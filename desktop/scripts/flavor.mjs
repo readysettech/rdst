@@ -32,6 +32,9 @@ export function flavorFacts(name, env = process.env) {
     RDST_DESKTOP_KEYSERVICE:
       flavor.keyservice ?? (env.RDST_BUILD_KEYSERVICE_URL || flavors.staging.keyservice),
     RDST_DESKTOP_UPDATES: flavor.updates,
+    // A flavor that ships to users (it has an update channel) refuses --inspect; a change build
+    // keeps it for the Playwright harnesses that drive its packages.
+    RDST_DESKTOP_INSPECT: flavor.updates === "enabled" ? "false" : "true",
     RDST_DESKTOP_SIGNED: flavor.signed.join(" "),
     RDST_DESKTOP_BUILDER_CONFIG: `build/${name}/electron-builder.yml`,
     RDST_DESKTOP_MARKER: `build/${name}/instance.json`,

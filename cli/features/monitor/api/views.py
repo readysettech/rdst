@@ -903,7 +903,7 @@ def queries(store: MonitorStore, target: str, range: str, now: int, *, sort: str
             "display_name": names.get(key) or (display_name(text) if text else f"Query {key}"),
             "family": ({"name": bases[key], "size": family_sizes[bases[key]]}
                        if key in bases and family_sizes[bases[key]] > 1 else None),
-            **analyzability(text, mean_ms=mean, execute=execute),
+            **analyzability(text, mean_ms=mean, execute=execute, engine=engine),
             "color_index": colors.get(key),
             "tables": _tables(text), "qps": calls / recorded, "mean_ms": mean,
             "db_time_ms": total_ms, "db_time_share": total_ms / db_ms if db_ms else 0.0,

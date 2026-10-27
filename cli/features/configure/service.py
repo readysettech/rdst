@@ -11,8 +11,13 @@ from shared.db_connection import (
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
     resolve_connection_params,
+    unverified_tls_message,
 )
-from shared.password_resolver import resolve_password, resolve_password_value
+from shared.password_resolver import (
+    is_rdst_password_env,
+    resolve_password,
+    resolve_password_value,
+)
 
 from .adapters import operation_name, target_detail_to_dict, target_summary_to_dict
 from .events import (
@@ -418,6 +423,23 @@ class ConfigureService:
 
             get_tunnel_manager().close(name)
 
+            # A password RDST saved for this database alone goes with it, so a database added
+            # later under the same pointer can't reuse it. One the user exports stays theirs.
+            pointer = str((removed or {}).get("password_env") or "")
+            if is_rdst_password_env(pointer) and not any(
+                (cfg.get(other) or {}).get("password_env") == pointer
+                for other in cfg.list_targets()
+            ):
+                try:
+                    from shared.secret_store_service import SecretStoreService
+
+                    store = SecretStoreService()
+                    if await asyncio.to_thread(store.get_secret, pointer):
+                        await asyncio.to_thread(store.clear_required, [pointer])
+                except Exception:
+                    logger.warning("Failed to remove the saved password for %s", name,
+                                   exc_info=True)
+
             try:
                 if was_monitored:
                     await asyncio.to_thread(database_limit.release, removed)
@@ -540,6 +562,7 @@ class ConfigureService:
                     server_version=result.get("server_version"),
                     privileges=result.get("privileges"),
                     query_capture=result.get("query_capture"),
+                    tls_warning=unverified_tls_message(test_config, labels=True, name=name),
                 )
             else:
                 yield ConfigureConnectionTestEvent(

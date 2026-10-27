@@ -321,6 +321,32 @@ describe('useConfigure unknown events', () => {
     })
   })
 
+  it('carries the TLS warning of a successful test', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse(
+            'event: connection_test\ndata: {"target_name":"draft","status":"success","tls_warning":"Not verified."}\n\n'
+          )
+        )
+    )
+    const { result } = renderHook(() => useConfigure(), {
+      wrapper: queryClientWrapper(),
+    })
+
+    let status: Awaited<ReturnType<typeof result.current.testConnection>> = null
+    await act(async () => {
+      status = await result.current.testConnection('draft')
+    })
+
+    expect(status).toMatchObject({
+      connected: true,
+      tlsWarning: 'Not verified.',
+    })
+  })
+
   it('invalidates status query after removing a target', async () => {
     vi.mocked(api.DELETE).mockResolvedValueOnce({
       data: { success: true },

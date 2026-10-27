@@ -805,6 +805,17 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
         # The app advertises this address to local agents in desktop-server.json.
         os.environ["RDST_WEB_HOST"] = host
         os.environ["RDST_WEB_PORT"] = str(port)
+        from shared.api.guards import (
+            API_TOKEN_ENV,
+            WEB_ALLOWED_HOSTS_ENV,
+            codespaces_forwarded_host,
+            configured_allowed_hosts,
+            is_loopback_host,
+        )
+
+        extra_hosts = [os.environ.get(WEB_ALLOWED_HOSTS_ENV, "")]
+        extra_hosts += getattr(args, "allowed_hosts", None) or []
+        os.environ[WEB_ALLOWED_HOSTS_ENV] = ",".join(h for h in extra_hosts if h)
         # The web server has no interactive terminal to theme; suppress the
         # OSC-11 /dev/tty probe so --reload worker respawns (which inherit this
         # env) never contend for the terminal on import.
@@ -836,6 +847,14 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             pass
 
         print(f"Starting RDST web server on http://{host}:{port}")
+        if not is_loopback_host(host):
+            names = ", ".join(sorted({"localhost", *configured_allowed_hosts()}))
+            print(f"Answering requests addressed to: {names}, and this machine's IP addresses")
+            print("To use another host name for this machine, add --allowed-host NAME")
+        if codespaces_forwarded_host():
+            print(f"Codespaces forwarded address: https://{codespaces_forwarded_host()}/")
+        if os.environ.get(API_TOKEN_ENV):
+            print("API requests require the X-RDST-Token header")
         if serve_static:
             print(f"Serving embedded frontend from: {dist_dir}")
         elif ui_mode == "auto":
@@ -876,6 +895,8 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
         else:
             static_dir_arg = str(dist_dir) if serve_static and dist_dir else None
             app = _get_create_app()(static_dist_dir=static_dir_arg)
+            # The app holds the token now; processes RDST starts don't need it.
+            os.environ.pop(API_TOKEN_ENV, None)
             uvicorn.run(app, host=host, port=port)
         return RdstResult(True, "")
     elif command == "help" or command is None:
@@ -916,6 +937,8 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             max_rows=getattr(args, 'max_rows', 1000),
             timeout=getattr(args, 'timeout', 600),
             port=getattr(args, 'port', 8080),
+            allow_origins=getattr(args, 'allow_origins', None),
+            token=getattr(args, 'token', None),
             deny_columns=getattr(args, 'deny_columns', None),
             allow_tables=getattr(args, 'allow_tables', None),
             guard=getattr(args, 'guard', None),
@@ -1170,6 +1193,10 @@ def main():
 
         mcp_server.main()
         return
+
+    from shared.constants import ensure_private_data_dir
+
+    ensure_private_data_dir()
 
     # New releases never use legacy trial tokens. Remove their local copy at
     # process startup so upgraded CLI users cannot retain stale credentials.

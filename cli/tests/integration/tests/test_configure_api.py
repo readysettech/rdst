@@ -11,7 +11,10 @@ live DB they just re-test mock plumbing.
 
 from __future__ import annotations
 
+import os
+
 from shared.config.targets import TargetsConfig
+from shared.secret_store_service import SecretStoreService
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +271,22 @@ async def test_update_target_success(client):
     assert saved["tls"] is True
 
 
+async def test_update_target_refuses_another_credential_as_its_password(client):
+    _write_target("prod", _sample_target())
+
+    response = await client.put(
+        "/api/configure/targets/prod",
+        json={"target": {**_sample_target(), "password_env": "ANTHROPIC_API_KEY"}},
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["message"].startswith(
+        "'ANTHROPIC_API_KEY' holds another credential, not a database password.")
+    cfg = TargetsConfig()
+    cfg.load()
+    assert cfg.get("prod")["password_env"] == "PROD_DB_PASSWORD"
+
+
 async def test_update_target_not_found(client):
     response = await client.put(
         "/api/configure/targets/nonexistent",
@@ -304,6 +323,30 @@ async def test_remove_target_success(client):
     cfg = TargetsConfig()
     cfg.load()
     assert cfg.get("old_db") is None
+
+
+async def test_remove_target_deletes_the_password_rdst_saved(client, inmemory_keyring,
+                                                             monkeypatch):
+    monkeypatch.delenv("RDST_OLD_DB_PASSWORD", raising=False)
+    SecretStoreService().set_secret("RDST_OLD_DB_PASSWORD", "saved", persist=True)
+    _write_target("old_db", _sample_target(password_env="RDST_OLD_DB_PASSWORD"))
+
+    response = await client.delete("/api/configure/targets/old_db")
+
+    assert response.json()["success"] is True
+    assert SecretStoreService().get_secret("RDST_OLD_DB_PASSWORD") is None
+    assert "RDST_OLD_DB_PASSWORD" not in os.environ
+
+
+async def test_remove_target_keeps_a_password_the_user_exports(client, inmemory_keyring,
+                                                               monkeypatch):
+    monkeypatch.setenv("RDST_OLD_DB_PASSWORD", "exported")
+    _write_target("old_db", _sample_target(password_env="RDST_OLD_DB_PASSWORD"))
+
+    response = await client.delete("/api/configure/targets/old_db")
+
+    assert response.json()["success"] is True
+    assert os.environ["RDST_OLD_DB_PASSWORD"] == "exported"
 
 
 async def test_remove_target_not_found(client):

@@ -34,7 +34,7 @@ def plan_count_name(sql, dialect, schema):
         or not isinstance(sql, str)
         or not 1 <= len(sql) <= 20000
         or not getattr(schema, "tables", None)
-        or not check_read_only(sql)["is_read_only"]
+        or not check_read_only(sql, dialect)["is_read_only"]
     ):
         return None
     try:
@@ -265,7 +265,7 @@ def candidate_sql(plan, witness):
         return None
     target.set("this", witness.full)
     return (
-        candidate if old == new and check_read_only(candidate)["is_read_only"] else None
+        candidate if old == new and check_read_only(candidate, "mysql")["is_read_only"] else None
     )
 
 

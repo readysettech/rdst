@@ -36,8 +36,13 @@ areas we consider security-relevant:
 Two destinations, both worth knowing about:
 
 - **LLM providers.** Commands such as `ask`, `analyze`, `scan` and `audit` send
-  schema and query text to the configured provider so it can do its job. Sample
-  rows may be included when a command needs to understand what a column holds.
+  schema and query text to the configured provider so it can do its job. Query
+  text keeps its literal values, because they tell the model how selective a
+  filter is. Monitoring analyzes the queries it captures from your database the
+  same way, filling placeholders with values seen there. Schema annotation sends
+  a few sample rows and column values so the model can tell what a column holds.
+  With your own API key, the provider's terms for that key apply. RDST's hosted
+  inference only routes to providers that do not train on request data.
 - **Telemetry.** Usage telemetry is on by default. It is not anonymous: if you
   have supplied an email address, events carry it and it is used to link your
   installs together. Turn telemetry off either way:
@@ -46,6 +51,9 @@ Two destinations, both worth knowing about:
   export RDST_TELEMETRY=false          # per shell
   telemetry_enabled = false            # in ~/.rdst/config.toml, permanently
   ```
+
+  In `config.toml`, `telemetry_enabled = false` works at the top level or in any table, as
+  does `enabled = false` in a `[telemetry]` table.
 
 Credentials are never intentionally included in either. If you find a case where
 one is, that is a vulnerability and we would like to hear about it.
@@ -56,4 +64,5 @@ RDST stores database passwords in your operating system's keychain via
 [keyring](https://pypi.org/project/keyring/). Configuration files hold a
 *pointer* to the credential, never the credential itself. `rdst` has no
 `--password` flag, so passwords do not enter your shell history or the process
-table.
+table. A pointer may not name RDST's own credentials or common provider and cloud
+keys (`ANTHROPIC_API_KEY`, `AWS_SECRET_ACCESS_KEY` and the like).

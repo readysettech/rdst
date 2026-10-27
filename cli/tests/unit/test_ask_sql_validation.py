@@ -678,6 +678,9 @@ class TestExecutionGate:
             def cursor(self):
                 return Cursor()
 
+            def set_session(self, **kwargs):
+                pass
+
             def close(self):
                 pass
 

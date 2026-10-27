@@ -33,7 +33,8 @@ class BackgroundRunCancelResponse(BaseModel):
 
 
 @router.get("/{run_id}", response_model=BackgroundRunResponse)
-async def run_status(run_id: str) -> BackgroundRunResponse:
+async def run_status(http_request: Request, run_id: str) -> BackgroundRunResponse:
+    require_local_request(http_request)
     description = _registry.describe(run_id)
     if description is None:
         raise HTTPException(status_code=404, detail=f"Background run '{run_id}' not found")
@@ -41,7 +42,8 @@ async def run_status(run_id: str) -> BackgroundRunResponse:
 
 
 @router.get("/{run_id}/events")
-async def run_events(run_id: str, after_seq: int = 0):
+async def run_events(http_request: Request, run_id: str, after_seq: int = 0):
+    require_local_request(http_request)
     if _registry.status(run_id) is None:
         raise HTTPException(status_code=404, detail=f"Background run '{run_id}' not found")
     return EventSourceResponse(_sse_frames(_registry, run_id, after_seq))

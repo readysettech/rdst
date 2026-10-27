@@ -53,6 +53,9 @@ MCP_VERSION = "2024-11-05"
 # shape (LD_PRELOAD, BASH_ENV, PATH, ...) would change how those children run.
 _CREDENTIAL_ENV_SUFFIXES = ("PASSWORD", "PASSWD", "API_KEY", "SECRET", "TOKEN")
 _ENV_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
+# RDST's own session and account tokens and the AWS credential chain: setting one would switch
+# the account RDST signs in as. Database passwords under these prefixes stay settable.
+_SELF_ENV_PREFIXES = ("RDST_", "AWS_")
 
 _PASSWORD_ASSIGNMENT = environment_assignment("PASSWORD_ENV_NAME", "actual-password")
 _PROD_PASSWORD_ASSIGNMENT = environment_assignment("PROD_DB_PASSWORD", "secret123")
@@ -834,7 +837,8 @@ WORKFLOW:
 The env var persists for the lifetime of this MCP session.
 
 Only credential variables can be set: an uppercase name ending in PASSWORD,
-PASSWD, API_KEY, SECRET, or TOKEN. Any other name is refused.
+PASSWD, API_KEY, SECRET, or TOKEN. Any other name is refused, as are RDST_ and
+AWS_ names other than passwords.
 """,
             "inputSchema": {
                 "type": "object",
@@ -1664,7 +1668,36 @@ def advertised_tool_names() -> Set[str]:
 
 def is_credential_env_name(name: str) -> bool:
     """Whether rdst_set_env may set this environment variable."""
+    if name.startswith(_SELF_ENV_PREFIXES) and not name.endswith(("PASSWORD", "PASSWD")):
+        return False
     return bool(_ENV_NAME_PATTERN.match(name)) and name.endswith(_CREDENTIAL_ENV_SUFFIXES)
+
+
+def configure_add_refusal(arguments: Dict[str, Any]) -> Optional[str]:
+    """Why rdst_configure_add can't save these values, or None.
+
+    An MCP client never submits a password, so it may not point a saved password at another
+    server, user or jump host, or read a password saved for another database.
+    """
+    from shared.config.targets import TargetsConfig
+    from shared.password_resolver import bind_target_credentials, credential_endpoint
+
+    cfg = TargetsConfig()
+    cfg.load()
+    name = arguments["target"]
+    existing = cfg.get(name)
+    proposed = {**(existing or {}), **{key: arguments[key] for key in (
+        "engine", "host", "port", "user", "database", "password_env") if key in arguments}}
+    if existing and credential_endpoint(existing) != credential_endpoint(proposed):
+        return (f"Target '{name}' already exists with another server, user or jump host. "
+                "Changing that needs its password: edit it in the RDST app or with "
+                f"`rdst configure edit {name}` in a terminal.")
+    saved = {other: cfg.get(other) or {} for other in cfg.list_targets()}
+    try:
+        bind_target_credentials(name, proposed, existing, saved, password_submitted=False)
+    except ValueError as exc:
+        return str(exc)
+    return None
 
 
 def get_prompts() -> List[Dict[str, Any]]:
@@ -1727,6 +1760,9 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     if name == "rdst_configure_add":
+        refusal = configure_add_refusal(arguments)
+        if refusal:
+            return {"success": False, "stdout": "", "stderr": refusal, "returncode": 1}
         # Always use --skip-verify for MCP (non-interactive, can't prompt for confirmation)
         # Note: "add" is positional, --skip-verify comes after
         args = ["configure", "add"]
@@ -1951,7 +1987,8 @@ This is the RDST configuration file. Key sections:
                 "stderr": (
                     f"Refusing to set '{env_name}'. rdst_set_env only sets credential "
                     f"variables: an uppercase name ending in "
-                    f"{', '.join(_CREDENTIAL_ENV_SUFFIXES)}."
+                    f"{', '.join(_CREDENTIAL_ENV_SUFFIXES)}, and RDST_ or AWS_ names only "
+                    f"for passwords."
                 ),
                 "returncode": 1
             }
@@ -2601,6 +2638,10 @@ def handle_request(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def main():
     """Main entry point for the MCP server."""
     configure_utf8_stdio(force=True, line_buffering=True)
+
+    from shared.constants import ensure_private_data_dir
+
+    ensure_private_data_dir()
 
     from shared.config.credential_migrations import retire_legacy_trial_credentials
 

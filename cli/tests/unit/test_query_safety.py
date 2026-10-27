@@ -509,3 +509,148 @@ class TestRejectionSurvivesRewording:
         """Literals are blanked before scanning, so a crafted quote must not be
         able to blank real SQL along with it."""
         assert validate_query_safety(sql)["safe"] is False
+
+
+class TestQuotingFollowsTheServer:
+    """Each check reads quotes, comments and statement breaks the way the server does.
+
+    A backslash escapes a quote only in some readings (PostgreSQL E'' strings,
+    standard_conforming_strings = off, MySQL by default), so a payload built on that
+    difference must fail under every reading the server might apply.
+    """
+
+    @pytest.mark.parametrize("dialect", ["postgresql", "mysql", ""])
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            r"SELECT E'\''; DELETE FROM users; COMMIT; SELECT '1'",
+            r"SELECT 'a\''; DELETE FROM users; -- '",
+            r"SELECT '\'; DELETE FROM users; -- '",
+            "SELECT '/*'; DELETE FROM users; SELECT '*/'",
+            "SELECT '--'; DELETE FROM users",
+            r"""WITH x AS (SELECT '\'), y AS (DELETE FROM users RETURNING 1) SELECT 1 -- '""",
+        ],
+    )
+    def test_quote_reading_cannot_hide_a_write(self, sql, dialect):
+        assert validate_query_safety(sql, dialect)["safe"] is False
+
+    @pytest.mark.parametrize(
+        "sql, dialect",
+        [
+            ('SELECT "pg_sleep"(10)', "postgresql"),
+            ("SELECT pg_catalog.\"pg_read_file\"('/etc/passwd')", "postgresql"),
+            ("SELECT pg_catalog.\"setval\"('public.order_id_seq', 1, true)", "postgresql"),
+            ("SELECT pg_sleep/**/(10)", "postgresql"),
+            ("SELECT `SLEEP`(10)", "mysql"),
+            ("SELECT 1 /*!50000 , SLEEP(10) */", "mysql"),
+            ("SELECT 1, GET_LOCK('x', 10)", "mysql"),
+            (r'SELECT U&"pg\005fsleep"(10)', "postgresql"),
+            ("SELECT lo_unlink(16384)", "postgresql"),
+            ("SELECT pg_terminate_backend(42)", "postgresql"),
+        ],
+    )
+    def test_side_effect_call_cannot_hide_behind_quoting(self, sql, dialect):
+        assert validate_query_safety(sql, dialect)["safe"] is False
+
+    def test_a_reading_the_server_would_reject_is_not_a_second_statement(self):
+        # Under standard_conforming_strings = on the tail never closes, so the server
+        # rejects the text whole; under the backslash reading it is one string.
+        assert validate_query_safety(r"SELECT 'a\'; DELETE FROM t; SELECT '", "postgresql")["safe"]
+
+    def test_unterminated_text_is_refused(self):
+        result = validate_query_safety("SELECT * FROM users WHERE name = 'Test")
+
+        assert result["safe"] is False
+        assert result["unterminated"] is True
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "WITH recent AS (SELECT * FROM orders WHERE created_at > now() - interval '1 day') "
+            "SELECT customer_id, count(*) FROM recent GROUP BY 1",
+            "SELECT id, sum(total) OVER (PARTITION BY customer_id ORDER BY created_at) FROM orders",
+            "SELECT * FROM orders WHERE customer_id = $1 AND status = $2 LIMIT $3",
+            'SELECT "Order"."Total" FROM "Order" WHERE "Order"."Status" = \'open\'',
+            r"SELECT * FROM notes WHERE body LIKE E'%a;b\'c%'",
+            "SELECT $$DROP TABLE users; DELETE$$ AS text, $tag$it's ; $tag$ AS other",
+            "SELECT data #>> '{a,b}' FROM docs WHERE data ? 'key'",
+            "SELECT '--not a comment', '/* nor this */' FROM t -- trailing comment",
+            "/* leading */ SELECT 1 /* nested /* comment */ still */ FROM t;",
+            "SELECT * FROM t WHERE path = 'C:\\'",
+            "SELECT id FROM t FOR UPDATE",
+            "EXPLAIN SELECT * FROM t",
+        ],
+    )
+    def test_legitimate_postgresql_queries_pass(self, sql):
+        assert validate_query_safety(sql, "postgresql")["issues"] == []
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT `order`.`id`, `order`.`desc` FROM `order` WHERE `order`.`status` = 'open'",
+            "SELECT * FROM t WHERE name = 'O\\'Brien; DROP' AND note = \"x\"",
+            "SELECT * FROM t # comment with 'quote\nWHERE id = 1",
+            "SELECT * FROM t WHERE a = 2--1",
+            "SELECT /*+ MAX_EXECUTION_TIME(1000) */ * FROM t WHERE id = ?",
+            "SELECT id, ROW_NUMBER() OVER (ORDER BY id) FROM t LIMIT 10, 5",
+        ],
+    )
+    def test_legitimate_mysql_queries_pass(self, sql):
+        assert validate_query_safety(sql, "mysql")["issues"] == []
+
+    def test_plain_explainable_write_is_one_statement_under_every_reading(self):
+        assert query_safety.is_plain_explainable_write("UPDATE t SET v = 'x' WHERE id = 1")
+        assert not query_safety.is_plain_explainable_write(
+            r"UPDATE t SET v = 'a\''; DELETE FROM t; --'")
+        assert not query_safety.is_plain_explainable_write(
+            r"UPDATE t SET v = '\'; DELETE FROM t; --'", "postgresql")
+
+
+class TestBacktickNamesWithoutADialect:
+    """MySQL backtick names hold keywords as text whether or not the caller knows the engine.
+
+    Without a dialect the PostgreSQL readings take backticks as quoted names too. Verified
+    on PostgreSQL 17: a backtick is an operator no database defines, so the statement
+    holding the first one fails at parse or analysis and nothing after it runs.
+    """
+
+    BACKTICK_QUERIES = [
+        "SELECT `Last Update` FROM t",
+        "SELECT `begin`, `end` FROM `shifts`",
+        "SELECT `delete`, `drop table` FROM `log` WHERE `update` > 1",
+    ]
+
+    @pytest.mark.parametrize("dialect", ["mysql", ""])
+    @pytest.mark.parametrize("sql", BACKTICK_QUERIES)
+    def test_keywords_in_backtick_names_are_text(self, sql, dialect):
+        assert validate_query_safety(sql, dialect)["issues"] == []
+
+    @pytest.mark.parametrize("sql", BACKTICK_QUERIES)
+    def test_ask_and_monitor_accept_them_without_a_dialect(self, sql):
+        from features.ask.sql_validation import check_read_only, validate_sql_for_ask
+        from features.monitor.analyze_queue import automatic_skip_reason
+        from shared.monitor.statements import analyzability
+
+        assert check_read_only(sql)["is_read_only"]
+        assert validate_sql_for_ask(sql)["is_valid"]
+        assert automatic_skip_reason(sql) is None
+        assert analyzability(sql)["analyzable"]
+
+    @pytest.mark.parametrize("dialect", ["mysql", "postgresql", ""])
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT `x`; DELETE FROM t WHERE id = 1; SELECT `y`",
+            r"SELECT E'\''; DELETE FROM users; COMMIT; SELECT '1'",
+            r"SELECT '\'; DELETE FROM users; -- '",
+            "SELECT '/*'; DELETE FROM users; SELECT '*/'",
+            "SELECT 1; DELETE FROM users",
+        ],
+    )
+    def test_bypass_payloads_are_still_refused(self, sql, dialect):
+        assert validate_query_safety(sql, dialect)["safe"] is False
+
+    def test_postgres_reads_backticks_as_code(self):
+        """An explicit PostgreSQL target never runs backticks, so they hide nothing."""
+        assert validate_query_safety("SELECT 1 ` 2; DELETE FROM t; SELECT ` 3",
+                                     "postgresql")["safe"] is False

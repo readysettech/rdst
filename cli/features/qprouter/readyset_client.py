@@ -52,7 +52,7 @@ class ReadysetClient:
         # carry a second statement or a non-identifier character.
         from features.query_registry.service import benchmark_read_only_reason
 
-        not_read_only = benchmark_read_only_reason(sql)
+        not_read_only = benchmark_read_only_reason(sql, "postgresql")
         if not_read_only:
             raise ValueError(f"Refusing to cache this query: {not_read_only}")
         if name is not None:

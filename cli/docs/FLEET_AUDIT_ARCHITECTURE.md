@@ -191,9 +191,11 @@ The capture service normalizes this before saving to the registry.
 ### First-time flow
 1. Audit completes → CLI prompts "Sending to X, press Enter"
 2. If no email on file → prompt with validation + retry loop
-3. CLI calls keyservice `/register-report` → verification email
-4. User clicks verification link → CLI polls `/report-status`
-5. Token saved to `~/.rdst/config.toml`
+3. CLI calls keyservice `/register-report` with a random pickup secret, which
+   sends the verification email
+4. User clicks the verification link; the CLI polls `/report-status` with the
+   secret
+5. Report credential (not the trial token) saved to `~/.rdst/config.toml`
 
 ### Subsequent runs
 Token on file → send directly, no verification prompt.
@@ -211,18 +213,18 @@ Cloudflare Worker with D1 database.
 | POST /register-report | Register email, send verification |
 | GET /verify-report | User clicks link to verify |
 | GET /report-status | CLI polls for verification |
-| POST /send-report | Send report (mode=link or inline) |
-| GET /report/:id | Render hosted report (password gate) |
+| POST /send-report | Host the report and email its link |
+| GET/POST /report/:id | Password form, then the report in a CSP sandbox |
 | GET /admin/reports | Per-email report metrics |
 
 ### Hosted Reports
 - HTML stored in `hosted_reports` D1 table
 - Random UUID URLs (122-bit entropy)
-- Password-protected: 8-char random password, SHA-256 checked
-  client-side, password shown in the email body
-- 30-day TTL with opportunistic cleanup
+- Password-protected: 8-char random password checked server-side,
+  password shown in the email body
+- 30-day TTL, expired rows dropped by the hourly cron
 - `noindex, nofollow` headers
-- `?download=1` forces save dialog
+- `?download=1` forces a save dialog once the password checks out
 
 ## PostHog Telemetry
 

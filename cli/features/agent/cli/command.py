@@ -9,6 +9,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
+import os
 import random
 import sys
 import threading
@@ -543,6 +544,8 @@ Examples:
         self,
         name: str | None = None,
         port: int = 8080,
+        allow_origins: list[str] | None = None,
+        token: str | None = None,
         **kwargs,
     ) -> RdstResult:
         """Start HTTP API server for an agent."""
@@ -557,16 +560,29 @@ Examples:
             if access_error is not None:
                 return access_error
 
-            from features.agent.http_server import AgentHTTPServer
+            from features.agent.http_server import AGENT_TOKEN_ENV, AgentHTTPServer
 
-            server = AgentHTTPServer(agent)
-            print(f"Starting HTTP API server for agent '{name}' on port {port}...")
-            print(f"  POST http://localhost:{port}/ask - Ask a question")
-            print(f"  GET  http://localhost:{port}/health - Health check")
-            print(f"  GET  http://localhost:{port}/schema - Get schema")
+            token = token or os.environ.get(AGENT_TOKEN_ENV) or None
+            server = AgentHTTPServer(agent, token=token, allowed_origins=allow_origins or ())
+            base = f"http://127.0.0.1:{port}"
+            print(f"Starting HTTP API server for agent '{name}' on {base}...")
+            print(f"  POST {base}/ask - Ask a question")
+            print(f"  GET  {base}/health - Health check")
+            print(f"  GET  {base}/schema - Get schema")
+            auth = ' -H "Authorization: Bearer <token>"' if token else ""
+            if token:
+                print("\n/ask and /schema require the configured bearer token.")
+            else:
+                print(f"\nNo token required. Set {AGENT_TOKEN_ENV} or --token to require one.")
+            print("\nExample:")
+            print(f"  curl{auth} -d '{{\"question\": \"How many users?\"}}' {base}/ask")
+            if allow_origins:
+                print(f"\nBrowser apps allowed from: {', '.join(allow_origins)}")
+            else:
+                print("\nBrowser pages on other sites are refused; allow one with --allow-origin.")
             print("\nPress Ctrl+C to stop\n")
 
-            server.run(port=port)
+            server.run(host="127.0.0.1", port=port)
             return RdstResult(ok=True)
         except Exception as e:
             return RdstResult(ok=False, message=str(e))

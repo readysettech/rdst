@@ -274,6 +274,7 @@ async def stream_query_discovery(
     This web/desktop-only endpoint opts into the background collector. Existing
     CLI commands and the legacy top endpoints keep their current behavior.
     """
+    require_local_request(request)
     header_cursor = request.headers.get("last-event-id")
     after_cursor = cursor
     if after_cursor is None and header_cursor:
@@ -537,6 +538,7 @@ def _library_read_model(
 
 @router.get("/query-registry")
 async def get_query_registry(
+    http_request: Request,
     limit: Optional[int] = 200,
     offset: int = 0,
     target: Optional[str] = None,
@@ -569,6 +571,7 @@ async def get_query_registry(
     shortlist composes with every other filter ("starred and not yet
     analyzed"). ``view=saved`` selects the same rows and keeps working.
     """
+    require_local_request(http_request)
     # Both paths decode Library rows in Python, which takes seconds on a large Library;
     # they run in a worker so the event loop keeps serving every other request.
     return await asyncio.to_thread(
@@ -644,12 +647,15 @@ def _query_registry_page(
 
 
 @router.post("/query-registry")
-async def add_query_to_registry(request: AddQueryRequest) -> AddQueryResponse:
+async def add_query_to_registry(
+    http_request: Request, request: AddQueryRequest
+) -> AddQueryResponse:
     """Add a query to the registry.
 
     Typing a query into the Add query dialog is the one place a person
     hands RDST a query to keep, so the new entry arrives starred.
     """
+    require_local_request(http_request)
     try:
         from shared.query_registry import QueryRegistry
 
@@ -670,8 +676,9 @@ async def add_query_to_registry(request: AddQueryRequest) -> AddQueryResponse:
 
 
 @router.delete("/query-registry/{query_hash}")
-async def remove_query_from_registry(query_hash: str) -> RemoveQueryResponse:
+async def remove_query_from_registry(http_request: Request, query_hash: str) -> RemoveQueryResponse:
     """Remove a query from the registry."""
+    require_local_request(http_request)
     try:
         from shared.query_registry import QueryRegistry
 
@@ -691,10 +698,12 @@ async def remove_query_from_registry(query_hash: str) -> RemoveQueryResponse:
 
 @router.post("/query-registry/{query_hash}/reviewed")
 async def mark_query_reviewed(
+    http_request: Request,
     query_hash: str,
     request: MarkQueryReviewedRequest,
 ) -> MarkQueryReviewedResponse:
     """Mark a query reviewed for exactly one target."""
+    require_local_request(http_request)
     try:
         from shared.query_registry import QueryRegistry
 
@@ -789,13 +798,16 @@ def _analysis_assessment(llm_analysis: Any) -> tuple[str, Optional[float]]:
 
 
 @router.get("/query-registry/{query_hash}/analysis/latest")
-async def get_latest_query_analysis(query_hash: str) -> LatestAnalysisResponse:
+async def get_latest_query_analysis(
+    http_request: Request, query_hash: str
+) -> LatestAnalysisResponse:
     """Get the most recent stored analysis summary for a query.
 
     Detail-level companion to the library listing: the list rides only the
     lifecycle timestamps, and the expanded query detail fetches this compact
     outcome on demand.
     """
+    require_local_request(http_request)
     try:
         from shared.query_registry import AnalysisResultsRegistry
 
@@ -819,13 +831,14 @@ async def get_latest_query_analysis(query_hash: str) -> LatestAnalysisResponse:
 
 
 @router.get("/query-registry/{query_hash}/analyses")
-async def list_query_analyses(query_hash: str) -> AnalysisHistoryResponse:
+async def list_query_analyses(http_request: Request, query_hash: str) -> AnalysisHistoryResponse:
     """List a query's stored analyses, newest first.
 
     The bounded history behind the results viewer: enough of each run to
     choose one, with the body left to the per-analysis route. A query that
     was never analyzed has an empty history rather than an error.
     """
+    require_local_request(http_request)
     from shared.query_registry import AnalysisResultsRegistry
 
     entries = []
@@ -845,6 +858,7 @@ async def list_query_analyses(query_hash: str) -> AnalysisHistoryResponse:
 
 @router.get("/query-registry/{query_hash}/analysis/{analysis_id}")
 async def get_stored_query_analysis(
+    http_request: Request,
     query_hash: str, analysis_id: str
 ) -> StoredAnalysisResponse:
     """Return one stored analysis whole, so it can be reopened without a re-run.
@@ -853,6 +867,7 @@ async def get_stored_query_analysis(
     newer build wrote, and ``display_payload`` carries the finished run in
     the shape the results view already renders.
     """
+    require_local_request(http_request)
     from shared.query_registry import AnalysisResultsRegistry
 
     stored = AnalysisResultsRegistry().get_stored_payload(query_hash, analysis_id)
@@ -882,9 +897,11 @@ class UpdateTagResponse(BaseModel):
 
 @router.patch("/query-registry/{query_hash}/tag")
 async def update_query_tag(
+    http_request: Request,
     query_hash: str, request: UpdateTagRequest
 ) -> UpdateTagResponse:
     """Update the tag/name of a query in the registry."""
+    require_local_request(http_request)
     try:
         from shared.query_registry import QueryRegistry
 
@@ -1101,9 +1118,11 @@ class QueryBenchmarkHistory(BaseModel):
     response_model=QueryBenchmarkHistory,
 )
 async def query_benchmark_history(
+    http_request: Request,
     query_hash: str, target: str, limit: int = Query(10, ge=1, le=50)
 ) -> QueryBenchmarkHistory:
     """Past benchmarks of one query on one database, newest first, from the activity log."""
+    require_local_request(http_request)
     from shared.agent_activity.store import AgentActivityStore
 
     runs = AgentActivityStore().benchmarks_for_query(target, query_hash, limit)
@@ -1123,9 +1142,11 @@ class UpdateSqlResponse(BaseModel):
 
 @router.patch("/query-registry/{query_hash}/sql")
 async def update_query_sql(
+    http_request: Request,
     query_hash: str, request: UpdateSqlRequest
 ) -> UpdateSqlResponse:
     """Replace a query's SQL, preserving its tag. The hash changes with the SQL."""
+    require_local_request(http_request)
     try:
         from shared.query_registry import QueryRegistry
 
@@ -1172,9 +1193,12 @@ class ImportQueriesResponse(BaseModel):
 
 
 @router.post("/query-registry/import")
-async def import_queries(request: ImportQueriesRequest) -> ImportQueriesResponse:
+async def import_queries(
+    http_request: Request, request: ImportQueriesRequest
+) -> ImportQueriesResponse:
     """Import queries from a local SQL file (semicolon-separated, with
     optional `-- name:` / `-- target:` metadata comments)."""
+    require_local_request(http_request)
     from ..models import QueryCommandInput
     from ..service import QueryService
 

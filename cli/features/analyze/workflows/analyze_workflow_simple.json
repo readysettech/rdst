@@ -6,7 +6,8 @@
             "Type": "Task",
             "Resource": "validate_query_safety",
             "Parameters": {
-                "sql": "{{query}}"
+                "sql": "{{query}}",
+                "dialect": "{{target_config.engine}}"
             },
             "ResultPath": "$.safety_check",
             "Next": "NormalizeForRegistry"

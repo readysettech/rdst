@@ -76,9 +76,16 @@ _SCRUBS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+# Database error parts that quote row data: Postgres DETAIL/HINT/CONTEXT lines, a key and its
+# value, a failing row, a statement position.
+_DB_DETAIL = re.compile(r"\b(DETAIL|HINT|CONTEXT|QUERY|WHERE|LINE \d+):[\s\S]*"
+                        r"|\bFailing row contains[\s\S]*|\bKey \([\s\S]*")
+_DB_DRIVER_MODULES = ("psycopg2", "psycopg", "pymysql", "MySQLdb", "mysql.connector")
+
+
 def scrub(text: Any, limit: int = MESSAGE_LIMIT) -> str:
     """A short message with SQL, hostnames, addresses, paths, emails and quoted values removed."""
-    value = str(text or "")
+    value = _DB_DETAIL.sub("", str(text or ""))
     value = _SQL_START.sub("[sql]", value)
     value = _SQL_LOWER.sub("[sql]", value)
     for pattern, replacement in _SCRUBS:
@@ -892,6 +899,29 @@ def _location(error: BaseException | None) -> str | None:
     return f"{os.path.basename(frame.filename)}:{frame.lineno} {frame.name}"
 
 
+def _driver_error(error: BaseException | None) -> tuple[str | None, str] | None:
+    """A database driver error's SQLSTATE or errno and its primary message, else None."""
+    if error is None or not type(error).__module__.startswith(_DB_DRIVER_MODULES):
+        return None
+    code = getattr(error, "pgcode", None) or getattr(error, "sqlstate", None)
+    diag = getattr(error, "diag", None)
+    primary = getattr(diag, "message_primary", None) if diag is not None else None
+    args = getattr(error, "args", ())
+    if code is None and len(args) >= 2 and isinstance(args[0], int):
+        code, primary = args[0], primary or args[1]
+    lines = str(primary if primary is not None else error).strip().splitlines()
+    first = lines[0] if lines else ""
+    return (str(code) if code is not None else None,
+            re.sub(r"^(ERROR|FATAL):\s*", "", first))
+
+
+def _error_text(error: BaseException | None) -> str:
+    driver = _driver_error(error)
+    if driver is None:
+        return str(error) if error else ""
+    return driver[1]
+
+
 def report_error(component: str, error: BaseException | None = None, *,
                  error_class: str | None = None, message: str | None = None,
                  source: str = "backend", handled: bool = True,
@@ -905,13 +935,16 @@ def report_error(component: str, error: BaseException | None = None, *,
         if not enabled():
             return
         cls = scrub(error_class or (type(error).__name__ if error is not None else "Error"), 80)
-        text = scrub(message if message is not None else (str(error) if error else ""))
+        text = scrub(message if message is not None else _error_text(error))
         component = scrub(component, 60) or "unknown"
+        driver = _driver_error(error)
         repeats = _gate.admit((source, component, cls, text[:80]))
         if repeats is None:
             return
         props: dict[str, Any] = {"source": source, "component": component, "error_class": cls,
                                  "message": text, "handled": handled, "suppressed_repeats": repeats}
+        if driver is not None and driver[0]:
+            props["db_code"] = scrub(driver[0], 12)
         location = _location(error)
         if location:
             props["location"] = scrub(location, 80)
@@ -998,8 +1031,8 @@ class AppErrorLogHandler(logging.Handler):
             error = record.exc_info[1] if record.exc_info else None
             template = record.msg if isinstance(record.msg, str) else type(record.msg).__name__
             detail = scrub(template, 120)
-            if error is not None and str(error):
-                detail = f"{detail}: {scrub(str(error), 120)}"
+            if error is not None and _error_text(error):
+                detail = f"{detail}: {scrub(_error_text(error), 120)}"
             extra: dict[str, Any] = {"level": record.levelname.lower()}
             # A warning RDST recovers from is information, not the app failing.
             condition = expected_condition(error) if record.levelno < logging.ERROR else None

@@ -158,23 +158,6 @@ class AnalyzeService:
         target_name = options.target
         target_config: Optional[Dict[str, Any]] = None
         try:
-            # Refuse unsafe SQL before anything else happens. The workflow runs
-            # the same check and raises, which is the backstop for every other
-            # caller, but reaching it costs a stack trace for what is a normal
-            # refusal -- and analyze executes what it is given, since EXPLAIN
-            # ANALYZE runs the statement rather than just planning it.
-            if input.sql:
-                safety = validate_query_safety(input.sql)
-                if not safety.get("safe") and not (
-                    options.non_interactive and options.fast and is_plain_explainable_write(input.sql)
-                ):
-                    issues = "; ".join(safety.get("issues") or []) or "failed safety validation"
-                    yield ErrorEvent(
-                        type="error",
-                        message=f"Refusing to analyze this query: {issues}",
-                    )
-                    return
-
             # Initial progress
             yield ProgressEvent(
                 type="progress",
@@ -198,6 +181,26 @@ class AnalyzeService:
                     message=f"Target '{target_name}' not found. Run 'rdst configure add' to set one up.",
                 )
                 return
+
+            # Refuse unsafe SQL before anything reaches the database. The workflow
+            # runs the same check and raises, which is the backstop for every other
+            # caller, but reaching it costs a stack trace for what is a normal
+            # refusal -- and analyze executes what it is given, since EXPLAIN
+            # ANALYZE runs the statement rather than just planning it. The target's
+            # engine decides how its quoting reads.
+            if input.sql:
+                dialect = str(target_config.get("engine") or "")
+                safety = validate_query_safety(input.sql, dialect)
+                if not safety.get("safe") and not (
+                    options.non_interactive and options.fast
+                    and is_plain_explainable_write(input.sql, dialect)
+                ):
+                    issues = "; ".join(safety.get("issues") or []) or "failed safety validation"
+                    yield ErrorEvent(
+                        type="error",
+                        message=f"Refusing to analyze this query: {issues}",
+                    )
+                    return
 
             # Load workflow
             workflow_path = self._get_workflow_path()

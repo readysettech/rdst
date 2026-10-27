@@ -32,6 +32,28 @@ def probe_remote(target_name: str, host: Optional[str] = None,
 
 from .script_generator import generate_script
 
+# A login name and an address or ~/.ssh/config alias. Neither may start with "-", so ssh and scp
+# can't read one as an option such as -oProxyCommand.
+_SSH_USER = re.compile(r"[A-Za-z0-9._][A-Za-z0-9._@\\$-]*")
+_SSH_HOST = re.compile(r"[A-Za-z0-9_\[][A-Za-z0-9._:%\[\]-]*")
+
+
+def _remote_destination(ssh_user: str, host: str) -> str:
+    """``user@host`` for ssh, after checking neither part can be read as an option."""
+    if not _SSH_HOST.fullmatch(host or ""):
+        raise ValueError(f"Invalid SSH host: {host!r}")
+    if not _SSH_USER.fullmatch(ssh_user or ""):
+        raise ValueError(f"Invalid SSH user: {ssh_user!r}")
+    return f"{ssh_user}@{host}"
+
+
+def _scp_destination(remote_dest: str, remote_path: str) -> str:
+    """scp's ``user@host:path``, bracketing an IPv6 address so its colons aren't the path's."""
+    user, _, host = remote_dest.rpartition("@")
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"{user}@{host}:{remote_path}" if user else f"{host}:{remote_path}"
+
 
 def deploy_remote(
     target_name: str,
@@ -62,7 +84,10 @@ def deploy_remote(
 
     # Build SSH args
     ssh_opts = _build_ssh_opts(ssh_key)
-    remote_dest = f"{ssh_user}@{host}"
+    try:
+        remote_dest = _remote_destination(ssh_user, host)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
 
     # 1. Test SSH connectivity
     conn_result = _test_connection(remote_dest, ssh_opts)
@@ -101,12 +126,12 @@ def deploy_remote(
     mgmt_path = f"/opt/rdst/deploy-{target_name}.sh"
     try:
         subprocess.run(
-            ["ssh", *ssh_opts, remote_dest, "mkdir", "-p", "/opt/rdst"],
+            ["ssh", *ssh_opts, "--", remote_dest, "mkdir", "-p", "/opt/rdst"],
             capture_output=True, timeout=10,
         )
         _scp_script(original_script, remote_dest, mgmt_path, ssh_opts)
         subprocess.run(
-            ["ssh", *ssh_opts, remote_dest, "chmod", "+x", mgmt_path],
+            ["ssh", *ssh_opts, "--", remote_dest, "chmod", "+x", mgmt_path],
             capture_output=True, timeout=10,
         )
         exec_result["management_script"] = mgmt_path
@@ -172,7 +197,7 @@ def _test_connection(remote_dest: str, ssh_opts: list) -> Dict[str, Any]:
     """Test SSH connectivity to remote host."""
     try:
         result = subprocess.run(
-            ["ssh", *ssh_opts, remote_dest, "echo", "ok"],
+            ["ssh", *ssh_opts, "--", remote_dest, "echo", "ok"],
             capture_output=True,
             text=True,
             timeout=15,
@@ -217,7 +242,7 @@ def _scp_script(
             local_path = f.name
 
         result = subprocess.run(
-            ["scp", *ssh_opts, local_path, f"{remote_dest}:{remote_path}"],
+            ["scp", *ssh_opts, "--", local_path, _scp_destination(remote_dest, remote_path)],
             capture_output=True,
             text=True,
             timeout=30,
@@ -257,7 +282,7 @@ def _upload_private_script(
     command = f"umask 077 && rm -f {quoted} && cat > {quoted}"
     try:
         result = subprocess.run(
-            ["ssh", *ssh_opts, remote_dest, command],
+            ["ssh", *ssh_opts, "--", remote_dest, command],
             # Bytes, not text: a text-mode pipe rewrites newlines on Windows
             # and the remote bash would choke on the CRLF script.
             input=script.encode("utf-8"),
@@ -289,7 +314,7 @@ def _execute_remote(
     """Execute the deployment script remotely with real-time output streaming."""
     try:
         proc = subprocess.Popen(
-            ["ssh", *ssh_opts, remote_dest, "bash", remote_script_path],
+            ["ssh", *ssh_opts, "--", remote_dest, "bash", remote_script_path],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -331,7 +356,7 @@ def _cleanup_remote(
     """Remove deployment script from remote host (best effort, removes password)."""
     try:
         subprocess.run(
-            ["ssh", *ssh_opts, remote_dest, "rm", "-f", remote_script_path],
+            ["ssh", *ssh_opts, "--", remote_dest, "rm", "-f", remote_script_path],
             capture_output=True,
             timeout=10,
         )

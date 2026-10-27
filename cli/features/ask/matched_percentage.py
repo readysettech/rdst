@@ -21,7 +21,7 @@ class MatchedPercentagePlan:
 
 
 def _base_plan(sql, dialect, schema):
-    if dialect != "mysql" or not check_read_only(sql)["is_read_only"]:
+    if dialect != "mysql" or not check_read_only(sql, dialect)["is_read_only"]:
         return None
     try:
         statements = sqlglot.parse(sql, read="mysql")

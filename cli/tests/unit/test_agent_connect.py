@@ -155,7 +155,7 @@ def test_mcp_refuses_foreign_browser_origins(app, origin, status):
 
 
 @pytest.mark.parametrize("host, status", [
-    ("evil.example", 403), ("evil.example:8787", 403), ("127.0.0.1.nip.io", 403),
+    ("evil.example", 421), ("evil.example:8787", 421), ("127.0.0.1.nip.io", 421),
     ("localhost:8787", 200), ("[::1]:8787", 200), ("127.0.0.1", 200)])
 def test_mcp_refuses_rebound_host_names(app, host, status):
     assert _rpc(app, "tools/list", headers={"Host": host}).status_code == status
@@ -175,9 +175,9 @@ def test_mcp_answers_the_wsl_listener_at_its_address(app):
             return await http.post("/mcp", json=body, headers={"Host": host, "Accept": ACCEPT})
 
     assert run(via_wsl("172.20.0.1:8787", "172.20.0.1")).status_code == 200
-    assert run(via_wsl("evil.example", "172.20.0.1")).status_code == 403
+    assert run(via_wsl("evil.example", "172.20.0.1")).status_code == 421
     # A WSL client reaching another listener with the WSL Host header is still refused.
-    assert run(via_wsl("172.20.0.1:8787", "10.0.0.4")).status_code == 403
+    assert run(via_wsl("172.20.0.1:8787", "10.0.0.4")).status_code == 421
 
 
 def test_mcp_notifications_get_202_and_lists_every_tool(app):
@@ -702,6 +702,24 @@ def test_runtime_advertises_the_server_and_cleans_up(data_dir, monkeypatch):
     assert not (data_dir / "mcp-token").exists()
     run(runtime.stop())
     assert not (data_dir / "desktop-server.json").exists()
+
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
+def test_runtime_publishes_the_api_token_owner_only(data_dir, monkeypatch):
+    """CLI commands find the desktop backend's launch token here; nothing else exposes it."""
+    monkeypatch.setenv("RDST_WEB_PORT", "8899")
+    data_dir.chmod(0o755)
+    app = SimpleNamespace(state=SimpleNamespace(api_token="launch-token"))
+    runtime = discovery.AgentConnectRuntime()
+    run(runtime.start(app))
+    path = data_dir / "desktop-server.json"
+    assert json.loads(path.read_text())["token"] == "launch-token"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(data_dir.stat().st_mode) == 0o700
+    assert "token" not in app.state.agent_connect
+    run(runtime.stop())
+    assert not path.exists()
 
 
 def test_wsl_listener_serves_only_mcp():

@@ -254,6 +254,8 @@ if [[ " ${MODES} " == *" desktop "* && -z "$desktop_exec" && -z "${RELENTLESS_UI
   desktop_exec="$(find "${unpack_dir}/squashfs-root" -maxdepth 1 -type f -executable \
     -regex '.*/rdst-desktop[a-z-]*' -print -quit)"
   [[ -n "$desktop_exec" ]] || { echo "ERROR: no rdst-desktop executable in the AppImage" >&2; exit 1; }
+  # The driver needs --inspect, which a flavor that ships to users (staging) fuses off.
+  node "${REPO_ROOT}/web-apps/apps/rdst-desktop/scripts/inspect-fuse.mjs" "$desktop_exec"
 fi
 
 # The CI machine's AWS credentials are for its agent, not for the app or the

@@ -643,7 +643,9 @@ class AnalyzeCommand:
                 # depending on whether credentials happen to be configured.
                 from shared.query_safety import validate_query_safety
 
-                safety = validate_query_safety(resolved_input.sql)
+                safety = validate_query_safety(
+                    resolved_input.sql, str(_validate_cfg.get(target).get("engine") or "")
+                )
                 if not safety.get("safe"):
                     issues = (
                         "; ".join(safety.get("issues") or [])

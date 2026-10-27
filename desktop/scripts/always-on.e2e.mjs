@@ -59,8 +59,12 @@ async function bounded(operation, description, timeoutMs = 10000) {
   } finally { clearTimeout(timer) }
 }
 
+// Direct backend calls carry the shell's launch token, as the shell's own requests do.
+let backendToken = ''
 const fetchWithTimeout = (url, options = {}) => fetch(url, {
-  ...options, signal: options.signal || AbortSignal.timeout(10000),
+  ...options,
+  headers: { ...options.headers, ...(backendToken ? { 'X-RDST-Token': backendToken } : {}) },
+  signal: options.signal || AbortSignal.timeout(10000),
 })
 
 async function eventually(check, description, timeoutMs = 30000) {
@@ -145,6 +149,7 @@ try {
     return state?.backendPid && state.trayExists ? state : null
   }, 'Electron tray and backend', 90000)
   backendPid = ready.backendPid
+  backendToken = ready.backendToken
   descendants = processTree(backendPid)
   const running = await eventually(async () => {
     const state = await snapshot()

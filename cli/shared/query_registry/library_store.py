@@ -1319,6 +1319,7 @@ class LibraryStore:
     def _connect(self, *, begin: bool = False) -> sqlite3.Connection:
         """A configured connection, in a write transaction when ``begin``. Lock contention
         past busy_timeout is retried for LOCK_RETRY_S: nothing has run yet, so it's safe."""
+        shared_constants.ensure_private_file(self._db_path)
         deadline = time.monotonic() + LOCK_RETRY_S
         delay = 0.05
         while True:

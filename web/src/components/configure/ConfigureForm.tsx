@@ -5,7 +5,7 @@ import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
 import { Disclosure } from '@rs/ui-new/disclosure'
 import { Text } from '@rs/ui-new/text'
 import { useId } from 'react'
-import type { ConfigureFormData } from '../../types/configure'
+import type { ConfigureFormData, SshConfig } from '../../types/configure'
 import { Field } from './Field'
 import {
   assembleSshConfig,
@@ -49,6 +49,34 @@ export function advancedConnection(advanced: Advanced) {
     ssh: assembleSshConfig(advanced.ssh),
   }
 }
+
+const jumpHost = (ssh?: SshConfig) =>
+  ssh?.profile
+    ? `profile:${ssh.profile.trim().toLowerCase()}`
+    : ssh?.host
+      ? `${ssh.host.trim().toLowerCase()}:${ssh.port ?? 22}:${ssh.user ?? ''}`
+      : ''
+
+/**
+ * Whether `next` connects to another server, user or jump host than `saved`. The server keeps a
+ * saved password for such a change only when it is typed again. Mirrors `credential_endpoint`
+ * in rdst/shared/password_resolver.py, which decides; keep the two in step.
+ */
+export function movesPassword(
+  saved: Omit<ConfigureFormData, 'name'>,
+  next: Omit<ConfigureFormData, 'name'>
+): boolean {
+  return (
+    saved.engine !== next.engine ||
+    saved.host.trim().toLowerCase() !== next.host.trim().toLowerCase() ||
+    Number(saved.port) !== Number(next.port) ||
+    saved.user.trim() !== next.user.trim() ||
+    jumpHost(saved.ssh) !== jumpHost(next.ssh)
+  )
+}
+
+export const PASSWORD_FOR_NEW_ADDRESS =
+  'Enter the password again: RDST sends a saved password to a new address only when you type it.'
 
 /** Why a typed name can't be used, or null. `taken` holds the other databases' names. */
 export function nameError(

@@ -152,6 +152,11 @@ def collect_outstanding_logins() -> bool:
     return _OAUTH.collect_outstanding_logins()
 
 
+def complete_login(login_id: str, completion: str) -> Optional[dict[str, Any]]:
+    """Land a Supabase login whose browser returned with the broker's completion."""
+    return _OAUTH.complete_login(login_id, completion)
+
+
 def get_login_status(login_id: str) -> dict[str, Any]:
     """Poll a Supabase login started on this server."""
     return _OAUTH.login_status(login_id)

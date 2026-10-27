@@ -210,6 +210,7 @@ class FleetCommand:
                     name,
                     password,
                     secret_store=store,
+                    config=cfg,
                 )
                 target_config["password_env"] = env_name
                 stored_in_keyring = store.get_secret(env_name) == password
@@ -584,6 +585,7 @@ class FleetCommand:
                             name,
                             password,
                             secret_store=store,
+                            config=cfg,
                         )
                         tc["password_env"] = env_name
                         if store.get_secret(env_name) != password:
@@ -653,6 +655,7 @@ class FleetCommand:
                             name,
                             password,
                             secret_store=store,
+                            config=cfg,
                         )
                         tc["password_env"] = env_name
                         stored_in_keyring = store.get_secret(env_name) == password

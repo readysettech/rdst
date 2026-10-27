@@ -7,21 +7,29 @@ Wraps Ask3Engine with safety enforcement for data agents.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from fnmatch import fnmatch
 from typing import Any, TYPE_CHECKING
 import logging
+import time
 
 import sqlglot
+from sqlglot import exp
 
 from .config import AgentConfig
 from shared.config.targets import create_targets_config
+from shared.query_safety import (
+    GENERATED_SQL_DENIED_FUNCTIONS, code_views, side_effect_calls, statement_count)
 
 from features.guard import GuardManager, GuardNotFoundError
+from features.guard.access import (
+    Tables, default_schema_for, denied_column_violation, disallowed_table_violation)
 
 if TYPE_CHECKING:
     from .conversation import ConversationSession
 
 logger = logging.getLogger(__name__)
+
+# How long a failed read of the target's schema stands before a statement tries it again.
+SCHEMA_RETRY_SECONDS = 60.0
 
 
 def _get_guard_module():
@@ -73,12 +81,24 @@ class AgentResponse:
         return result
 
 
-def validate_read_only(sql: str) -> tuple[bool, str]:
+# Statements, clauses and commands that write, lock or leave the query: a data-modifying CTE
+# sits inside a SELECT, so the whole tree is checked, not just its top.
+_NOT_READ_ONLY_NODES = tuple(
+    getattr(exp, name) for name in (
+        "Insert", "Update", "Delete", "Merge", "Create", "Drop", "Alter", "TruncateTable",
+        "Into", "Lock", "Command", "Copy", "Set", "Grant", "Revoke", "Transaction", "Commit",
+        "Rollback", "Use", "LoadData",
+    ) if hasattr(exp, name)
+)
+
+
+def validate_read_only(sql: str, dialect: str = "") -> tuple[bool, str]:
     """
-    Ensure SQL is read-only (SELECT/WITH only).
+    Ensure SQL is a single read-only statement (SELECT/WITH only).
 
     Args:
         sql: SQL to validate.
+        dialect: Target engine; selects the quoting rules and the parser.
 
     Returns:
         Tuple of (is_valid, error_message).
@@ -86,20 +106,38 @@ def validate_read_only(sql: str) -> tuple[bool, str]:
     # Read-only statement types (compound SELECTs like UNION are allowed)
     READ_ONLY_KEYS = {"select", "with", "union", "intersect", "except"}
 
+    views = code_views(sql, dialect)
+    if not views:
+        return False, "Could not verify SQL is read-only: a string, quoted name or comment is open"
+    if any(statement_count(view) != 1 for view in views):
+        return False, "Only a single statement is allowed"
+    if any(view.escaped_name for view in views):
+        return False, "Unicode-escaped quoted names are not allowed"
+    calls = side_effect_calls(sql, dialect, GENERATED_SQL_DENIED_FUNCTIONS)
+    if calls:
+        return False, f"Function not allowed: {calls[0].lower()}()"
+
+    read = {"postgresql": "postgres", "postgres": "postgres", "mysql": "mysql"}.get(
+        (dialect or "").lower())
     try:
-        parsed = sqlglot.parse(sql)
-        for statement in parsed:
-            if statement is None:
-                continue
-            key = statement.key.lower() if hasattr(statement, "key") else ""
-            if key not in READ_ONLY_KEYS:
-                return False, f"Write operation not allowed: {key.upper()}"
-        return True, ""
+        parsed = [statement for statement in sqlglot.parse(sql, read=read) if statement]
     except Exception as e:
         # Unparseable SQL cannot be shown to be read-only, and the agent is the
         # component this check exists to constrain, so refuse it.
         logger.warning(f"Could not parse SQL for read-only check: {e}")
         return False, f"Could not verify SQL is read-only: {e}"
+    if len(parsed) != 1:
+        return False, "Only a single statement is allowed"
+    key = parsed[0].key.lower()
+    if key not in READ_ONLY_KEYS:
+        return False, f"Write operation not allowed: {key.upper()}"
+    for node in parsed[0].walk():
+        if isinstance(node, _NOT_READ_ONLY_NODES):
+            return False, f"Write operation not allowed: {node.key.upper()}"
+        name = node.name if isinstance(node, exp.Anonymous) else ""
+        if name.upper() in GENERATED_SQL_DENIED_FUNCTIONS:
+            return False, f"Function not allowed: {name.lower()}()"
+    return True, ""
 
 
 def inject_limit(sql: str, max_rows: int) -> str:
@@ -124,72 +162,63 @@ def inject_limit(sql: str, max_rows: int) -> str:
 
 
 def validate_columns(
-    sql: str, denied_columns: list[str] | None
+    sql: str,
+    denied_columns: list[str] | None,
+    *,
+    dialect: str = "",
+    tables: Tables = None,
+    default_schema: str | None = None,
 ) -> tuple[bool, str]:
     """
-    Check SQL doesn't reference denied columns.
+    Check SQL doesn't read denied columns, through aliases, CTEs and stars included.
 
     Args:
         sql: SQL to validate.
         denied_columns: List of column patterns to deny (e.g., "customers.ssn").
+        dialect: Target engine.
+        tables: How the target resolves table names and their columns (``SchemaInfo``), or
+            the default schema's tables and their columns, so stars resolve.
+        default_schema: Schema an unqualified table name resolves to, when known exactly.
 
     Returns:
         Tuple of (is_valid, error_message).
     """
     if not denied_columns:
         return True, ""
-
-    try:
-        parsed = sqlglot.parse_one(sql)
-        for column in parsed.find_all(sqlglot.exp.Column):
-            table = column.table if column.table else ""
-            col_name = column.name
-
-            # Check both "table.column" and just "column"
-            for pattern in denied_columns:
-                if table:
-                    full_ref = f"{table}.{col_name}"
-                    if fnmatch(full_ref, pattern) or fnmatch(full_ref.lower(), pattern.lower()):
-                        return False, f"Access to column '{full_ref}' is denied"
-
-                if fnmatch(col_name, pattern) or fnmatch(col_name.lower(), pattern.lower()):
-                    return False, f"Access to column '{col_name}' is denied"
-
-        return True, ""
-    except Exception as e:
-        logger.warning(f"Could not validate columns: {e}")
-        return True, ""
+    violation = denied_column_violation(
+        sql, denied_columns, dialect=dialect, tables=tables, default_schema=default_schema
+    )
+    return (False, violation) if violation else (True, "")
 
 
 def validate_tables(
-    sql: str, allowed_tables: list[str] | None
+    sql: str,
+    allowed_tables: list[str] | None,
+    *,
+    dialect: str = "",
+    default_schema: str | None = None,
+    tables: Tables = None,
 ) -> tuple[bool, str]:
     """
-    Check SQL only references allowed tables.
+    Check SQL only reads allowed tables (None = all allowed).
 
     Args:
         sql: SQL to validate.
-        allowed_tables: List of allowed tables (None = all allowed).
+        allowed_tables: List of allowed tables; one without a schema is allowed in any
+            schema, ``schema.table`` only in that schema.
+        dialect: Target engine.
+        default_schema: Schema an unqualified table name resolves to, when known exactly.
+        tables: How the target resolves table names (``SchemaInfo``).
 
     Returns:
         Tuple of (is_valid, error_message).
     """
     if not allowed_tables:
         return True, ""
-
-    try:
-        parsed = sqlglot.parse_one(sql)
-        allowed_set = {t.lower() for t in allowed_tables}
-
-        for table in parsed.find_all(sqlglot.exp.Table):
-            table_name = table.name.lower() if table.name else ""
-            if table_name and table_name not in allowed_set:
-                return False, f"Access to table '{table.name}' is not allowed"
-
-        return True, ""
-    except Exception as e:
-        logger.warning(f"Could not validate tables: {e}")
-        return True, ""
+    violation = disallowed_table_violation(
+        sql, allowed_tables, dialect=dialect, default_schema=default_schema, tables=tables
+    )
+    return (False, violation) if violation else (True, "")
 
 
 class AgentRuntime:
@@ -216,6 +245,8 @@ class AgentRuntime:
         self._engine = None
         self._target_config = None
         self._guard_config = None
+        self._tables: Tables = None
+        self._tables_retry_at = 0.0
 
     def _get_guard_config(self):
         """Load guard configuration if agent has a guard reference."""
@@ -263,6 +294,28 @@ class AgentRuntime:
 
         return self._target_config
 
+    def _has_restrictions(self) -> bool:
+        restrictions = self.config.restrictions
+        return bool(restrictions.denied_columns or restrictions.allowed_tables)
+
+    def _restriction_tables(self) -> Tables:
+        """How the target resolves table names and their columns, read once, for table
+        and column restrictions.
+
+        A failed read stands for ``SCHEMA_RETRY_SECONDS`` instead of being repeated for
+        every statement; meanwhile nothing is known, so stars and unqualified names checked
+        against a schema-qualified entry are refused. Never None, so ``check_query`` does
+        not read the schema again.
+        """
+        now = time.monotonic()
+        if self._tables is None and self._target_config and now >= self._tables_retry_at:
+            from features.guard.checker import load_default_schema_tables
+
+            self._tables = load_default_schema_tables(self._target_config, self.config.target)
+            if self._tables is None:
+                self._tables_retry_at = now + SCHEMA_RETRY_SECONDS
+        return self._tables or {}
+
     def _validate_safety(self, sql: str) -> None:
         """
         Validate SQL against safety configuration.
@@ -277,8 +330,16 @@ class AgentRuntime:
             SafetyViolationError: If SQL violates safety policy.
         """
         guard = self._get_guard_config()
+        dialect = str((self._target_config or {}).get("engine") or "")
+        default_schema = default_schema_for(self._target_config)
 
         if guard:
+            # A guard always means read-only, and its own read-only check looks only at the
+            # leading keyword.
+            ok, msg = validate_read_only(sql, dialect)
+            if not ok:
+                raise SafetyViolationError(msg)
+
             # Use guard-based validation
             check_query = _get_guard_module().check_query
 
@@ -289,6 +350,8 @@ class AgentRuntime:
                 guard,
                 target_name=self.config.target,
                 target_config=self._target_config,
+                tables=(self._restriction_tables() if guard.restrictions.denied_columns
+                        or guard.restrictions.allowed_tables else None),
             )
             for result in results:
                 if not result.passed and result.level == "block":
@@ -297,17 +360,25 @@ class AgentRuntime:
             # Use legacy inline config
             # Check read-only
             if self.config.safety.read_only:
-                ok, msg = validate_read_only(sql)
+                ok, msg = validate_read_only(sql, dialect)
                 if not ok:
                     raise SafetyViolationError(msg)
 
             # Check denied columns
-            ok, msg = validate_columns(sql, self.config.restrictions.denied_columns)
+            denied = self.config.restrictions.denied_columns
+            ok, msg = validate_columns(
+                sql, denied, dialect=dialect, default_schema=default_schema,
+                tables=self._restriction_tables() if denied else None,
+            )
             if not ok:
                 raise SafetyViolationError(msg)
 
             # Check allowed tables
-            ok, msg = validate_tables(sql, self.config.restrictions.allowed_tables)
+            allowed = self.config.restrictions.allowed_tables
+            ok, msg = validate_tables(
+                sql, allowed, dialect=dialect, default_schema=default_schema,
+                tables=self._restriction_tables() if allowed else None,
+            )
             if not ok:
                 raise SafetyViolationError(msg)
 
@@ -364,7 +435,7 @@ class AgentRuntime:
 
             # Create pre-execution validator callback if guard is configured
             pre_execute_validator = None
-            if guard or self.config.safety.read_only:
+            if guard or self.config.safety.read_only or self._has_restrictions():
                 def pre_execute_validator(sql: str) -> None:
                     self._validate_safety(sql)
 
@@ -460,7 +531,7 @@ class AgentRuntime:
 
             # Create pre-execution validator callback if guard is configured
             pre_execute_validator = None
-            if guard or self.config.safety.read_only:
+            if guard or self.config.safety.read_only or self._has_restrictions():
                 def pre_execute_validator(sql: str) -> None:
                     self._validate_safety(sql)
 

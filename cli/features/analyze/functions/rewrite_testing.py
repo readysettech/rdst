@@ -45,6 +45,17 @@ def _has_unresolved_placeholders(sql: str) -> bool:
     return False
 
 
+def _engine(kwargs: Dict) -> str:
+    """The target's engine, so safety checks read quoting the way the server will."""
+    config = kwargs.get('target_config')
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except ValueError:
+            config = None
+    return str(config.get('engine') or '') if isinstance(config, dict) else ''
+
+
 def test_query_rewrites(original_sql: str, rewrite_suggestions: List[Dict[str, Any]],
                        target: str = None, **kwargs) -> Dict[str, Any]:
     """
@@ -202,7 +213,7 @@ def _get_baseline_performance(original_sql: str, target: str, kwargs: Dict) -> D
     """Get baseline performance metrics for the original query."""
     try:
         # Validate original query safety
-        safety_check = validate_query_safety(original_sql)
+        safety_check = validate_query_safety(original_sql, _engine(kwargs))
         if not safety_check.get('safe', False):
             return {
                 "success": False,
@@ -305,7 +316,7 @@ def _test_single_rewrite(suggestion: Dict[str, Any], baseline_result: Dict[str, 
             }
 
         # For executable queries (SELECT), validate safety
-        safety_check = validate_query_safety(rewritten_sql)
+        safety_check = validate_query_safety(rewritten_sql, _engine(kwargs))
         if not safety_check.get('safe', False):
             return {
                 "suggestion_id": suggestion_id,

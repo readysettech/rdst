@@ -69,6 +69,9 @@ class BrokerStub:
         )
         self.result_status = "pending"
         self.result_detail = None
+        # When set, a ready login releases tokens only to a pickup carrying this
+        # completion, as the broker does: pending without one, 403 for a wrong one.
+        self.completion = None
         self.tokens = {
             "access_token": access,
             "refresh_token": refresh,
@@ -88,6 +91,11 @@ class BrokerStub:
         if url == self.START_URL:
             return self.start_response
         if url == self.RESULT_URL:
+            sent = (kwargs.get("json") or {}).get("completion")
+            if self.result_status == "ready" and self.completion not in (None, sent):
+                if sent:
+                    return make_response(403, {"code": "forbidden"})
+                return make_response(200, {"status": "pending"})
             if self.result_status == "ready":
                 return make_response(200, {"status": "ready", "tokens": self.tokens})
             body = {"status": self.result_status}

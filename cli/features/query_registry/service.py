@@ -448,18 +448,21 @@ def _has_unresolved_placeholders(sql: str) -> bool:
     )
 
 
-def benchmark_read_only_reason(sql: str) -> Optional[str]:
+def benchmark_read_only_reason(sql: str, dialect: str = "") -> Optional[str]:
     """Return a human reason if ``sql`` is not a single read-only statement,
     else ``None``.
 
     Rejects: empty input, multiple ``;``-separated statements, a lead keyword
     other than ``SELECT`` / ``WITH``, ``SELECT ... INTO`` (which writes a new
-    table), and any DML/DDL keyword anywhere (data-modifying CTEs). The parser
-    tokenizes first, so keywords inside string literals or identifiers are not
-    matched.
+    table), any DML/DDL keyword anywhere (data-modifying CTEs), and calls that
+    change the session's settings (``set_config``). The parser tokenizes first,
+    so keywords inside string literals or identifiers are not matched.
     """
     import sqlparse
     from sqlparse.tokens import DDL, DML, Keyword
+
+    from shared.query_safety import (
+        SESSION_SETTING_FUNCTIONS, code_views, side_effect_calls, statement_count)
 
     statements = [
         s
@@ -468,7 +471,12 @@ def benchmark_read_only_reason(sql: str) -> Optional[str]:
     ]
     if not statements:
         return "The benchmark query is empty."
-    if len(statements) > 1:
+    # sqlparse reads every backslash in a string as an escape; the server may not, so the
+    # statement is also read with the server's quoting rules (see ``code_views``).
+    views = code_views(sql, dialect)
+    if not views:
+        return "The benchmark query has an unterminated string, quoted name or comment."
+    if len(statements) > 1 or any(statement_count(view) > 1 for view in views):
         return (
             "Benchmark runs a single read-only statement per query; "
             "multiple statements are not allowed."
@@ -484,7 +492,10 @@ def benchmark_read_only_reason(sql: str) -> Optional[str]:
             f"'{label}' is not allowed."
         )
 
-    for token in stmt.flatten():
+    tokens = list(stmt.flatten())
+    for view in views:
+        tokens.extend(token for part in sqlparse.parse(view.keywords) for token in part.flatten())
+    for token in tokens:
         value = (token.value or "").upper()
         if token.ttype in (DML, DDL) and value in _BENCHMARK_WRITE_KEYWORDS:
             return (
@@ -496,6 +507,31 @@ def benchmark_read_only_reason(sql: str) -> Optional[str]:
                 "Benchmark rejected: 'SELECT ... INTO' writes a new table, but "
                 "the benchmark is read-only."
             )
+    # The session's read-only setting is what stops a write the text doesn't show, and
+    # the statement runs on that session again and again.
+    calls = side_effect_calls(sql, dialect, SESSION_SETTING_FUNCTIONS)
+    if calls:
+        return (
+            f"Benchmark rejected: {calls[0].lower()}() changes the session's settings, "
+            "which keep the benchmark read-only."
+        )
+    return None
+
+
+def benchmark_execution_reason(sql: str, dialect: str = "") -> Optional[str]:
+    """``benchmark_read_only_reason``, plus calls a read-only session still lets through:
+    sleeping, signalling other backends, outbound connections, session settings."""
+    from shared.query_safety import side_effect_calls
+
+    reason = benchmark_read_only_reason(sql, dialect)
+    if reason:
+        return reason
+    calls = side_effect_calls(sql, dialect)
+    if calls:
+        return (
+            f"Benchmark rejected: {calls[0].lower()}() reaches outside the queried "
+            "tables, so the benchmark won't run it."
+        )
     return None
 
 
@@ -993,19 +1029,21 @@ class QueryService:
                     "No queries to run", code="benchmark_no_queries"
                 )
 
-            # Read-only rail: reject the whole run if any resolved query is not a
-            # single read-only statement — enforced server-side regardless of the
-            # UI, before opening a DB connection.
-            for rq in resolved_queries:
-                reason = benchmark_read_only_reason(rq.variants[0])
-                if reason:
-                    raise BenchmarkValidationError(reason, code="benchmark_read_only")
-
             cfg = create_targets_config()
             cfg.load()
 
             if not target:
                 target = cfg.get_default()
+
+            # Read-only rail: reject the whole run if any resolved query is not a
+            # single read-only statement, enforced server-side regardless of the
+            # UI, before opening a DB connection, and before a missing target is
+            # reported. The target's engine decides how the query's quoting reads.
+            engine = str(((cfg.get(target) if target else None) or {}).get("engine") or "")
+            for rq in resolved_queries:
+                reason = benchmark_read_only_reason(rq.variants[0], engine)
+                if reason:
+                    raise BenchmarkValidationError(reason, code="benchmark_read_only")
 
             if not target:
                 raise BenchmarkValidationError(
@@ -1070,7 +1108,7 @@ class QueryService:
             # A substituted value must not turn a read into anything else.
             for rq in resolved_queries:
                 for variant in rq.variants[1:]:
-                    reason = benchmark_read_only_reason(variant)
+                    reason = benchmark_read_only_reason(variant, engine)
                     if reason:
                         raise BenchmarkValidationError(
                             reason, code="benchmark_read_only"

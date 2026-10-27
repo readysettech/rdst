@@ -9,6 +9,7 @@ import {
   fetchFleetDiscoverPreview,
   fleetAwsLogout,
   startFleetAwsLogin,
+  startFleetSupabaseLogin,
   updateFleetTargetGroup,
 } from './useFleet'
 
@@ -133,6 +134,24 @@ describe('AWS SSO and group-edit contracts', () => {
     expect(error).toMatchObject({
       code: 'aws_cli_missing',
       fallbackCommand: 'aws sso login --profile dev',
+    })
+  })
+
+  it('surfaces why a provider sign-in cannot start from this browser', async () => {
+    stubFetch(
+      jsonResponse(
+        {
+          code: 'supabase_oauth_remote_browser',
+          detail:
+            'Connect Supabase from a browser on the machine running RDST.',
+        },
+        409
+      )
+    )
+    const error = await startFleetSupabaseLogin().catch((caught) => caught)
+    expect(error).toMatchObject({
+      code: 'supabase_oauth_remote_browser',
+      message: 'Connect Supabase from a browser on the machine running RDST.',
     })
   })
 

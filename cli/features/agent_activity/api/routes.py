@@ -7,13 +7,14 @@ import io
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 
 from features.agent_activity.api import models
 from features.agent_activity.api.models import AgentAction, AgentGroup, AgentOutcome
 from features.monitor.api.models import documented
 from shared.agent_activity.store import RETENTION_DAYS, AgentActivityStore
+from shared.api.guards import require_local_request
 
 router = APIRouter()
 
@@ -28,6 +29,7 @@ def _store() -> AgentActivityStore:
 
 @router.get("/agent-activity", **documented(models.AgentActivityPage))
 def agent_activity(
+    http_request: Request,
     target: Optional[str] = None,
     action: Optional[AgentAction] = None,
     outcome: Optional[AgentOutcome] = None,
@@ -41,6 +43,7 @@ def agent_activity(
     utc_offset: int = Query(0, ge=-900, le=900,
                             description="Minutes east of UTC that set local days and hours"),
 ) -> dict:
+    require_local_request(http_request)
     store = _store()
     try:
         page = store.page(target=target, action=action, outcome=outcome, since=since,
@@ -58,6 +61,7 @@ def _day(ts: int, utc_offset: int) -> str:
 @router.get("/agent-activity/export.csv", response_class=Response,
             responses={200: {"content": {"text/csv": {}}}})
 def agent_activity_export(
+    http_request: Request,
     target: Optional[str] = None,
     action: Optional[AgentAction] = None,
     since: Optional[int] = Query(None, description="From, epoch seconds, inclusive"),
@@ -66,6 +70,7 @@ def agent_activity_export(
                             description="Minutes east of UTC that name the file's days"),
 ) -> Response:
     """Every entry in the range, one row each, attention checks included."""
+    require_local_request(http_request)
     if since is not None and until is not None and since >= until:
         raise HTTPException(422, "The range ends before it starts")
     rows = _store().export_rows(target=target, action=action, since=since, until=until)
@@ -90,7 +95,8 @@ def agent_activity_export(
 
 
 @router.get("/agent-activity/{entry_id}", **documented(models.AgentActivityDetail))
-def agent_activity_entry(entry_id: int) -> dict:
+def agent_activity_entry(http_request: Request, entry_id: int) -> dict:
+    require_local_request(http_request)
     entry = _store().entry(entry_id)
     if entry is None:
         raise HTTPException(404, "Activity entry not found")

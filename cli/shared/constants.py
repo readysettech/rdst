@@ -93,6 +93,46 @@ def rdst_data_dir() -> Path:
     return Path.home() / f".rdst{rdst_instance_suffix()}"
 
 
+_PRIVATE_FILE_SUFFIXES = (".db", ".db-wal", ".db-shm", ".db-journal")
+
+
+def ensure_private_data_dir() -> Path:
+    """Create the data directory readable only by its owner, and tighten an existing one.
+
+    It holds monitored query samples and local stores. Only a directory and files this user
+    owns are changed; Windows keeps its ACL defaults.
+    """
+    path = rdst_data_dir()
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if os.name == "nt":
+            return path
+        uid = os.getuid()
+        mode = path.stat()
+        if mode.st_uid == uid and mode.st_mode & 0o077:
+            path.chmod(mode.st_mode & 0o700)
+        for child in path.iterdir():
+            if not child.name.endswith(_PRIVATE_FILE_SUFFIXES):
+                continue
+            stat = child.lstat()
+            if child.is_file() and not child.is_symlink() and stat.st_uid == uid \
+                    and stat.st_mode & 0o077:
+                child.chmod(stat.st_mode & 0o600)
+    except OSError:
+        pass
+    return path
+
+
+def ensure_private_file(path) -> None:
+    """Create ``path`` readable only by its owner when it doesn't exist yet."""
+    if os.name == "nt":
+        return
+    try:
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    except OSError:
+        pass
+
+
 def rdst_semantic_layer_dir() -> Path:
     """Return the semantic-layer directory (``~/.rdst/semantic-layer``)."""
     return rdst_data_dir() / "semantic-layer"

@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process'
 import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import {
   accessSync,
   constants,
@@ -32,6 +33,10 @@ const MAX_OUTPUT_LINES = 10
 // The backend's usual port, so an agent's saved MCP registration and a prompt copied before
 // a restart keep working. Another build (RDST_INSTANCE) takes a nearby one so both can run.
 export const PREFERRED_PORT = 47787
+/** Carries the shell's launch token (the backend's RDST_API_TOKEN) on every backend request. */
+export const TOKEN_HEADER = 'X-RDST-Token'
+// What the backend's server prints once it holds its port; only the child writes its pipes.
+const LISTENING_LINE = /^(?:INFO:\s+)?Uvicorn running on (\S+) \(/
 
 const POSIX_SYSTEM_PATHS = ['/usr/local/bin', '/usr/bin', '/bin']
 
@@ -118,6 +123,30 @@ export interface StartBackendOptions {
   /** Called once the process exists, so a quit during startup can stop it. */
   onSpawn?: (handle: BackendHandle) => void
   startupTimeoutMs?: number
+  /** The launch token the backend requires (RDST_API_TOKEN); see createBackendToken. */
+  token?: string
+}
+
+/** A fresh secret for one launch of the shell, shared only with the backend it starts. */
+export function createBackendToken(): string {
+  return randomBytes(32).toString('base64url')
+}
+
+/** `fetcher` with the launch token on every request; only for requests to the backend. */
+export function tokenFetch(
+  token: string,
+  fetcher: typeof fetch = fetch
+): typeof fetch {
+  return (input, init) => {
+    const headers = new Headers(init?.headers)
+    headers.set(TOKEN_HEADER, token)
+    return fetcher(input, { ...init, headers })
+  }
+}
+
+/** True for the line the backend prints once it is serving on `apiBaseUrl`. */
+export function reportsListening(line: string, apiBaseUrl: string): boolean {
+  return LISTENING_LINE.exec(line.trim())?.[1] === apiBaseUrl
 }
 
 /** Reads a `RDST_STARTUP {...}` line from the backend's stdout. */
@@ -373,6 +402,8 @@ async function listenOnce(host: string, port: number): Promise<number> {
   })
 }
 
+// The port is free when chosen but bound by the child only later, so another program can take
+// it in between. Only the child's own report that it is listening makes an answer the backend's.
 async function waitForBackend(
   apiBaseUrl: string,
   watch: StartupWatch,
@@ -382,9 +413,11 @@ async function waitForBackend(
   } | null,
   getSpawnError: () => Error | null,
   getStdout: () => string[],
-  getStderr: () => string[]
+  getStderr: () => string[],
+  listening: () => boolean,
+  token?: string
 ): Promise<void> {
-  let lastError = 'not checked yet'
+  let lastError = 'not listening yet'
 
   while (!watch.timedOut()) {
     const spawnError = getSpawnError()
@@ -401,8 +434,13 @@ async function waitForBackend(
       )
     }
 
+    if (!listening()) {
+      await wait(READINESS_INTERVAL_MS)
+      continue
+    }
     try {
       const response = await fetch(`${apiBaseUrl}${READY_PATH}`, {
+        headers: token ? { [TOKEN_HEADER]: token } : {},
         signal: AbortSignal.timeout(READINESS_REQUEST_TIMEOUT_MS),
       })
       if (response.ok) {
@@ -452,6 +490,8 @@ export async function startBackend(
     options.keyservice,
     options.identity
   )
+  if (options.token) environment.RDST_API_TOKEN = options.token
+  let listening = false
   const child = spawn(
     binaryPath,
     [
@@ -487,9 +527,13 @@ export async function startBackend(
   ])
   const stdoutSplitter = new LineSplitter()
   const stderrSplitter = new LineSplitter()
+  const noteListening = (lines: string[]) => {
+    listening ||= lines.some((line) => reportsListening(line, apiBaseUrl))
+  }
   const onStdoutLines = (lines: string[]) => {
     appendOutput(stdoutLines, lines)
     log?.write('stdout', lines)
+    noteListening(lines)
     for (const line of lines) {
       const marker = parseStartupMarker(line)
       if (!marker) continue
@@ -500,6 +544,7 @@ export async function startBackend(
   const onStderrLines = (lines: string[]) => {
     appendOutput(stderrLines, lines)
     log?.write('stderr', lines)
+    noteListening(lines)
   }
   child.stdout.on('data', (chunk: Buffer) => {
     onStdoutLines(stdoutSplitter.push(chunk.toString()))
@@ -536,7 +581,9 @@ export async function startBackend(
       () => exitStatus,
       () => spawnError,
       () => stdoutLines,
-      () => stderrLines
+      () => stderrLines,
+      () => listening,
+      options.token
     )
   } catch (error) {
     log?.write('shell', [errorText(error)])

@@ -74,6 +74,8 @@ export interface ConfigureConnectionStatus {
   category?: string
   passwordEnv?: string
   privileges?: { writable: boolean; evidence: string }
+  /** Set when the connection is unencrypted or doesn't check the server's certificate. */
+  tlsWarning?: string
   databaseEngine?: string
   queryCapture?: {
     available: boolean

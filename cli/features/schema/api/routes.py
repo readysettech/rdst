@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from shared.api.guards import require_local_request
 from shared.api.target_guard import TargetGuard, require_target_optional
 
 from ..schema_collector import collect_all_tables_schema
@@ -25,9 +26,11 @@ class SchemaResponse(BaseModel):
 
 @router.get("/schema")
 async def get_schema(
+    http_request: Request,
     guard: TargetGuard = Depends(require_target_optional),
 ) -> SchemaResponse:
     """Fetch database schema for SQL autocomplete."""
+    require_local_request(http_request)
     try:
         result = collect_all_tables_schema(
             target_config=guard.target_config,

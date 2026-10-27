@@ -22,7 +22,7 @@ class StableFirstPlan:
 def plan_stable_first(sql, dialect, schema):
     if schema is None:
         return None
-    if dialect not in {"mysql", "postgres"} or not check_read_only(sql)["is_read_only"]:
+    if dialect not in {"mysql", "postgres"} or not check_read_only(sql, dialect)["is_read_only"]:
         return None
     try:
         statements = sqlglot.parse(sql, read=dialect)

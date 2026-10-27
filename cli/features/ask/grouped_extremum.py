@@ -18,7 +18,7 @@ class GroupedExtremumPlan:
 
 def plan_grouped_extremum(sql, dialect):
     dialect = {"postgresql": "postgres"}.get(dialect, dialect)
-    if dialect not in {"mysql", "postgres"} or not check_read_only(sql)["is_read_only"]:
+    if dialect not in {"mysql", "postgres"} or not check_read_only(sql, dialect)["is_read_only"]:
         return None
     try:
         statements = sqlglot.parse(sql, read=dialect)

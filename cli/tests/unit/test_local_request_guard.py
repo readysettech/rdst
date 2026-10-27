@@ -249,3 +249,61 @@ def test_cross_site_page_cannot_drive_write_routes(method, path):
     response = asyncio.run(send())
 
     assert response.status_code == 403, response.text
+
+
+@pytest.mark.parametrize("site", ["cross-site", "same-site"])
+def test_headerless_request_from_another_page_is_forbidden(site):
+    """A page can drop Origin and Referer, but the browser still labels the request."""
+    response = _post(
+        "http://127.0.0.1:8787",
+        LOOPBACK_CLIENT,
+        headers={"sec-fetch-site": site, "sec-fetch-mode": "no-cors",
+                 "sec-fetch-dest": "empty"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Cross-site requests are not allowed"
+
+
+@pytest.mark.parametrize("site", ["same-origin", "none"])
+def test_headerless_same_origin_browser_request_passes(site):
+    """The desktop app's proxy drops Origin/Referer from RDST's own pages."""
+    response = _post("http://127.0.0.1:8787", LOOPBACK_CLIENT,
+                     headers={"sec-fetch-site": site, "sec-fetch-mode": "cors"})
+
+    assert response.status_code == 200
+
+
+def test_cross_site_top_level_navigation_passes():
+    """An OAuth provider redirects the browser back to RDST's callback route."""
+
+    async def send() -> Response:
+        app = FastAPI()
+
+        @app.get("/api/callback")
+        async def callback(request: Request) -> dict[str, bool]:
+            require_local_request(request)
+            return {"ok": True}
+
+        transport = ASGITransport(app=app, client=LOOPBACK_CLIENT)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8787") as http:
+            headers = {"sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate",
+                       "sec-fetch-dest": "document"}
+            navigation = await http.get("/api/callback", headers=headers)
+            framed = await http.get("/api/callback", headers={**headers, "sec-fetch-dest": "iframe"})
+            return navigation, framed
+
+    navigation, framed = asyncio.run(send())
+    assert navigation.status_code == 200
+    assert framed.status_code == 403
+
+
+def test_cross_site_navigation_post_is_forbidden():
+    response = _post(
+        "http://127.0.0.1:8787",
+        LOOPBACK_CLIENT,
+        headers={"sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate",
+                 "sec-fetch-dest": "document"},
+    )
+
+    assert response.status_code == 403

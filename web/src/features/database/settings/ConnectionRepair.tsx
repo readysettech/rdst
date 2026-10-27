@@ -1,6 +1,6 @@
 // Fix connection: the dialog names the host and the likely cause, the saved fields can
-// be changed in place with the password kept unless typed, and "Check again" saves and
-// tries the database once more.
+// be changed in place with the password kept unless typed or the address changes, and "Check
+// again" saves and tries the database once more.
 import { Alert } from '@rs/ui-new/alert'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
@@ -9,6 +9,10 @@ import { Skeleton } from '@rs/ui-new/skeleton'
 import { useEffect, useId, useState } from 'react'
 import { useConfigure } from '@/lib/useConfigure'
 import type { ConfigureTargetDetail } from '@/types/configure'
+import {
+  movesPassword,
+  PASSWORD_FOR_NEW_ADDRESS,
+} from '../../../components/configure/ConfigureForm'
 import { DialogShell } from '../../../components/DialogShell'
 
 const ENGINE_NAME: Record<string, string> = {
@@ -128,19 +132,32 @@ export function ConnectionRepair({
   const set = (name: keyof Fields) => (value: string) =>
     setFields((current) => (current ? { ...current, [name]: value } : current))
 
+  const next = detail &&
+    fields && {
+      ...detail,
+      host: fields.host,
+      port: Number(fields.port) || detail.port,
+      database: fields.database,
+      user: fields.user,
+      password: fields.password || undefined,
+    }
+  const passwordNeeded = Boolean(
+    detail?.has_password &&
+      next &&
+      !next.password &&
+      movesPassword(detail, next)
+  )
+
   const checkAgain = async () => {
-    if (!detail || !fields) return
+    if (!next) return
+    if (passwordNeeded) {
+      setSaveError(PASSWORD_FOR_NEW_ADDRESS)
+      return
+    }
     setSaving(true)
     setSaveError(null)
     try {
-      await configure.updateTarget(target, {
-        ...detail,
-        host: fields.host,
-        port: Number(fields.port) || detail.port,
-        database: fields.database,
-        user: fields.user,
-        password: fields.password || undefined,
-      })
+      await configure.updateTarget(target, next)
       onSaved()
       onClose()
     } catch (error) {
@@ -207,7 +224,11 @@ export function ConnectionRepair({
             type="password"
             value={fields.password}
             onChange={set('password')}
-            placeholder="Leave blank to keep it"
+            placeholder={
+              passwordNeeded
+                ? 'Enter it again for the new address'
+                : 'Leave blank to keep it'
+            }
             className="col-span-2"
           />
         </div>

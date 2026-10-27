@@ -412,7 +412,7 @@ def test_api_pages_details_and_csv(data_dir):
     store.append(_entry(HOUR - 3 * 86400, action="ask", details={"question": "top orders?"}))
     app = FastAPI()
     app.include_router(routes.router, prefix="/api")
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     page = client.get("/api/agent-activity?limit=1").json()
     assert page["items"][0]["kind"] == "rollup" and page["targets"] == ["db"]
     rest = client.get(f"/api/agent-activity?limit=1&cursor={page['next_cursor']}").json()
@@ -518,7 +518,7 @@ def test_folded_lines_name_their_database_and_the_page_states_one_retention(data
                                 subject=""))
     app = FastAPI()
     app.include_router(routes.router, prefix="/api")
-    page = TestClient(app).get("/api/agent-activity").json()
+    page = TestClient(app, client=("127.0.0.1", 50000)).get("/api/agent-activity").json()
     rollups = [item for item in page["items"] if item["kind"] == "rollup"]
     assert sorted((item["target"], item["count"]) for item in rollups) == [
         ("billing", 3), ("shop", 3)]

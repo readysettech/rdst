@@ -639,3 +639,177 @@ class TestCTEAliasAllowedTables:
             allowed_tables=["orders", "users"],
         )
         assert result.passed is True
+
+
+class TestRestrictionsResolveNames:
+    """Aliases, stars and schemas resolve to the columns and tables actually read."""
+
+    TABLES = {"customers": ["id", "name", "ssn"], "orders": ["id", "customer_id"]}
+
+    @pytest.mark.parametrize(
+        "sql",
+        ["SELECT * FROM customers", "SELECT c.ssn AS value FROM customers c"],
+    )
+    def test_denied_column_through_alias_or_star(self, sql):
+        result = check_denied_columns(
+            sql, ["customers.ssn"], dialect="postgresql", tables=self.TABLES,
+            default_schema="public",
+        )
+        assert result.passed is False
+        assert result.level == "block"
+
+    def test_a_qualified_entry_pins_the_schema(self):
+        bare = check_allowed_tables(
+            "SELECT ssn FROM secret.customers", ["customers"], dialect="postgresql",
+            default_schema="public",
+        )
+        qualified = check_allowed_tables(
+            "SELECT ssn FROM secret.customers", ["public.customers"], dialect="postgresql",
+            default_schema="public",
+        )
+        assert bare.passed is True
+        assert qualified.passed is False
+        assert "secret.customers" in qualified.message
+
+    @pytest.mark.parametrize("entry", ["public.title_basics", "title_basics"])
+    def test_a_quoted_postgres_table_is_its_own_table(self, entry):
+        other = check_allowed_tables(
+            'SELECT tconst FROM public."Title_Basics"', [entry], dialect="postgresql",
+            default_schema="public",
+        )
+        allowed = check_allowed_tables(
+            "SELECT tconst FROM public.Title_Basics", [entry], dialect="postgresql",
+            default_schema="public",
+        )
+        assert other.passed is False
+        assert allowed.passed is True
+
+    def test_a_quoted_entry_allows_only_that_postgres_table(self):
+        entry = ['public."Title_Basics"']
+        assert check_allowed_tables('SELECT 1 FROM public."Title_Basics"', entry,
+                                    dialect="postgresql").passed is True
+        assert check_allowed_tables("SELECT 1 FROM public.title_basics", entry,
+                                    dialect="postgresql").passed is False
+
+    def test_mysql_table_names_still_match_in_any_case(self):
+        assert check_allowed_tables("SELECT 1 FROM `Users`", ["users"],
+                                    dialect="mysql").passed is True
+
+    def test_parse_failure_blocks(self):
+        assert check_denied_columns("SELECT (((", ["ssn"]).level == "block"
+        assert check_allowed_tables("SELECT (((", ["users"]).level == "block"
+
+    def test_check_query_uses_target_engine_and_given_tables(self):
+        config = GuardConfig(
+            name="pii", restrictions=RestrictionsConfig(denied_columns=["customers.ssn"])
+        )
+        blocked = check_query("SELECT * FROM customers", config,
+                              target_config={"engine": "postgresql"}, tables=self.TABLES)
+        allowed = check_query("SELECT * FROM orders", config,
+                              target_config={"engine": "postgresql"}, tables=self.TABLES)
+
+        assert any(not r.passed and r.guard_name == "denied_columns" for r in blocked)
+        assert all(r.passed for r in allowed if r.guard_name == "denied_columns")
+
+    @pytest.mark.parametrize("sql", ["SELECT FROM WHERE (((", "SELECT 1 FROM t WHERE"])
+    def test_unparseable_query_warns_without_a_target_and_blocks_with_one(self, sql):
+        """A query neither check can verify is advisory without a target, enforced with one."""
+        config = GuardConfig(name="g", restrictions=RestrictionsConfig(
+            denied_columns=["customers.ssn"], allowed_tables=["customers"]))
+        advisory = check_query(sql, config)
+        enforced = check_query(sql, config, target_config={"engine": "postgresql"}, tables={})
+
+        for results, level in ((advisory, "warn"), (enforced, "block")):
+            checks = {r.guard_name: r for r in results}
+            assert (checks["denied_columns"].passed, checks["denied_columns"].level) == (
+                False, level)
+            assert (checks["allowed_tables"].passed, checks["allowed_tables"].level) == (
+                False, level)
+
+    def test_a_broken_rule_blocks_even_without_a_target(self):
+        config = GuardConfig(name="g", restrictions=RestrictionsConfig(
+            denied_columns=["customers.ssn"], allowed_tables=["customers"]))
+        checks = {r.guard_name: r for r in check_query(
+            "SELECT c.ssn FROM customers c JOIN orders o ON o.id = c.id", config)}
+
+        assert checks["denied_columns"].level == "block"
+        assert checks["allowed_tables"].level == "block"
+
+    def test_unverifiable_star_warns_without_a_target_and_blocks_with_one(self):
+        config = GuardConfig(
+            name="pii", restrictions=RestrictionsConfig(denied_columns=["customers.ssn"])
+        )
+        advisory = check_query("SELECT * FROM customers", config)
+        enforced = check_query("SELECT * FROM customers", config,
+                               target_config={"engine": "postgresql"}, tables={})
+
+        [advisory_denied] = [r for r in advisory if r.guard_name == "denied_columns"]
+        [enforced_denied] = [r for r in enforced if r.guard_name == "denied_columns"]
+        assert (advisory_denied.passed, advisory_denied.level) == (False, "warn")
+        assert (enforced_denied.passed, enforced_denied.level) == (False, "block")
+
+
+class TestSearchPath:
+    """Unqualified names resolve the way the target resolves them: PostgreSQL searches its
+    search_path ('"$user", public' by default) and takes the first schema with the table."""
+
+    from features.guard.access import SchemaInfo as _Info
+
+    ANALYST = _Info(
+        ("pg_catalog", "analyst", "public"),
+        {("analyst", "users"): ["id", "ssn"], ("public", "users"): ["id", "name"],
+         ("public", "orders"): ["id", "total"]},
+    )
+
+    def test_a_users_own_schema_shadows_public(self):
+        refused = check_allowed_tables("SELECT id FROM users", ["public.users"],
+                                       dialect="postgresql", tables=self.ANALYST)
+        allowed = check_allowed_tables("SELECT id FROM users", ["analyst.users"],
+                                       dialect="postgresql", tables=self.ANALYST)
+
+        assert (refused.passed, refused.level) == (False, "block")
+        assert "analyst.users" in refused.message
+        assert allowed.passed
+
+    def test_a_table_the_first_schema_lacks_comes_from_the_next(self):
+        assert check_allowed_tables("SELECT id FROM orders", ["public.orders"],
+                                    dialect="postgresql", tables=self.ANALYST).passed
+
+    def test_stars_expand_against_the_schema_the_name_resolves_to(self):
+        result = check_denied_columns("SELECT * FROM users", ["analyst.users.ssn"],
+                                      dialect="postgresql", tables=self.ANALYST)
+        public_only = self._Info(("public",), {("public", "users"): ["id", "name"]})
+
+        assert result.passed is False and "ssn" in result.message
+        assert check_denied_columns("SELECT * FROM users", ["users.ssn"],
+                                    dialect="postgresql", tables=public_only).passed
+
+    def test_unknown_schema_is_unverifiable_not_assumed_public(self):
+        config = GuardConfig(name="g", restrictions=RestrictionsConfig(
+            allowed_tables=["public.users"]))
+        advisory = {r.guard_name: r for r in check_query("SELECT id FROM users", config)}
+        enforced = {r.guard_name: r for r in check_query(
+            "SELECT id FROM users", config, target_config={"engine": "postgresql"},
+            tables={})}
+
+        assert (advisory["allowed_tables"].passed, advisory["allowed_tables"].level) == (
+            False, "warn")
+        assert (enforced["allowed_tables"].passed, enforced["allowed_tables"].level) == (
+            False, "block")
+        assert "could not be checked" in enforced["allowed_tables"].message
+
+    def test_check_query_reads_the_targets_search_path_for_table_restrictions(
+        self, monkeypatch
+    ):
+        loaded = []
+        monkeypatch.setattr("features.guard.checker.load_default_schema_tables",
+                            lambda config, name: loaded.append(name) or self.ANALYST)
+        config = GuardConfig(name="g", restrictions=RestrictionsConfig(
+            allowed_tables=["public.users"]))
+
+        results = check_query("SELECT id FROM users", config, target_name="db",
+                              target_config={"engine": "postgresql"})
+
+        assert loaded == ["db"]
+        assert any(r.guard_name == "allowed_tables" and r.level == "block"
+                   and not r.passed for r in results)

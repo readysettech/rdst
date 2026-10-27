@@ -128,6 +128,38 @@ describe('SupabaseConnectionPanel', () => {
     ).toBeTruthy()
   })
 
+  it('explains a sign-in that cannot start from this browser', async () => {
+    vi.mocked(fetchFleetSupabaseStatus).mockResolvedValue({
+      connected: false,
+      method: null,
+      detail: null,
+    })
+    vi.mocked(startFleetSupabaseLogin).mockRejectedValue(
+      Object.assign(
+        new Error(
+          'Connect Supabase from a browser on the machine running RDST.'
+        ),
+        { code: 'supabase_oauth_remote_browser' }
+      )
+    )
+    vi.mocked(fetchFleetSupabaseLogin).mockClear()
+    const popup = { close: vi.fn() }
+    vi.stubGlobal('open', vi.fn().mockReturnValue(popup))
+
+    renderWithClient(<SupabaseConnectionPanel />)
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Sign in with Supabase' })
+    )
+
+    expect(
+      await screen.findAllByText(
+        'Connect Supabase from a browser on the machine running RDST.'
+      )
+    ).not.toHaveLength(0)
+    expect(popup.close).toHaveBeenCalled()
+    expect(fetchFleetSupabaseLogin).not.toHaveBeenCalled()
+  })
+
   it('offers the authorization link when the popup is blocked', async () => {
     vi.mocked(fetchFleetSupabaseStatus).mockResolvedValue({
       connected: false,

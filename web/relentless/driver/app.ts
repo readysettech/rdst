@@ -26,7 +26,7 @@ export interface AppOptions {
   runDir: string
   runId: string
   home: string
-  /** Packaged desktop executable, e.g. dist/linux-unpacked/rdst-desktop. */
+  /** Packaged desktop executable, e.g. dist/cl/linux-unpacked/rdst-desktop-cl. */
   desktopExecutable?: string
   headless?: boolean
   /** Session bus of the run's own Secret Service. */
@@ -70,6 +70,8 @@ export interface AppUnderTest {
   dispose?(): void
   /** The backend's own HTTP address, when the page reaches it some other way. */
   backendUrl?(): string | undefined
+  /** The launch token that backend requires (its RDST_API_TOKEN), if any. */
+  backendToken?(): string | undefined
 }
 
 const READY_TIMEOUT_MS = 120_000
@@ -396,7 +398,7 @@ class DesktopApp implements AppUnderTest {
     if (!executable || !existsSync(executable)) {
       throw new Error(
         `desktop mode needs --desktop-exec pointing at a packaged build (got ${executable ?? 'nothing'}); ` +
-          'build one with pnpm --filter rdst-desktop package:linux and use dist/linux-unpacked/rdst-desktop'
+          'build one with RDST_DESKTOP_FLAVOR=cl pnpm --filter rdst-desktop package:linux and use dist/cl/linux-unpacked/rdst-desktop-cl'
       )
     }
     this.executable = executable
@@ -512,6 +514,13 @@ class DesktopApp implements AppUnderTest {
     for (const { cmdline } of findMarkedProcesses(this.options.runId)) {
       const match = cmdline.match(/\bweb\b.*--host (\S+) --port (\d+)/)
       if (match) return `http://${match[1]}:${match[2]}`
+    }
+    return undefined
+  }
+
+  backendToken() {
+    for (const { cmdline, token } of findMarkedProcesses(this.options.runId)) {
+      if (token && /\bweb\b.*--port \d+/.test(cmdline)) return token
     }
     return undefined
   }
@@ -638,6 +647,8 @@ export function createApp(options: AppOptions): AppUnderTest & {
 export interface MarkedProcess {
   pid: number
   cmdline: string
+  /** RDST_API_TOKEN from its environment. */
+  token?: string
 }
 
 /** Processes carrying this run's marker. Linux only; elsewhere it is empty. */
@@ -649,13 +660,16 @@ export function findMarkedProcesses(runId: string): MarkedProcess[] {
     const pid = Number(entry)
     if (!Number.isInteger(pid) || pid === process.pid) continue
     try {
-      const environ = readFileSync(`/proc/${pid}/environ`, 'utf8')
-      if (!environ.split('\0').includes(needle)) continue
+      const environ = readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0')
+      if (!environ.includes(needle)) continue
       const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
         .split('\0')
         .join(' ')
         .trim()
-      found.push({ pid, cmdline })
+      const token = environ
+        .find((value) => value.startsWith('RDST_API_TOKEN='))
+        ?.slice('RDST_API_TOKEN='.length)
+      found.push({ pid, cmdline, token })
     } catch {}
   }
   return found

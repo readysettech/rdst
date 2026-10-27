@@ -10,12 +10,20 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, TypeAdapter
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from shared.api.guards import (
+    API_TOKEN_ENV,
+    ApiTokenMiddleware,
+    HostAllowlistMiddleware,
+    configured_allowed_hosts,
+)
 
 
 class HealthResponse(BaseModel):
@@ -108,9 +116,10 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _validation_exception_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        errors = exc.errors()
+        # A validator's own error rides along in each entry's context, which JSON can't hold.
+        errors = jsonable_encoder(exc.errors())
         first = errors[0].get("msg") if errors else None
-        message = str(first) if first else "The request was invalid."
+        message = str(first).removeprefix("Value error, ") if first else "The request was invalid."
         return JSONResponse(
             status_code=422,
             content=_error_envelope("invalid_request", message, errors),
@@ -462,6 +471,13 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
         with inference_workflow("other", surface):
             return await call_next(request)
 
+    # Added before CORS so preflights are answered without the token.
+    api_token = os.environ.get(API_TOKEN_ENV, "")
+    # Published in desktop-server.json for same-user CLI commands; never in a response.
+    app.state.api_token = api_token or None
+    if api_token:
+        app.add_middleware(ApiTokenMiddleware, token=api_token)
+
     # Every legitimate caller is a loopback origin: the desktop app's static
     # server, the Vite dev server, and `rdst serve` (which is same-origin
     # anyway). A wildcard additionally hands responses to any page the user
@@ -473,6 +489,9 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Outermost, so a DNS-rebinding request reaches no route, static file, or /mcp.
+    app.add_middleware(HostAllowlistMiddleware, allowed_hosts=configured_allowed_hosts())
 
     register_error_handlers(app)
 

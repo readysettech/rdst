@@ -74,8 +74,9 @@ async def start_bootstrap(
 
 
 @router.get("/runs/{run_id}", response_model=BootstrapRunStatusResponse)
-async def bootstrap_run_status(run_id: str) -> BootstrapRunStatusResponse:
+async def bootstrap_run_status(http_request: Request, run_id: str) -> BootstrapRunStatusResponse:
     """Cheap status poll for a run."""
+    require_local_request(http_request)
     status = _registry.status(run_id)
     if status is None:
         raise HTTPException(
@@ -85,8 +86,9 @@ async def bootstrap_run_status(run_id: str) -> BootstrapRunStatusResponse:
 
 
 @router.get("/runs/{run_id}/events")
-async def bootstrap_run_events(run_id: str, after_seq: int = 0):
+async def bootstrap_run_events(http_request: Request, run_id: str, after_seq: int = 0):
     """Replay events with seq > after_seq, then stream live until terminal."""
+    require_local_request(http_request)
     if _registry.status(run_id) is None:
         raise HTTPException(
             status_code=404, detail=f"Bootstrap run '{run_id}' not found"

@@ -42,11 +42,12 @@ export default defineConfig([
     clean: false,
     sourcemap: true,
   },
+  // The window's renderer is sandboxed, which runs its preload only as a CommonJS script.
   {
     entry: { 'preload/index': 'src/preload/index.ts' },
     outDir: 'out',
-    format: 'esm',
-    outExtension: () => ({ js: '.mjs' }),
+    format: 'cjs',
+    outExtension: () => ({ js: '.cjs' }),
     platform: 'node',
     target: 'node22',
     external: ['electron'],

@@ -489,7 +489,7 @@ def generate_sql_from_nl(
         # the same model wrote the SQL -- so check the generated statement.
         unsafe_sql = False
         if result.sql:
-            read_only_check = check_read_only(result.sql)
+            read_only_check = check_read_only(result.sql, database_engine)
             if not read_only_check["is_read_only"]:
                 unsafe_sql = True
                 result.success = False
@@ -654,7 +654,7 @@ def repair_sql_after_validation(
             raise ValueError("validation repair response has unexpected fields")
         if not all(isinstance(parsed[field], str) for field in parsed):
             raise ValueError("validation repair fields must be strings")
-        safety = check_read_only(parsed["sql"])
+        safety = check_read_only(parsed["sql"], database_engine)
         if not safety["is_read_only"]:
             raise ValueError("validation repair did not return one read-only statement")
         return {"success": True, **parsed, "raw_response": parsed}

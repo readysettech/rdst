@@ -53,6 +53,8 @@ class ConfigureConnectionTestEvent:
     password_env: Optional[str] = None
     privileges: Optional[Dict[str, Any]] = None
     query_capture: Optional[Dict[str, Any]] = None
+    # Set on success when the connection is unencrypted or doesn't check the server.
+    tls_warning: Optional[str] = None
 
 
 @dataclass

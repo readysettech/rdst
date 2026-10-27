@@ -178,14 +178,16 @@ class ParamSampler:
         counts = {row["query_key"]: row["n"] for row in self.store.read(
             f"SELECT query_key,COUNT(*) n FROM query_sample WHERE target=? "
             f"AND query_key IN ({placeholders}) GROUP BY query_key", (target, *top))}
+        from features.monitor.analyze_queue import target_engine
         from shared.monitor.statements import analyzability
 
+        engine = target_engine(self.store, target)
         texts = {row["query_key"]: row["text"] for row in self.store.read(
             f"SELECT query_key,text FROM query_text WHERE target=? "
             f"AND query_key IN ({placeholders})", (target, *top))}
         # Only statements Deep Analyze runs need values; DDL and writes never do.
         wanted = {key for key in top if counts.get(key, 0) < SAMPLES_PER_QUERY
-                  and analyzability(texts.get(key, ""))["analyzable"]}
+                  and analyzability(texts.get(key, ""), engine=engine)["analyzable"]}
         self._wanted[target] = (now, wanted)
         return wanted
 

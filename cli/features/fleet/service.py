@@ -159,6 +159,7 @@ class FleetService:
                 member.password,
                 member.password_env,
                 secret_store=self._secret_store,
+                config=config,
             )
             if stored_env:
                 target_config["password_env"] = stored_env

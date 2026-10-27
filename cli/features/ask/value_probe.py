@@ -518,7 +518,9 @@ def _create_bounded_probe_executor(
                 "Ask value probe deadline exceeded",
                 "probe_timeout",
             )
-        validation = validate_sql_for_ask(sql, enforce_result_limit=False)
+        validation = validate_sql_for_ask(
+            sql, enforce_result_limit=False, dialect=str(ctx.db_type or "")
+        )
         if not validation.get("is_valid"):
             diagnostics["failed_calls"] += 1
             return _failed_probe(

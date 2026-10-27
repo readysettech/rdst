@@ -707,12 +707,17 @@ export class Session {
     }
     const body = flag(input, 'json')
     const shown = this.current?.baseUrl ?? ''
-    const base = /^https?:/.test(shown) ? shown : this.app.backendUrl?.()
+    const direct = /^https?:/.test(shown)
+    const base = direct ? shown : this.app.backendUrl?.()
+    const token = direct ? undefined : this.app.backendToken?.()
     // Without the backend's address, an app-scheme page's own /api is the way in.
     const response = base
       ? await fetch(new URL(path, base), {
           method,
-          headers: body ? { 'content-type': 'application/json' } : undefined,
+          headers: {
+            ...(body ? { 'content-type': 'application/json' } : {}),
+            ...(token ? { 'X-RDST-Token': token } : {}),
+          },
           body,
           signal: AbortSignal.timeout(timeoutOf(input)),
         }).then(async (r) => ({

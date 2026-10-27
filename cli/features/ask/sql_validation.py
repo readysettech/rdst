@@ -20,11 +20,10 @@ from sqlglot.schema import MappingSchema
 from sqlparse.sql import Parenthesis, Statement, TokenList
 from sqlparse.tokens import DML, Keyword
 
-from shared.query_safety import _QUOTED_SPANS, SIDE_EFFECT_FUNCTIONS
-
-# Shared with the analyze validator so the two lists cannot drift apart.
-# _QUOTED_SPANS blanks out literals and quoted identifiers: a keyword inside one
-# is text, not an operation, and scanning the raw string reads it as an operation.
+# Shared with the analyze validator so the two cannot drift apart. A code view blanks
+# literals, quoted names and comments as the server reads them: a keyword inside one is
+# text, not an operation.
+from shared.query_safety import GENERATED_SQL_DENIED_FUNCTIONS, code_views, statement_count
 
 
 # Dangerous keywords that indicate write operations
@@ -127,7 +126,7 @@ def validate_sql_for_ask(
         }
 
     # Step 2: Check for dangerous keywords
-    read_only_check = check_read_only(sql)
+    read_only_check = check_read_only(sql, dialect)
     if not read_only_check["is_read_only"]:
         issues.extend(read_only_check["issues"])
         return {
@@ -158,8 +157,7 @@ def validate_sql_for_ask(
 
         # Only the leading statement is inspected below, so anything trailing a
         # semicolon would reach the driver unexamined.
-        meaningful = [s for s in parsed if str(s).strip().strip(";").strip()]
-        if len(meaningful) > 1:
+        if any(statement_count(view) > 1 for view in code_views(sql, dialect)):
             issues.append("Only a single statement is allowed")
             return {
                 "is_valid": False,
@@ -201,7 +199,7 @@ def validate_sql_for_ask(
     # Step 3b: Constructs that stay inside a SELECT but reach past the queried
     # tables. These block rather than warn -- they return their payload to the
     # caller before any rollback, so an advisory verdict buys nothing.
-    forbidden = _check_forbidden_constructs(sql)
+    forbidden = _check_forbidden_constructs(sql, dialect)
     if forbidden:
         issues.extend(forbidden)
         return {
@@ -522,7 +520,7 @@ def _explicit_free_text_reference(
     )
 
 
-def check_read_only(sql: str) -> Dict[str, Any]:
+def check_read_only(sql: str, dialect: str = "") -> Dict[str, Any]:
     """
     Check if SQL is read-only (no write operations).
 
@@ -530,20 +528,30 @@ def check_read_only(sql: str) -> Dict[str, Any]:
     1. Keyword pattern matching
     2. SQL parsing to check statement type
     """
-    sql_upper = _QUOTED_SPANS.sub(" ", sql).upper()
-    # MySQL uses REPLACE both for a write statement (``REPLACE INTO ...``) and
-    # for a read-only scalar function (``REPLACE(value, from, to)``).  Remove
-    # only function-call spellings before the keyword scan; a statement-level
-    # REPLACE, including one following a CTE or another statement, remains.
-    keyword_scan_sql = re.sub(r"\bREPLACE\s*(?=\()", "", sql_upper)
+    views = code_views(sql, dialect)
+    if not views:
+        return {
+            "is_read_only": False,
+            "issues": [
+                "Error tokenizing the SQL: a string, quoted name or comment is never closed "
+                "(write an apostrophe inside a string as two)"
+            ],
+            "dangerous_keywords": [],
+        }
     dangerous_found = []
+    for view in views:
+        # MySQL uses REPLACE both for a write statement (``REPLACE INTO ...``) and
+        # for a read-only scalar function (``REPLACE(value, from, to)``).  Remove
+        # only function-call spellings before the keyword scan; a statement-level
+        # REPLACE, including one following a CTE or another statement, remains.
+        keyword_scan_sql = re.sub(r"\bREPLACE\s*(?=\()", "", view.keywords.upper())
 
-    # Check for write keywords
-    for keyword in WRITE_KEYWORDS:
-        # Use word boundaries to avoid false positives such as DESCRIPTION/DESC.
-        pattern = r"\b" + keyword + r"\b"
-        if re.search(pattern, keyword_scan_sql):
-            dangerous_found.append(keyword)
+        # Check for write keywords
+        for keyword in WRITE_KEYWORDS:
+            # Use word boundaries to avoid false positives such as DESCRIPTION/DESC.
+            pattern = r"\b" + keyword + r"\b"
+            if keyword not in dangerous_found and re.search(pattern, keyword_scan_sql):
+                dangerous_found.append(keyword)
 
     if dangerous_found:
         return {
@@ -771,7 +779,7 @@ def _replace_limit(sql: str, new_limit: int, dialect: str = "") -> str:
 _SELECT_INTO = re.compile(r"\bINTO\s+(?!OUTFILE\b|DUMPFILE\b)", re.IGNORECASE)
 
 
-def _check_forbidden_constructs(sql: str) -> List[str]:
+def _check_forbidden_constructs(sql: str, dialect: str = "") -> List[str]:
     """
     Check for constructs that must block execution rather than warn.
 
@@ -779,21 +787,26 @@ def _check_forbidden_constructs(sql: str) -> List[str]:
         List of issue messages; empty means nothing forbidden was found
     """
     issues = []
-    sql_upper = _QUOTED_SPANS.sub(" ", sql).upper()
+    for view in code_views(sql, dialect):
+        sql_upper = view.keywords.upper()
+        found = []
+        if re.search(r"\bINTO\s+(?:OUTFILE|DUMPFILE)\b", sql_upper):
+            found.append("INTO OUTFILE/DUMPFILE writes to the database server filesystem")
 
-    if "INTO OUTFILE" in sql_upper or "INTO DUMPFILE" in sql_upper:
-        issues.append("INTO OUTFILE/DUMPFILE writes to the database server filesystem")
-
-    if _SELECT_INTO.search(sql_upper):
-        issues.append(
-            "SELECT ... INTO writes the result set outside the queried tables"
-        )
-
-    for func in sorted(SIDE_EFFECT_FUNCTIONS):
-        if re.search(r"\b" + func + r"\s*\(", sql_upper):
-            issues.append(
-                f"{func}() reaches outside the queried tables and is not permitted"
+        if _SELECT_INTO.search(sql_upper):
+            found.append(
+                "SELECT ... INTO writes the result set outside the queried tables"
             )
+
+        names_upper = view.names.upper()
+        for func in sorted(GENERATED_SQL_DENIED_FUNCTIONS):
+            if re.search(r"\b" + func + r"\s*\(", names_upper):
+                found.append(
+                    f"{func}() reaches outside the queried tables and is not permitted"
+                )
+        if view.escaped_name:
+            found.append("Unicode-escaped quoted names are not permitted")
+        issues.extend(issue for issue in found if issue not in issues)
 
     return issues
 

@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from .access import SchemaInfo, Tables
 from .config import GuardConfig
 from shared.db_connection import (
     create_mysql_connection_from_params,
@@ -40,6 +41,7 @@ def check_query(
     config: GuardConfig,
     target_name: str | None = None,
     target_config: dict[str, Any] | None = None,
+    tables: Tables = None,
 ) -> list[CheckResult]:
     """Check SQL against all enabled guards.
 
@@ -47,7 +49,12 @@ def check_query(
         sql: The SQL query to check.
         config: Guard configuration with enabled checks.
         target_name: Optional target name (for cost/row estimation).
-        target_config: Optional target config (for cost/row estimation).
+        target_config: Optional target config (for cost/row estimation, and the engine and
+            default schema that table and column restrictions resolve names against).
+        tables: Optional ``SchemaInfo`` (how the target resolves table names and their
+            columns), or the default schema's tables and their columns. Read from the target
+            when restrictions are configured and it is not given; without either, a star or
+            an unqualified name checked against a schema-qualified entry cannot be verified.
 
     Returns:
         List of CheckResult for each check performed.
@@ -97,16 +104,44 @@ def check_query(
             )
         )
 
+    from .access import default_schema_for
+
+    dialect = str((target_config or {}).get("engine") or "")
+    default_schema = default_schema_for(target_config)
+    # Without a target there is no schema to resolve stars or names against; that check is
+    # advisory, so a read it can't verify warns rather than blocks.
+    unverifiable_level = "warn" if tables is None and not target_config else "block"
+
+    restrictions = config.restrictions
+    if tables is None and target_config and (
+            restrictions.denied_columns or restrictions.allowed_tables):
+        # Names resolve the way the target resolves them: its search path and its tables.
+        tables = load_default_schema_tables(target_config, target_name)
+
     # Check denied columns
     if config.restrictions.denied_columns:
         results.append(
-            check_denied_columns(sql, config.restrictions.denied_columns)
+            check_denied_columns(
+                sql,
+                config.restrictions.denied_columns,
+                dialect=dialect,
+                tables=tables,
+                default_schema=default_schema,
+                unverifiable_level=unverifiable_level,
+            )
         )
 
     # Check allowed tables
     if config.restrictions.allowed_tables:
         results.append(
-            check_allowed_tables(sql, config.restrictions.allowed_tables)
+            check_allowed_tables(
+                sql,
+                config.restrictions.allowed_tables,
+                dialect=dialect,
+                default_schema=default_schema,
+                tables=tables,
+                unverifiable_level=unverifiable_level,
+            )
         )
 
     # Check required filters - stronger than require_where
@@ -116,6 +151,58 @@ def check_query(
         )
 
     return results
+
+
+# The schemas an unqualified name searches, in order: PostgreSQL's effective search_path
+# (with the implicit pg_catalog), MySQL's connected database.
+_SEARCH_PATH_SQL = {
+    "postgresql": "SELECT s::text FROM unnest(current_schemas(true)) WITH ORDINALITY AS "
+                  "p(s, n) ORDER BY n",
+    "mysql": "SELECT DATABASE()",
+}
+_COLUMNS_SQL = {
+    "postgresql": "SELECT table_schema, table_name, column_name FROM information_schema.columns "
+                  "WHERE table_schema = ANY(current_schemas(true)) "
+                  "ORDER BY table_schema, table_name, ordinal_position",
+    "mysql": "SELECT table_schema, table_name, column_name FROM information_schema.columns "
+             "WHERE table_schema = DATABASE() ORDER BY table_name, ordinal_position",
+}
+
+
+def load_default_schema_tables(
+    target_config: dict[str, Any], target_name: str | None = None
+) -> SchemaInfo | None:
+    """How the target resolves table names (see ``SchemaInfo``), or None when unreadable."""
+    from shared.db_connection import close_connection, create_direct_connection
+
+    engine = "mysql" if str(target_config.get("engine") or "").lower() == "mysql" \
+        else "postgresql"
+    try:
+        conn = create_direct_connection(target_config, target=target_name, read_only=True)
+    except Exception as exc:
+        logger.warning("Could not read the schema for table and column restrictions: %s", exc)
+        return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute(_SEARCH_PATH_SQL[engine])
+        search_path = tuple(str(_values(row)[0]).lower() for row in cursor.fetchall()
+                            if _values(row)[0])
+        cursor.execute(_COLUMNS_SQL[engine])
+        columns: dict[tuple[str, str], list[str]] = {}
+        for row in cursor.fetchall():
+            schema, table, column = (str(value).lower() for value in _values(row))
+            columns.setdefault((schema, table), []).append(column)
+        cursor.close()
+    except Exception as exc:
+        logger.warning("Could not read the schema for table and column restrictions: %s", exc)
+        return None
+    finally:
+        close_connection(conn)
+    return SchemaInfo(search_path, columns, exact=engine == "mysql")
+
+
+def _values(row: Any) -> list[Any]:
+    return list(row.values()) if isinstance(row, dict) else list(row)
 
 
 def check_read_only(sql: str) -> CheckResult:
@@ -369,119 +456,79 @@ def check_max_tables(sql: str, max_tables: int) -> CheckResult:
         )
 
 
-def check_denied_columns(sql: str, denied_columns: list[str]) -> CheckResult:
-    """Check that query doesn't reference denied columns."""
-    try:
-        import sqlglot
-        import fnmatch
+def check_denied_columns(
+    sql: str,
+    denied_columns: list[str],
+    *,
+    dialect: str = "",
+    tables: Tables = None,
+    default_schema: str | None = None,
+    unverifiable_level: str = "block",
+) -> CheckResult:
+    """Check that query doesn't read denied columns, through aliases and stars included.
 
-        parsed = sqlglot.parse_one(sql)
-
-        # Find all column references
-        violations = []
-        for col in parsed.find_all(sqlglot.exp.Column):
-            col_name = col.name.lower()
-            for pattern in denied_columns:
-                if fnmatch.fnmatch(col_name, pattern.lower()):
-                    violations.append(col_name)
-                    break
-
-        if not violations:
-            return CheckResult(
-                passed=True,
-                level="info",
-                guard_name="denied_columns",
-                message="No denied columns referenced",
-            )
-
-        return CheckResult(
-            passed=False,
-            level="block",
-            guard_name="denied_columns",
-            message=f"Denied column(s) referenced: {', '.join(violations)}",
-            suggestion="Remove references to restricted columns",
-        )
-
-    except ImportError:
-        logger.warning("sqlglot not installed, skipping denied_columns check")
-        return CheckResult(
-            passed=True,
-            level="warn",
-            guard_name="denied_columns",
-            message="Could not check denied columns (sqlglot not installed)",
-        )
-    except Exception as e:
-        logger.warning(f"Could not parse SQL for column check: {e}")
-        return CheckResult(
-            passed=False,
-            level="warn",
-            guard_name="denied_columns",
-            message=f"Could not check denied columns: {e}",
-        )
-
-
-def check_allowed_tables(sql: str, allowed_tables: list[str]) -> CheckResult:
-    """Check that query only references allowed tables.
-
-    CTE aliases defined within the same query are excluded from the allowlist
-    check because they are not real tables — they are derived from other
-    expressions that are themselves checked.
+    A read it cannot verify (unknown columns, a query it cannot parse) gets
+    ``unverifiable_level``.
     """
-    try:
-        import sqlglot
+    from .access import UNKNOWN_COLUMNS, denied_column_violation, unverified
 
-        parsed = sqlglot.parse_one(sql)
-
-        # Collect CTE alias names so we can skip them during the table check.
-        cte_names: set[str] = set()
-        for cte in parsed.find_all(sqlglot.exp.CTE):
-            if cte.alias:
-                cte_names.add(cte.alias.lower())
-
-        # Find all table references
-        allowed_lower = [t.lower() for t in allowed_tables]
-        violations = []
-
-        for table in parsed.find_all(sqlglot.exp.Table):
-            table_name = table.name.lower()
-            # Skip references to CTE aliases — they are not real tables.
-            if table_name in cte_names:
-                continue
-            if table_name not in allowed_lower:
-                violations.append(table_name)
-
-        if not violations:
-            return CheckResult(
-                passed=True,
-                level="info",
-                guard_name="allowed_tables",
-                message="All tables are allowed",
-            )
-
-        return CheckResult(
-            passed=False,
-            level="block",
-            guard_name="allowed_tables",
-            message=f"Table(s) not in allowlist: {', '.join(violations)}",
-            suggestion=f"Only these tables are allowed: {', '.join(allowed_tables)}",
-        )
-
-    except ImportError:
-        logger.warning("sqlglot not installed, skipping allowed_tables check")
+    violation = denied_column_violation(
+        sql, denied_columns, dialect=dialect, tables=tables, default_schema=default_schema
+    )
+    if not violation:
         return CheckResult(
             passed=True,
-            level="warn",
-            guard_name="allowed_tables",
-            message="Could not check allowed tables (sqlglot not installed)",
+            level="info",
+            guard_name="denied_columns",
+            message="No denied columns referenced",
         )
-    except Exception as e:
-        logger.warning(f"Could not parse SQL for table check: {e}")
+    return CheckResult(
+        passed=False,
+        level=unverifiable_level if unverified(violation) else "block",
+        guard_name="denied_columns",
+        message=violation,
+        suggestion=(
+            "Check against a target so RDST can read the table's columns"
+            if UNKNOWN_COLUMNS in violation
+            else "Remove references to restricted columns"
+        ),
+    )
+
+
+def check_allowed_tables(
+    sql: str,
+    allowed_tables: list[str],
+    *,
+    dialect: str = "",
+    default_schema: str | None = None,
+    tables: Tables = None,
+    unverifiable_level: str = "block",
+) -> CheckResult:
+    """Check that query only reads allowed tables.
+
+    CTE names are not tables; the tables they read are checked instead. An entry without
+    a schema allows that table in any schema; ``schema.table`` allows only that schema's.
+    A query it cannot verify gets ``unverifiable_level``.
+    """
+    from .access import disallowed_table_violation, unverified
+
+    violation = disallowed_table_violation(
+        sql, allowed_tables, dialect=dialect, default_schema=default_schema, tables=tables
+    )
+    if not violation:
         return CheckResult(
-            passed=False,
-            level="warn",
+            passed=True,
+            level="info",
             guard_name="allowed_tables",
-            message=f"Could not check allowed tables: {e}",
+            message="All tables are allowed",
         )
+    return CheckResult(
+        passed=False,
+        level=unverifiable_level if unverified(violation) else "block",
+        guard_name="allowed_tables",
+        message=violation,
+        suggestion=f"Only these tables are allowed: {', '.join(allowed_tables)}",
+    )
 
 
 def check_cost_limit(

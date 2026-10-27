@@ -31,6 +31,7 @@ from features.guard import (
     derive_rules_from_intent,
     format_derived_rules,
 )
+from features.guard.access import UNKNOWN_COLUMNS
 from shared.cli.types import RdstResult
 from shared.editor import resolve_editor_command
 
@@ -512,7 +513,18 @@ Run 'rdst guard create --help' for full options."""
         except GuardNotFoundError:
             return RdstResult(False, f"Guard '{guard_name}' not found")
 
-        results = check_query(sql, config, target_name=target)
+        target_config = None
+        if target:
+            from shared.config.targets import create_targets_config
+
+            targets = create_targets_config()
+            targets.load()
+            target_config = targets.get(target)
+            if not target_config:
+                return RdstResult(False, f"Target '{target}' not found")
+        # With a target, stars resolve against the table's real columns and names against
+        # its engine and default schema.
+        results = check_query(sql, config, target_name=target, target_config=target_config)
 
         # Format output
         lines = [f"Guard: {guard_name}", ""]
@@ -531,8 +543,12 @@ Run 'rdst guard create --help' for full options."""
                 passed = False
 
             lines.append(f"  {symbol} {result.message}")
-            if result.suggestion and not result.passed:
-                lines.append(f"      → {result.suggestion}")
+            suggestion = result.suggestion
+            if (not target and not result.passed and result.guard_name == "denied_columns"
+                    and UNKNOWN_COLUMNS in result.message):
+                suggestion = "Pass --target NAME so RDST reads the table's columns"
+            if suggestion and not result.passed:
+                lines.append(f"      -> {suggestion}")
 
         lines.append("")
         if not passed:

@@ -414,7 +414,7 @@ def query_analyze_jobs(target: str, key: str, limit: int = 5):
 
 @router.post("/targets/{target}/queries/{key}/analyze", **documented(models.AnalyzeJob))
 async def enqueue_analysis(target: str, key: str, request: Request):
-    from features.monitor.analyze_queue import enqueue_user
+    from features.monitor.analyze_queue import enqueue_user, target_engine
     from features.monitor import database_limit
 
     from shared.monitor.statements import analyzability
@@ -424,7 +424,8 @@ async def enqueue_analysis(target: str, key: str, request: Request):
         store.read, "SELECT text FROM query_text WHERE target=? AND query_key=?", (target, key))
     if not rows:
         raise HTTPException(404, "Query not found")
-    verdict = analyzability(rows[0]["text"])
+    verdict = analyzability(rows[0]["text"],
+                            engine=await asyncio.to_thread(target_engine, store, target))
     if not verdict["analyzable"]:
         # Refuse up front with the reason; a queued job for these only ever fails.
         raise HTTPException(422, verdict["not_analyzable_reason"])
@@ -506,7 +507,7 @@ def add_query(target: str, body: AddQueryRequest):
         raise HTTPException(422, "Pass query_hash and analysis_id together")
     if body.analysis_id is None:
         # Pasted to be analyzed: one RDST would refuse to analyze stays out of the list.
-        verdict = analyzability(sql)
+        verdict = analyzability(sql, engine=str(config.get(target).get("engine") or ""))
         if not verdict["analyzable"]:
             raise HTTPException(422, verdict["not_analyzable_reason"])
     ref = (f"/api/query-registry/{body.query_hash}/analysis/{body.analysis_id}"

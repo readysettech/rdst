@@ -21,7 +21,7 @@ class RankedUnionPlan:
 
 def plan_ranked_union(sql, dialect):
     read = "postgres" if dialect in {"postgres", "postgresql"} else dialect
-    if read not in {"mysql", "postgres"} or not check_read_only(sql)["is_read_only"]:
+    if read not in {"mysql", "postgres"} or not check_read_only(sql, dialect)["is_read_only"]:
         return None
     try:
         statements = sqlglot.parse(sql, read=read)

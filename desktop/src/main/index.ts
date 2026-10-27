@@ -23,9 +23,17 @@ import {
   APP_SCHEME_PRIVILEGES,
   createAppRequestHandler,
   isRendererUrl,
+  isSafeExternalUrl,
 } from './app-protocol.js'
 
-import { type BackendHandle, startBackend, stopBackend } from './backend.js'
+import {
+  type BackendHandle,
+  createBackendToken,
+  startBackend,
+  stopBackend,
+  TOKEN_HEADER,
+  tokenFetch,
+} from './backend.js'
 import { BackendLog } from './backend-log.js'
 import {
   type BackendRunState,
@@ -75,6 +83,7 @@ import {
   errorClass,
   loadDirectTelemetryConfig,
   startFailureClass,
+  TELEMETRY_DISABLED_ARG,
   telemetryDisabled,
 } from './telemetry.js'
 import { trayBitmap } from './tray-icons.js'
@@ -118,6 +127,15 @@ const DEV_RENDERER_URL = SMOKE_MODE
 
 // Must happen before the app is ready.
 protocol.registerSchemesAsPrivileged([APP_SCHEME_PRIVILEGES])
+
+// Every request to the backend carries this launch's token, which only the backend shares.
+const BACKEND_TOKEN = createBackendToken()
+const BACKEND_HEADERS = { [TOKEN_HEADER]: BACKEND_TOKEN }
+const backendFetch = tokenFetch(BACKEND_TOKEN)
+// DevTools are for development; support turns them on in a release with RDST_DESKTOP_DEVTOOLS=1.
+const DEVTOOLS_ENABLED = process.env.RDST_DESKTOP_DEVTOOLS
+  ? process.env.RDST_DESKTOP_DEVTOOLS === '1'
+  : !app.isPackaged
 
 // Development and an installed build may run together. Keep Electron's
 // profile and single-instance lock separate, just as their OAuth protocols are
@@ -236,6 +254,7 @@ function startBackendOnce(
     sourceDir: E2E_SOURCE_ROOT,
     keyservice: PACKAGED.keyservice,
     identity: { instance: INSTANCE, protocol: OAUTH_PROTOCOL },
+    token: BACKEND_TOKEN,
     log: backendLog,
     onPhase,
     onSpawn: (handle) => {
@@ -259,6 +278,7 @@ function registerAppProtocol(): void {
       onWrite: (pathname) => {
         if (changesTrayDatabases(pathname)) refreshTrayMenu()
       },
+      apiToken: BACKEND_TOKEN,
     })
   )
   appProtocolRegistered = true
@@ -347,15 +367,60 @@ function waitForRetry(): Promise<void> {
   })
 }
 
-function registerWindowControlHandlers(): void {
-  const senderWindow = (
-    event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent
-  ) => BrowserWindow.fromWebContents(event.sender)
+type IpcEvent = Electron.IpcMainEvent | Electron.IpcMainInvokeEvent
 
-  ipcMain.on('desktop:open-logs', openLogsFolder)
-  ipcMain.on('desktop:retry-backend', () => retryRequested?.())
-  ipcMain.handle('desktop:get-backend-state', () => backendRunState)
-  ipcMain.on('desktop:reload-window', (event) => {
+/**
+ * True for a message from a window's top frame showing RDST's own page: the renderer, or the
+ * startup and crash pages the shell loads as data: URLs (navigation can't reach those).
+ */
+function trustedSender(event: IpcEvent): boolean {
+  const frame = event.senderFrame
+  if (!frame || frame.parent || !BrowserWindow.fromWebContents(event.sender))
+    return false
+  return (
+    isRendererUrl(frame.url, DEV_RENDERER_URL) || frame.url.startsWith('data:')
+  )
+}
+
+function rejectSender(channel: string, event: IpcEvent): void {
+  console.warn(
+    `[rdst-desktop] ignored ${channel} from ${event.senderFrame?.url ?? 'a closed frame'}`
+  )
+}
+
+/** ipcMain.handle for RDST's own pages only. */
+function handleIpc<T>(
+  channel: string,
+  listener: (event: Electron.IpcMainInvokeEvent, ...args: never[]) => T
+): void {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!trustedSender(event)) {
+      rejectSender(channel, event)
+      throw new Error(`${channel} is not available to this page`)
+    }
+    return listener(event, ...(args as never[]))
+  })
+}
+
+/** ipcMain.on for RDST's own pages only. */
+function onIpc(
+  channel: string,
+  listener: (event: Electron.IpcMainEvent) => void
+): void {
+  ipcMain.on(channel, (event) => {
+    if (trustedSender(event)) listener(event)
+    else rejectSender(channel, event)
+  })
+}
+
+function registerWindowControlHandlers(): void {
+  const senderWindow = (event: IpcEvent) =>
+    BrowserWindow.fromWebContents(event.sender)
+
+  onIpc('desktop:open-logs', openLogsFolder)
+  onIpc('desktop:retry-backend', () => retryRequested?.())
+  handleIpc('desktop:get-backend-state', () => backendRunState)
+  onIpc('desktop:reload-window', (event) => {
     const window = senderWindow(event)
     if (!window) return
     rendererReloads = []
@@ -365,7 +430,7 @@ function registerWindowControlHandlers(): void {
       console.warn('[rdst-desktop] could not reload the window:', error)
     })
   })
-  ipcMain.handle('oauth:register-protocol', () => {
+  handleIpc('oauth:register-protocol', () => {
     if (process.defaultApp && process.argv[1]) {
       return app.setAsDefaultProtocolClient(OAUTH_PROTOCOL, process.execPath, [
         path.resolve(process.argv[1]),
@@ -373,7 +438,7 @@ function registerWindowControlHandlers(): void {
     }
     return app.setAsDefaultProtocolClient(OAUTH_PROTOCOL)
   })
-  ipcMain.handle('ssh:select-key', async (event) => {
+  handleIpc('ssh:select-key', async (event) => {
     const sshDirectory = path.join(os.homedir(), '.ssh')
     const options: Electron.OpenDialogOptions = {
       title: 'Select SSH private key',
@@ -403,7 +468,9 @@ function installApplicationMenu(): void {
     submenu: [
       { role: 'reload' },
       { role: 'forceReload' },
-      { role: 'toggleDevTools' },
+      ...(DEVTOOLS_ENABLED
+        ? [{ role: 'toggleDevTools' } as MenuItemConstructorOptions]
+        : []),
       { type: 'separator' },
       {
         label: 'Actual Size',
@@ -467,10 +534,15 @@ async function createWindow(
     // flash before first paint.
     backgroundColor: '#171616',
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.mjs'),
+      preload: path.join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
+      devTools: DEVTOOLS_ENABLED,
+      // A sandboxed preload sees only the arguments given here, not the shell's environment.
+      additionalArguments: telemetryDisabled(process.env, true)
+        ? [TELEMETRY_DISABLED_ARG]
+        : [],
       zoomFactor: DEFAULT_ZOOM_FACTOR,
     },
   })
@@ -495,13 +567,23 @@ async function createWindow(
     if (isRendererUrl(url, DEV_RENDERER_URL)) {
       return { action: 'allow' }
     }
-    void shell.openExternal(url)
+    openExternalLink(url)
     return { action: 'deny' }
   })
   window.webContents.on('will-navigate', (event, url) => {
     if (isRendererUrl(url, DEV_RENDERER_URL)) return
     event.preventDefault()
-    void shell.openExternal(url)
+    openExternalLink(url)
+  })
+  // Frames (the top one is will-navigate's) and redirects stay on RDST's own pages.
+  window.webContents.on('will-frame-navigate', (event) => {
+    if (event.isMainFrame || isRendererUrl(event.url, DEV_RENDERER_URL)) return
+    event.preventDefault()
+  })
+  window.webContents.on('will-redirect', (event, url) => {
+    if (isRendererUrl(url, DEV_RENDERER_URL)) return
+    console.warn(`[rdst-desktop] blocked a redirect to ${url}`)
+    event.preventDefault()
   })
 
   window.once('closed', () => {
@@ -535,6 +617,17 @@ async function createWindow(
   }
 
   return window
+}
+
+/** Opens a link from a page in the browser; other schemes could launch local programs. */
+function openExternalLink(url: string): void {
+  if (!isSafeExternalUrl(url)) {
+    console.warn(
+      `[rdst-desktop] did not open a link with an unsupported scheme: ${url}`
+    )
+    return
+  }
+  void shell.openExternal(url)
 }
 
 /** Reload a window whose renderer died, or show the error page once it keeps dying. */
@@ -758,7 +851,7 @@ function openNotificationSettings(): void {
 function loadTrayDatabases(): Promise<void> {
   if (trayDatabasesLoading) return trayDatabasesLoading
   if (!backend) return Promise.resolve()
-  trayDatabasesLoading = listTrayDatabases(backend.apiBaseUrl)
+  trayDatabasesLoading = listTrayDatabases(backend.apiBaseUrl, backendFetch)
     .then((databases) => {
       const changed =
         JSON.stringify(databases) !== JSON.stringify(trayDatabases)
@@ -779,7 +872,12 @@ function refreshTrayDatabases(): void {
 
 function runPauseAction(action: PauseAction): void {
   if (!backend) return
-  void applyPauseAction(backend.apiBaseUrl, action, trayDatabases ?? [])
+  void applyPauseAction(
+    backend.apiBaseUrl,
+    action,
+    trayDatabases ?? [],
+    backendFetch
+  )
     .catch((error) =>
       dialog.showErrorBox('RDST monitoring', errorMessage(error))
     )
@@ -920,6 +1018,7 @@ function createTray(): void {
   if (process.platform !== 'darwin') tray.on('click', focusMainWindow)
   trayWatcher = watchTrayStatus({
     apiBaseUrl: () => backend?.apiBaseUrl ?? null,
+    fetcher: backendFetch,
     backendUp: () =>
       backend !== null &&
       backend.process.exitCode === null &&
@@ -998,7 +1097,7 @@ function keepBackendUp(handle: BackendHandle): void {
     onState: setBackendRunState,
     onRestarted: (restarted) => {
       backend = restarted
-      telemetry?.setBackend(restarted.apiBaseUrl)
+      telemetry?.setBackend(restarted.apiBaseUrl, BACKEND_HEADERS)
       refreshTrayMenu()
     },
   })
@@ -1138,39 +1237,36 @@ async function startApplication(): Promise<void> {
       console.warn('[rdst-desktop] failed to enable start at login:', error)
     }
   }
-  ipcMain.handle(
+  handleIpc(
     'desktop:get-notification-health',
     async () =>
       notificationHealth ?? (await notificationWatch?.refresh()) ?? null
   )
-  ipcMain.on('desktop:open-notification-settings', openNotificationSettings)
+  onIpc('desktop:open-notification-settings', openNotificationSettings)
   // A coding agent changed monitoring through RDST's MCP server, out of the proxy's sight.
-  ipcMain.on('desktop:refresh-tray', () => refreshTrayMenu())
-  ipcMain.handle('desktop:get-start-at-login', startAtLoginStatus)
-  ipcMain.handle('desktop:set-start-at-login', (_event, enabled: boolean) => {
+  onIpc('desktop:refresh-tray', () => refreshTrayMenu())
+  handleIpc('desktop:get-start-at-login', startAtLoginStatus)
+  handleIpc('desktop:set-start-at-login', (_event, enabled: boolean) => {
     const result = configureStartAtLogin(enabled)
     settings.markStartAtLoginConfigured()
     capture('start_at_login_changed', { enabled: result.enabled, by: 'user' })
     refreshTrayMenu()
     return result
   })
-  ipcMain.handle(
+  handleIpc(
     'desktop:get-notifications-enabled',
     () => settings.notificationsEnabled
   )
-  ipcMain.handle(
-    'desktop:set-notifications-enabled',
-    (_event, enabled: boolean) => {
-      settings.setNotificationsEnabled(enabled)
-      refreshTrayMenu()
-      return settings.notificationsEnabled
-    }
-  )
+  handleIpc('desktop:set-notifications-enabled', (_event, enabled: boolean) => {
+    settings.setNotificationsEnabled(enabled)
+    refreshTrayMenu()
+    return settings.notificationsEnabled
+  })
   installApplicationMenu()
 
   // Smoke builds expose update IPC with delivery disabled.
   if (SMOKE_MODE) {
-    ipcMain.handle('updates:get-state', () => null)
+    handleIpc('updates:get-state', () => null)
   } else {
     onUpdateStateChange((state) => {
       const label = restartToUpdateLabel(state)
@@ -1194,7 +1290,8 @@ async function startApplication(): Promise<void> {
         appImagePath: process.env.APPIMAGE,
         packageName: packageName(INSTANCE),
       },
-      (install) => cleanUpThen(quitState, cleanup, install)
+      (install) => cleanUpThen(quitState, cleanup, install),
+      trustedSender
     )
   }
 
@@ -1242,10 +1339,11 @@ async function startApplication(): Promise<void> {
       settings.markWelcomeNotificationSent()
     }
     if (backend) {
-      telemetry?.setBackend(backend.apiBaseUrl)
+      telemetry?.setBackend(backend.apiBaseUrl, BACKEND_HEADERS)
       keepBackendUp(backend)
       stopInboxStream = startInboxNotifications({
         apiBaseUrl: () => backend?.apiBaseUrl ?? null,
+        fetcher: backendFetch,
         enabled: () => settings.notificationsEnabled,
         onEvent: (id) => {
           lastInboxEventId = id
@@ -1280,6 +1378,7 @@ async function startApplication(): Promise<void> {
             backendLog: backendLog?.file ?? null,
             startPhases: [...startPhases],
             backendUrl: backend?.apiBaseUrl,
+            backendToken: BACKEND_TOKEN,
             windowVisible: mainWindow?.isVisible(),
             trayExists: tray !== null && !tray.isDestroyed(),
             trayTooltip: tray ? trayStatus.tooltip : null,
@@ -1364,6 +1463,7 @@ if (SMOKE_MODE) {
   app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'rdst-smoke-')))
   // The sidecar inherits this env: CI launches must not emit telemetry.
   process.env.RDST_TELEMETRY = 'off'
+  smokeLog('shell loaded')
 }
 
 if (app.requestSingleInstanceLock()) {

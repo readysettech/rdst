@@ -57,7 +57,7 @@ def test_docker_desktop_behind_the_default_socket_uses_bridge_networking(monkeyp
         "localhost", platform_name="linux").host_network
 
 
-def test_run_list_orders_the_queue_across_targets(monkeypatch):
+def test_run_list_orders_the_queue_across_targets(monkeypatch, loopback_request):
     import asyncio
 
     class Registry:
@@ -82,6 +82,6 @@ def test_run_list_orders_the_queue_across_targets(monkeypatch):
     monkeypatch.setattr(routes, "_run_registry", Registry())
     monkeypatch.setattr(routes, "_docker_runtime_status", runtime)
     monkeypatch.setattr("shared.deploy.sandbox_manager.sandbox_manager", Manager())
-    page = asyncio.run(routes.list_compare_runs("db"))
+    page = asyncio.run(routes.list_compare_runs(loopback_request, "db"))
     positions = {run.run_id: run.queue_position for run in page.runs}
     assert positions == {"r1": 1, "r2": None}

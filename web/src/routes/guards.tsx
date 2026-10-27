@@ -719,7 +719,7 @@ function GuardEditor({
               rows={3}
             />
             <Text level="caption" className="text-content-layout-3">
-              One per line (or comma-separated).
+              One per line (or comma-separated). table.column denies it in every schema.
             </Text>
           </VStack>
           <VStack className="gap-1.5 items-start">
@@ -734,7 +734,8 @@ function GuardEditor({
               rows={3}
             />
             <Text level="caption" className="text-content-layout-3">
-              Empty means all tables are allowed.
+              Empty means all tables are allowed. A name allows that table in any schema;
+              write schema.table to allow it in that schema only.
             </Text>
           </VStack>
         </div>

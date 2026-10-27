@@ -3,9 +3,11 @@
 import asyncio
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI, Request
@@ -186,7 +188,10 @@ async def fire(event, store, monkeypatch):
         monkeypatch.setattr(rdst, '_get_create_app', lambda: lambda **kwargs: FastAPI())
         monkeypatch.setattr(uvicorn, 'run', lambda *args, **kwargs: None)
         monkeypatch.setenv('RDST_WEB_SERVE_STATIC', '0')
-        assert rdst.execute_command(None, SimpleNamespace(command='web', ui='none', no_browser=True)).ok
+        # `rdst web` configures its server through the process environment; restore it after.
+        with patch.dict(os.environ):
+            assert rdst.execute_command(
+                None, SimpleNamespace(command='web', ui='none', no_browser=True)).ok
     elif event == 'app_error':
         handler = product.AppErrorLogHandler()
         log = logging.getLogger('features.monitor.report')

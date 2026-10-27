@@ -138,6 +138,12 @@ test('adds, updates, defaults, and deletes a database target', async ({
   await expect(editDialog.locator('[name="connection_string"]')).toHaveCount(0)
   await editDialog.locator('[name="host"]').fill('db-updated.internal')
   await editDialog.locator('[name="database"]').fill('application_v2')
+  // A saved password goes to a new host only when it is typed again.
+  await expect(editDialog.locator('[name="password"]')).toHaveAttribute(
+    'placeholder',
+    'Enter it again for the new address'
+  )
+  await editDialog.locator('[name="password"]').fill('test-password')
   await editDialog.getByRole('button', { name: 'Save changes' }).click()
   await expect(editDialog).toHaveCount(0)
 

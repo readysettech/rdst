@@ -232,7 +232,11 @@ export interface QueuedEvent {
   properties: EventProperties
 }
 
-export type EventPoster = (url: string, body: unknown) => Promise<boolean>
+export type EventPoster = (
+  url: string,
+  body: unknown,
+  headers?: Record<string, string>
+) => Promise<boolean>
 
 const QUEUE_LIMIT = 100
 const BATCH_LIMIT = 50
@@ -244,6 +248,9 @@ const TELEMETRY_OFF = new Set([
   'disable',
   'disabled',
 ])
+
+/** Tells the window's preload that renderer analytics are off (see telemetryDisabled). */
+export const TELEMETRY_DISABLED_ARG = '--rdst-telemetry-disabled'
 
 export function telemetryDisabled(
   env: NodeJS.ProcessEnv,
@@ -262,13 +269,13 @@ export function telemetryDisabled(
   )
 }
 
-const postJson: EventPoster = async (url, body) => {
+const postJson: EventPoster = async (url, body, headers = {}) => {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 5_000)
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(body),
       signal: controller.signal,
     })
@@ -283,6 +290,7 @@ const postJson: EventPoster = async (url, body) => {
 export class DesktopTelemetry {
   private queue: QueuedEvent[] = []
   private apiBaseUrl: string | null = null
+  private backendHeaders: Record<string, string> = {}
   private flushing: Promise<void> | null = null
   private internalUser: Promise<boolean> | null = null
   private identified = false
@@ -358,9 +366,16 @@ export class DesktopTelemetry {
       void this.flush()
   }
 
-  /** The backend is up (a URL) or gone (null); queued events go out once it's up. */
-  setBackend(apiBaseUrl: string | null): void {
+  /**
+   * The backend is up (a URL, and the headers its requests carry) or gone (null); queued
+   * events go out once it's up.
+   */
+  setBackend(
+    apiBaseUrl: string | null,
+    headers: Record<string, string> = {}
+  ): void {
     this.apiBaseUrl = apiBaseUrl
+    this.backendHeaders = headers
     if (apiBaseUrl && this.queue.length) void this.flush()
   }
 
@@ -449,10 +464,11 @@ export class DesktopTelemetry {
       if (!batch.length) break
       let ok = false
       try {
-        ok = await this.post(`${this.apiBaseUrl}/api/telemetry/events`, {
-          source: 'desktop',
-          events: batch,
-        })
+        ok = await this.post(
+          `${this.apiBaseUrl}/api/telemetry/events`,
+          { source: 'desktop', events: batch },
+          this.backendHeaders
+        )
       } catch {
         // Keep the saved events for a later launch.
       }

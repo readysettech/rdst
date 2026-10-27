@@ -8,6 +8,7 @@ from itertools import count
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, cast
 
+from shared.db_connection import apply_read_only_session
 from shared.ui import (
     get_console,
     StyleTokens,
@@ -122,7 +123,20 @@ def _open_persistent_connection(db_config: Dict[str, Any]):
             application_name="rdst/compare",
         )
         conn.autocommit = True
+    if db_config.get("read_only"):
+        # Set once per connection, so measured executions carry no extra round trips.
+        try:
+            apply_read_only_session(conn, "mysql" if engine == "mysql" else "postgresql")
+        except Exception:
+            conn.close()
+            raise
     return conn, engine
+
+
+def origin_config(db_config: Dict[str, Any]) -> Dict[str, Any]:
+    """The user's database only answers the query being measured; its session refuses
+    writes, whatever the statement turns out to call."""
+    return {**db_config, "read_only": True}
 
 
 def _execute_on_connection(
@@ -343,6 +357,7 @@ def run_comparison(
 
     Suitable for service-layer / API use.
     """
+    original_db_config = origin_config(original_db_config)
     if not MIN_COMPARISON_ITERATIONS <= iterations <= MAX_COMPARISON_ITERATIONS:
         return {
             "success": False,

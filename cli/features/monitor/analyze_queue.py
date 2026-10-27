@@ -360,8 +360,14 @@ def timeout_ms(mean_ms: float) -> int:
     return max(1000, min(30000, round(5 * max(0, mean_ms))))
 
 
-def analysis_mode(sql: str, mean_ms: float, execute: bool) -> str:
-    safety = validate_query_safety(sql)
+def target_engine(store: MonitorStore, target: str) -> str:
+    """The engine monitoring recorded for the target, or "" before its first collection."""
+    meta = store.read("SELECT engine FROM stats_meta WHERE target=?", (target,))
+    return str(meta[0]["engine"] or "") if meta else ""
+
+
+def analysis_mode(sql: str, mean_ms: float, execute: bool, engine: str = "") -> str:
+    safety = validate_query_safety(sql, engine)
     return "analyze" if (execute and mean_ms <= 3000 and safety.get("safe")
                          and _read_only_select(sql)) else "explain"
 
@@ -438,16 +444,18 @@ _STATE_CHANGING_CALL = re.compile(
     r"pg_stat_statements_reset|pg_stat_reset\w*|dblink_exec|lo_unlink)\s*\(", re.IGNORECASE)
 
 
-def automatic_skip_reason(sql: str) -> str | None:
+def automatic_skip_reason(sql: str, engine: str = "") -> str | None:
     from shared.monitor.statements import analyzability
 
     if statement_kind(sql) == "write":
         # Automatic analysis leaves writes alone; a user can still analyze one.
         return f"{verb(sql) or 'This statement'} changes data, so RDST doesn't run it."
-    verdict = analyzability(sql)
+    verdict = analyzability(sql, engine=engine)
     if not verdict["analyzable"] and verdict["analyzable_code"] != "no_text":
         return verdict["not_analyzable_reason"]
-    safety = validate_query_safety(sql)
+    safety = validate_query_safety(sql, engine)
+    if safety.get("unterminated"):
+        return "RDST couldn't parse this statement"
     if not safety.get("safe"):
         issues = "; ".join(safety.get("issues") or [])
         return f"Read-only safety validation rejected the statement: {issues}"
@@ -493,7 +501,7 @@ def _enqueue(target: str, key: str, reason: str, *, store: MonitorStore | None =
     if reason != "user":
         if key not in store.full_detail_keys(target):
             return None
-        skip = automatic_skip_reason(rows[0]["text"])
+        skip = automatic_skip_reason(rows[0]["text"], target_engine(store, target))
         if skip:
             store.skip_analysis_once(target, key, reason, now, skip)
             return None
@@ -564,6 +572,7 @@ def top_reads(store: MonitorStore, target: str, weights: dict[str, dict[str, Any
     in the window. Writes and statements RDST never analyzes on its own don't take a place."""
     keys = [key for key in sorted(weights, key=lambda key: (-weights[key]["total_ms"], key))
             if weights[key]["total_ms"]]
+    engine = target_engine(store, target)
     top: list[str] = []
     for chunk in range(0, len(keys), 50):
         if len(top) >= count:
@@ -575,7 +584,7 @@ def top_reads(store: MonitorStore, target: str, weights: dict[str, dict[str, Any
         for key in batch:
             if len(top) >= count:
                 break
-            if not automatic_skip_reason(texts.get(key) or ""):
+            if not automatic_skip_reason(texts.get(key) or "", engine):
                 top.append(key)
     if len(top) < count:
         # A small or idle database runs only a few queries; the spare places go to the
@@ -591,7 +600,7 @@ def top_reads(store: MonitorStore, target: str, weights: dict[str, dict[str, Any
                 (target, json.dumps(keys), 4 * count)):
             if len(top) >= count:
                 break
-            if not automatic_skip_reason(row["text"] or ""):
+            if not automatic_skip_reason(row["text"] or "", engine):
                 top.append(row["query_key"])
     return top
 
@@ -1424,7 +1433,7 @@ class AnalyzeQueue:
             sql = rows[0]["text"]
             agent_activity.describe(subject=display_name(sql))
             if job["reason"] != "user":
-                skip = automatic_skip_reason(sql)
+                skip = automatic_skip_reason(sql, target_engine(self.store, target))
                 if skip:
                     await asyncio.to_thread(self.store.finish_analysis, job["id"], "skipped",
                                             int(self.clock()), owner=job["owner"], attempt=job["attempt"],
@@ -1462,7 +1471,7 @@ class AnalyzeQueue:
             calls = weights.get("calls", 0)
             mean_ms = weights.get("total_ms", 0) / calls if calls else 0
             execute = job.get("mode") != "explain"
-            mode = analysis_mode(sql, mean_ms, execute)
+            mode = analysis_mode(sql, mean_ms, execute, str(target_config.get("engine") or ""))
             # Without real values only a plan estimate runs, even with consent to measure:
             # EXPLAIN ANALYZE never takes placeholders or made-up values.
             if (source in ("none", "estimated") and suggestions.get("placeholders")) or (
@@ -1471,8 +1480,9 @@ class AnalyzeQueue:
             if lookup is not None:
                 # A write's row search is only planned: its WHERE may call a function that writes.
                 mode = "explain"
-            if not validate_query_safety(sql).get("safe") and not (
-                mode == "explain" and is_plain_explainable_write(sql)
+            engine = str(target_config.get("engine") or "")
+            if not validate_query_safety(sql, engine).get("safe") and not (
+                mode == "explain" and is_plain_explainable_write(sql, engine)
             ):
                 raise ValueError("Query failed read-only safety validation")
             user_requested = job["reason"] == "user"

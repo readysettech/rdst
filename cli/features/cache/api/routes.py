@@ -279,10 +279,12 @@ async def start_cache_test_run(
 
 @compare_router.post("/compare-runs", response_model=CacheTestRunStartResponse)
 async def start_cache_compare_run(
+    http_request: Request,
     request: CacheCompareRunRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> CacheTestRunStartResponse:
     """Start an adjustable, equal-concurrency comparison in the same sandbox."""
+    require_local_request(http_request)
     from ..experiment_service import ReadysetExperimentService, parameter_fingerprint
 
     await _require_readyset_runtime()
@@ -319,9 +321,11 @@ async def start_cache_compare_run(
     "/compare-runs/{run_id}/load", response_model=CacheCompareLoadResponse
 )
 async def update_cache_compare_load(
+    http_request: Request,
     run_id: str, request: CacheCompareLoadRequest
 ) -> CacheCompareLoadResponse:
     """Adjust the in-flight clients for an active live comparison."""
+    require_local_request(http_request)
     _prune_compare_controllers()
     run = _run_registry.describe(run_id)
     controller = _compare_controllers.get(run_id)
@@ -450,12 +454,15 @@ def summarize_compare_run(run: dict, sandbox: Optional[dict]) -> CompareRunSumma
 
 
 @compare_router.get("/compare-runs", response_model=CompareRunPage)
-async def list_compare_runs(target: str, query_hash: Optional[str] = None) -> CompareRunPage:
+async def list_compare_runs(
+    http_request: Request, target: str, query_hash: Optional[str] = None
+) -> CompareRunPage:
     """In-flight and recent Compare and Benchmark runs for a target, newest first.
 
     Runs are process-local; each finished Compare also records its outcome on the query
     (`last_compare` on monitor rows), which survives restarts.
     """
+    require_local_request(http_request)
     from shared.deploy.sandbox_manager import sandbox_manager
 
     diagnostics, runtime = await asyncio.gather(

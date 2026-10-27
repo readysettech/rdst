@@ -385,9 +385,11 @@ def _update_result_to_response(result: SchemaUpdateResult) -> SchemaUpdateRespon
 
 @router.get("/semantic-layer/status")
 async def get_schema_status(
+    http_request: Request,
     guard: TargetGuard = Depends(require_target),
 ) -> SchemaStatusResponse:
     """Get semantic layer status for a target."""
+    require_local_request(http_request)
     service = SchemaService()
     status = service.get_status(guard.target_name)
     return _status_to_response(status)
@@ -395,10 +397,12 @@ async def get_schema_status(
 
 @router.get("/semantic-layer")
 async def get_schema(
+    http_request: Request,
     guard: TargetGuard = Depends(require_target),
     table: Optional[str] = Query(None, description="Specific table to load"),
 ) -> SchemaDetailsResponse:
     """Get full semantic layer details or a single table."""
+    require_local_request(http_request)
     service = SchemaService()
     details = service.get_schema(guard.target_name, table)
 
@@ -418,8 +422,9 @@ async def get_schema(
 
 
 @router.get("/semantic-layer/targets")
-async def list_schema_targets() -> SchemaTargetListResponse:
+async def list_schema_targets(http_request: Request) -> SchemaTargetListResponse:
     """List all targets with semantic layers."""
+    require_local_request(http_request)
     service = SchemaService()
     target_list = service.list_targets()
     return _target_list_to_response(target_list)
@@ -651,10 +656,12 @@ async def init_schema_stream(
 
 @router.get("/semantic-layer/export")
 async def export_schema(
+    http_request: Request,
     guard: TargetGuard = Depends(require_target),
     format: str = Query("yaml", description="Export format: yaml or json"),
 ) -> SchemaExportResponse:
     """Export semantic layer as YAML or JSON."""
+    require_local_request(http_request)
     service = SchemaService()
     result = service.export(guard.target_name, format)
     return _export_result_to_response(result)

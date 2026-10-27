@@ -52,7 +52,7 @@ def plan_period_literal(sql, dialect, schema):
         dialect != "mysql"
         or schema is None
         or "\\" in sql
-        or not check_read_only(sql)["is_read_only"]
+        or not check_read_only(sql, dialect)["is_read_only"]
     ):
         return None
     try:

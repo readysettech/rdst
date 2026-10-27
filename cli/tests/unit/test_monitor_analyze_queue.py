@@ -1060,6 +1060,9 @@ def test_noninteractive_path_does_not_open_tty(monkeypatch):
         def cursor(self):
             return Cursor()
 
+        def set_session(self, **kwargs):
+            pass
+
         def close(self):
             pass
 

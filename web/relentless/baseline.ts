@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /**
  * What a finding is checked against: main's latest Linux desktop package, and
@@ -19,6 +20,17 @@ import { join } from 'node:path'
 /** main's staging packages, published by every main build that packages them. */
 export const MAIN_CHANNEL =
   'https://downloads.readyset.io/packages/rdst-desktop-staging/linux/update'
+const INSPECT_FUSE_SCRIPT = fileURLToPath(
+  new URL('../../rdst-desktop/scripts/inspect-fuse.mjs', import.meta.url)
+)
+
+/** The driver needs --inspect, which a staging package ships fused off; this copy gets it back. */
+function enableInspect(executable: string) {
+  execFileSync(process.execPath, [INSPECT_FUSE_SCRIPT, executable], {
+    stdio: 'ignore',
+  })
+  return executable
+}
 
 export interface Finding {
   id: string
@@ -45,7 +57,10 @@ export async function fetchMainPackage(dir: string) {
   const home = join(dir, `main-${version}`)
   const done = join(home, 'executable')
   if (existsSync(done)) {
-    return { version, executable: readFileSync(done, 'utf8').trim() }
+    return {
+      version,
+      executable: enableInspect(readFileSync(done, 'utf8').trim()),
+    }
   }
   mkdirSync(home, { recursive: true })
   const image = await fetch(`${MAIN_CHANNEL}/${file}`)
@@ -70,7 +85,7 @@ export function unpack(image: string, dir: string, done: string) {
       (statSync(join(root, entry)).mode & 0o111) !== 0
   )
   if (!name) throw new Error(`no rdst-desktop executable in ${root}`)
-  const executable = join(root, name)
+  const executable = enableInspect(join(root, name))
   writeFileSync(done, executable)
   return executable
 }

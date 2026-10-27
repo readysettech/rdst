@@ -23,7 +23,7 @@ from pydantic import BaseModel, SecretStr
 
 from sse_starlette.sse import EventSourceResponse
 
-from shared.api.guards import require_local_request
+from shared.api.guards import is_loopback_host, is_loopback_request, require_local_request
 
 from ..service import ACCOUNT_PROVIDERS, ProvidersService
 
@@ -380,6 +380,33 @@ async def _poll_provider_login(provider: str, login_id: str):
         )
 
 
+def _loopback_origin(value: str) -> Optional[str]:
+    """``value``'s scheme, loopback host, and port as an origin, or None when not loopback."""
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    host = parsed.hostname or ""
+    if parsed.scheme not in ("http", "https") or not is_loopback_host(host):
+        return None
+    if ":" in host:
+        host = f"[{host}]"
+    return f"{parsed.scheme}://{host}" + (f":{port}" if port else "")
+
+
+def _local_origin(request: Request) -> str:
+    """This server's loopback origin as the browser reaches it."""
+    for candidate in (request.headers.get("origin", ""), str(request.base_url)):
+        origin = _loopback_origin(candidate)
+        if origin:
+            return origin
+
+    # ASGI test clients and unusual local proxies may use a synthetic Host.
+    # The broker still independently validates this destination at /start.
+    return "http://localhost"
+
+
 def _provider_return_url(request: Request, provider: str) -> str:
     """Return to this web app, or to the desktop deep-link when sidecar-hosted."""
     if os.environ.get("RDST_DESKTOP") == "1":
@@ -387,22 +414,92 @@ def _provider_return_url(request: Request, provider: str) -> str:
         if not _DESKTOP_PROTOCOL_RE.fullmatch(scheme):
             scheme = "rdst"
         return f"{scheme}://oauth-complete?provider={quote(provider)}"
+    return f"{_local_origin(request)}/configure?connected={quote(provider)}"
 
-    candidates = [request.headers.get("origin", ""), str(request.base_url)]
-    for candidate in candidates:
-        try:
-            parsed = urlsplit(candidate)
-            if (
-                parsed.scheme in ("http", "https")
-                and parsed.hostname in ("localhost", "127.0.0.1")
-            ):
-                return f"{parsed.scheme}://{parsed.netloc}/configure?connected={quote(provider)}"
-        except ValueError:
-            continue
 
-    # ASGI test clients and unusual local proxies may use a synthetic Host.
-    # The broker still independently validates this destination at /start.
-    return f"http://localhost/configure?connected={quote(provider)}"
+def _remote_browser_refusal(request: Request, provider: str) -> Optional[JSONResponse]:
+    """Refuse a broker sign-in started from a browser on another machine.
+
+    The broker returns the browser to this server's loopback address, which a browser
+    elsewhere cannot reach, so the login would wait until it expired.
+    """
+    origin = request.headers.get("origin", "")
+    # The browser's own Origin says where it runs. A Docker port mapping or local proxy
+    # makes the TCP peer non-loopback even when the browser is on this machine.
+    if origin:
+        local = _loopback_origin(origin) is not None
+    else:
+        local = is_loopback_request(request)
+    if local:
+        return None
+    label = OAUTH_PROVIDERS[provider][1]
+    return JSONResponse(
+        status_code=409,
+        content={
+            "code": f"{provider}_oauth_remote_browser",
+            "detail": (
+                f"Connect {label} from a browser on the machine running RDST. "
+                "The sign-in finishes at that machine's own address, which this "
+                "browser cannot reach."
+            ),
+        },
+    )
+
+
+def _provider_completion_url(request: Request, provider: str) -> str:
+    """Where the broker sends the browser once the provider approves: this server's
+    oauth-return route, which takes the completion the broker withholds tokens for."""
+    return f"{_local_origin(request)}/api/providers/oauth-return?provider={quote(provider)}"
+
+
+@router.get("/oauth-return", response_class=HTMLResponse)
+async def provider_oauth_return(
+    request: Request, provider: str = "", login_id: str = "", completion: str = ""
+):
+    """Land a provider sign-in whose browser came back from the broker, then hand the
+    browser back to RDST: a popup closes, a browser tab follows the usual return URL.
+
+    The broker's page navigates here cross-site, so this answers without the
+    Origin/Referer guard, like the other browser callbacks. It changes nothing unless
+    the broker accepts the one-time completion for a login this server started.
+    """
+    if provider not in OAUTH_PROVIDERS:
+        raise HTTPException(status_code=404, detail="Unknown provider")
+    label = OAUTH_PROVIDERS[provider][1]
+    outcome = await asyncio.to_thread(
+        _oauth_module(provider).complete_login, login_id, completion
+    )
+    status_code = 200
+    if outcome is None:
+        status_code = 400
+        title, detail = f"{label} sign-in not found", "Start the sign-in again from RDST."
+    elif outcome.get("rejected"):
+        status_code = 403
+        title, detail = f"{label} sign-in not confirmed", "Start the sign-in again from RDST."
+    elif outcome.get("state") == "success":
+        title, detail = f"Connected to {label}", str(outcome.get("detail") or "")
+    else:
+        title, detail = f"{label} sign-in failed", str(outcome.get("detail") or "")
+    destination = (
+        json.dumps(_provider_return_url(request, provider))
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+    page = (
+        f"<html><head><title>RDST and {escape(label)}</title></head>"
+        "<body style=\"font-family: system-ui, sans-serif; padding: 40px;\">"
+        f"<h2>{escape(title)}</h2><p>{escape(detail)}</p>"
+        "<p>You can close this tab and return to RDST.</p>"
+        "<script>window.close();"
+        f"window.setTimeout(function(){{window.location.replace({destination});}},300);"
+        "</script></body></html>"
+    )
+    return HTMLResponse(
+        page,
+        status_code=status_code,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
 
 
 @router.get("/supabase-status")
@@ -419,12 +516,18 @@ async def get_fleet_supabase_status(http_request: Request) -> dict[str, Any]:
 async def start_fleet_supabase_login(request: Request):
     """Start a Supabase OAuth sign-in and hand the browser the authorize URL."""
     require_local_request(request)
+    from ..supabase_oauth import dev_client_config
+
+    # The direct developer exchange returns to request.base_url itself.
+    refusal = None if dev_client_config() else _remote_browser_refusal(request, "supabase")
+    if refusal:
+        return refusal
 
     # The redirect URI must match the port this server is actually serving on.
     return await _start_provider_login(
         "supabase",
         str(request.base_url),
-        _provider_return_url(request, "supabase"),
+        _provider_completion_url(request, "supabase"),
     )
 
 
@@ -553,9 +656,12 @@ async def get_fleet_digitalocean_status(http_request: Request) -> dict[str, Any]
 async def start_fleet_digitalocean_login(request: Request):
     """Start a DigitalOcean OAuth sign-in and hand the browser the authorize URL."""
     require_local_request(request)
+    refusal = _remote_browser_refusal(request, "digitalocean")
+    if refusal:
+        return refusal
 
     return await _start_provider_login(
-        "digitalocean", _provider_return_url(request, "digitalocean")
+        "digitalocean", _provider_completion_url(request, "digitalocean")
     )
 
 

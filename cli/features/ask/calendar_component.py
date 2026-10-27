@@ -36,7 +36,7 @@ def _plan_prefix_component(
     if (
         dialect not in {"mysql", "postgres", "postgresql"}
         or schema_info is None
-        or not check_read_only(sql)["is_read_only"]
+        or not check_read_only(sql, dialect)["is_read_only"]
     ):
         return None
     d = "postgres" if dialect in {"postgres", "postgresql"} else "mysql"

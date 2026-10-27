@@ -62,7 +62,9 @@ import {
   AdvancedFields,
   advancedConnection,
   advancedFrom,
+  movesPassword,
   nameError,
+  PASSWORD_FOR_NEW_ADDRESS,
 } from './ConfigureForm'
 import { defaultPortFor, parseConnectionUrl } from './connectionUrl'
 import { Field } from './Field'
@@ -182,6 +184,8 @@ type Check =
       capture: QueryCapture | null
       /** The server said its query statistics are readable. */
       statsReadable?: boolean
+      /** Why the connection doesn't check whose server it reached. */
+      tlsWarning?: string
     }
   | { connected: false; message: string }
 
@@ -336,6 +340,12 @@ function ConnectionForm({
     read_only: editing?.read_only,
   }
   const urlUnreadable = Boolean(url.trim()) && !connection
+  const passwordNeeded = Boolean(
+    editing?.has_password &&
+      connection &&
+      !connection.password &&
+      movesPassword(editing, connection)
+  )
   const defaultName = editing
     ? editing.name
     : newDatabaseName(fields.database || fields.host, taken)
@@ -349,7 +359,9 @@ function ConnectionForm({
               ? 'Fill in the host, database and user.'
               : MISSING_FIELDS
             : INVALID_PORT
-          : nameError(name, taken))) ||
+          : passwordNeeded
+            ? PASSWORD_FOR_NEW_ADDRESS
+            : nameError(name, taken))) ||
     (check && !check.connected ? check.message : null)
   const capture = check?.connected ? check.capture : null
 
@@ -423,7 +435,7 @@ function ConnectionForm({
   const ready = (): ConfigureFormData | null => {
     setAttempted(true)
     const badName = Boolean(nameError(name, taken))
-    if (!connection || badName) {
+    if (!connection || badName || passwordNeeded) {
       if (!editing)
         for (const [field, error_class] of fieldErrors(url, fields, badName))
           trackEvent('database_add_field_error', { field, error_class })
@@ -448,6 +460,7 @@ function ConnectionForm({
               ? result.queryCapture
               : null,
           statsReadable: result.queryCapture?.available === true,
+          tlsWarning: result.tlsWarning,
         }
       : {
           connected: false,
@@ -615,6 +628,14 @@ function ConnectionForm({
                 {check.statsReadable && ' Query statistics are readable.'}
               </Text>
             )}
+            {check?.connected && !problem && check.tlsWarning && (
+              <Alert
+                variant="warning"
+                modifier="ghost"
+                icon="alert"
+                label={check.tlsWarning}
+              />
+            )}
             {capture && (
               <CaptureNotice capture={capture} editing={Boolean(editing)} />
             )}
@@ -699,7 +720,11 @@ function ConnectionForm({
             value={fields.password}
             onChange={set('password')}
             placeholder={
-              editing?.has_password ? 'Leave blank to keep it' : undefined
+              passwordNeeded
+                ? 'Enter it again for the new address'
+                : editing?.has_password
+                  ? 'Leave blank to keep it'
+                  : undefined
             }
             helper={
               editing

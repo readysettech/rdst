@@ -14,6 +14,14 @@ from shared.config.targets import TargetsConfig
 from shared.ui import DataTable, get_console
 
 
+def _server_token(port: int) -> str | None:
+    """The API token of the running server on ``port``, when it published one."""
+    from features.agent_connect.discovery import read_discovery
+
+    info = read_discovery() or {}
+    return info.get("token") if info.get("port") == port else None
+
+
 NO_WEB_SERVER_MESSAGE = (
     "CLI tunnels only exist during each command; run `rdst web` to hold "
     "long-lived tunnels."
@@ -119,10 +127,14 @@ class TunnelCommand:
                 port = 8787
         url = f"http://127.0.0.1:{port}/api/tunnel/{path}"
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
+        headers = {"Content-Type": "application/json"} if body else {}
+        token = _server_token(port)
+        if token:
+            headers["X-RDST-Token"] = token
         request = Request(
             url,
             data=body,
-            headers={"Content-Type": "application/json"} if body else {},
+            headers=headers,
             method="POST" if body else "GET",
         )
         try:

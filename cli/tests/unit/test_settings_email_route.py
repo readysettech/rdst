@@ -361,6 +361,53 @@ class TestSignupFlow:
         assert response.status_code == 502
         assert "temporarily unavailable" in response.json()["detail"]
 
+    def _signed_up(self, client):
+        client.post(
+            "/api/settings/email",
+            json={"email": "ada@example.com", "first_name": "Ada", "last_name": "L"},
+        )
+
+    def test_verify_poll_checks_off_the_event_loop(self, client, monkeypatch):
+        import asyncio
+
+        self._signed_up(client)
+        loops = []
+
+        def check_status(service, email):
+            # Called on the loop's own thread, a running loop would be found here.
+            try:
+                loops.append(asyncio.get_running_loop())
+            except RuntimeError:
+                loops.append(None)
+            return {"verified": False}
+
+        monkeypatch.setattr(_StubEmailService, "check_status", check_status)
+        client.post("/api/settings/email/verify-poll")
+
+        assert loops == [None]
+
+    def test_verify_poll_reads_a_timed_out_check_as_pending(self, client):
+        self._signed_up(client)
+        _StubEmailService.status_result = {"verified": False, "pending": True}
+
+        response = client.post("/api/settings/email/verify-poll")
+
+        assert response.status_code == 200
+        assert response.json() == {"verified": False}
+
+    def test_verify_poll_reports_a_release_without_storing_a_credential(
+        self, client, config_path
+    ):
+        self._signed_up(client)
+        _StubEmailService.status_result = {
+            "verified": True, "report_token": None, "report_released": True,
+        }
+
+        assert client.post("/api/settings/email/verify-poll").json() == {"verified": True}
+        cfg = TargetsConfig(path=str(config_path))
+        cfg.load()
+        assert cfg.get_token_for_email("ada@example.com") is None
+
     def test_names_are_per_machine_across_email_swaps(self, client, config_path):
         client.post(
             "/api/settings/email",

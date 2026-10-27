@@ -3,6 +3,8 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import type { CustomScheme } from 'electron'
 
+import { TOKEN_HEADER } from './backend.js'
+
 // The renderer is served from this origin. It stays the same across launches, so the
 // renderer's localStorage and per-origin zoom last; each flavor has its own Electron
 // profile, so flavors keep separate storage under the same origin.
@@ -24,6 +26,24 @@ export const APP_SCHEME_PRIVILEGES: CustomScheme = {
 
 /** Marks the proxy's own answers when the backend can't be reached. */
 export const UNREACHABLE_HEADER = 'x-rdst-backend'
+
+// The renderer's own pages: scripts only from the bundle and PostHog's analytics assets, network
+// calls only to the app origin (the backend proxy), Readyset account sign-in (a Supabase
+// project), and PostHog. CodeMirror and React set inline styles.
+export const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' https://us-assets.i.posthog.com",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "media-src 'self' blob:",
+  "connect-src 'self' https://*.supabase.co https://us.i.posthog.com https://us-assets.i.posthog.com",
+  "worker-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join('; ')
 
 const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
@@ -84,6 +104,14 @@ export function isRendererUrl(url: string, devRendererUrl?: string): boolean {
   return Boolean(
     parsed && dev && parsed.origin !== 'null' && parsed.origin === dev.origin
   )
+}
+
+const EXTERNAL_PROTOCOLS = new Set(['https:', 'http:', 'mailto:'])
+
+/** True for a link the system browser or mail client may open on a page's behalf. */
+export function isSafeExternalUrl(url: string): boolean {
+  const parsed = parseUrl(url)
+  return Boolean(parsed && EXTERNAL_PROTOCOLS.has(parsed.protocol))
 }
 
 function text(
@@ -160,6 +188,8 @@ function serveStatic(
     'x-content-type-options': 'nosniff',
     'accept-ranges': 'bytes',
   }
+  if (path.extname(filePath) === '.html')
+    headers['content-security-policy'] = CONTENT_SECURITY_POLICY
   if (rangeHeader) {
     const range = parseByteRange(rangeHeader, size)
     if (!range)
@@ -260,6 +290,8 @@ async function proxyApi(
   const target = new URL(url.pathname + url.search, apiBaseUrl)
   const headers = new Headers(request.headers)
   for (const name of DROPPED_REQUEST_HEADERS) headers.delete(name)
+  headers.delete(TOKEN_HEADER)
+  if (options.apiToken) headers.set(TOKEN_HEADER, options.apiToken)
   const method = request.method.toUpperCase()
   let body: string | ArrayBuffer | undefined
   if (method !== 'GET' && method !== 'HEAD') {
@@ -314,6 +346,8 @@ export interface AppRequestHandlerOptions {
   smokeAuth?: boolean
   /** Told the path of each request that changed something in the backend and succeeded. */
   onWrite?: (pathname: string) => void
+  /** Sent to the backend with every proxied request (its RDST_API_TOKEN). */
+  apiToken?: string
   fetch?: typeof fetch
 }
 

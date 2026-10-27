@@ -328,3 +328,212 @@ class TestAgentResponse:
         assert "columns" not in result
         assert "rows" not in result
         assert "error" not in result
+
+
+class TestReadOnlyCoversTheWholeStatement:
+    """A write or side effect anywhere in the tree, or behind quoting, is refused."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x",
+            "SELECT * INTO newt FROM t",
+            "SELECT * FROM t FOR UPDATE",
+            "SELECT nextval('s')",
+            "SELECT set_config('statement_timeout', '0', false)",
+            "SELECT pg_terminate_backend(1)",
+            "SELECT dblink_exec('host=x', 'DROP TABLE t')",
+            "SELECT lo_unlink(1)",
+            "SELECT pg_sleep(100000)",
+            'SELECT pg_catalog."pg_read_file"(\'/etc/passwd\')',
+            "SELECT pg_catalog.\"setval\"('public.order_id_seq', 1, true)",
+            "SELECT 1; DELETE FROM t",
+            r"SELECT E'\''; DELETE FROM users; COMMIT; SELECT '1'",
+        ],
+    )
+    def test_refused_on_postgresql(self, sql):
+        ok, msg = validate_read_only(sql, "postgresql")
+
+        assert ok is False
+        assert msg
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT SLEEP(10)",
+            "SELECT BENCHMARK(1000000, MD5('x'))",
+            "SELECT GET_LOCK('x', 10)",
+            "SELECT LOAD_FILE('/etc/passwd')",
+            "SELECT * FROM t INTO OUTFILE '/tmp/x'",
+        ],
+    )
+    def test_refused_on_mysql(self, sql):
+        assert validate_read_only(sql, "mysql")[0] is False
+
+    @pytest.mark.parametrize(
+        "sql, dialect",
+        [
+            ("WITH r AS (SELECT * FROM orders) SELECT customer_id, count(*) FROM r GROUP BY 1",
+             "postgresql"),
+            ("SELECT id, rank() OVER (PARTITION BY region ORDER BY total DESC) FROM orders",
+             "postgresql"),
+            ("SELECT * FROM orders WHERE note = E'a;b' AND body = $$x; y$$", "postgresql"),
+            ('SELECT "Order"."Id" FROM "Order" -- comment', "postgresql"),
+            ("SELECT `order`.id FROM `order` WHERE name = 'O\\'Brien'", "mysql"),
+        ],
+    )
+    def test_legitimate_reads_pass(self, sql, dialect):
+        assert validate_read_only(sql, dialect) == (True, "")
+
+
+TABLES = {"customers": ["id", "name", "ssn"], "orders": ["id", "customer_id", "total"]}
+
+
+class TestRestrictionsResolveWhatIsRead:
+    """Restrictions compare the columns and tables the database reads, not spellings."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * FROM customers",
+            "SELECT c.ssn AS value FROM customers c",
+            "SELECT c.* FROM customers c",
+            "SELECT row_to_json(c) FROM customers c",
+            "SELECT to_json(c) FROM customers c",
+            "SELECT row_to_json(c.*) FROM customers c",
+            "SELECT c::text FROM customers c",
+            "SELECT ROW(c.*) FROM customers c",
+            "SELECT json_agg(c) FROM customers c",
+            "SELECT hstore(c) FROM customers c",
+            "SELECT customers FROM customers",
+            "SELECT row_to_json(public.customers) FROM public.customers",
+            "SELECT to_jsonb(customers.*) FROM customers",
+            "SELECT format('%s', C) FROM customers c",
+            "SELECT row_to_json(s) FROM (SELECT * FROM customers) s",
+            "SELECT o.id FROM orders o WHERE EXISTS "
+            "(SELECT 1 FROM customers c WHERE c::text LIKE '%1%')",
+            "SELECT name FROM customers WHERE ssn LIKE '1%'",
+            "SELECT (SELECT max(ssn) FROM customers) AS m",
+            "WITH x AS (SELECT * FROM customers) SELECT ssn FROM x",
+            "SELECT ssn FROM secret.customers",
+        ],
+    )
+    @pytest.mark.parametrize("tables", [TABLES, None])
+    def test_denied_column_is_refused_however_it_is_reached(self, sql, tables):
+        ok, msg = validate_columns(
+            sql, ["customers.ssn"], dialect="postgresql", tables=tables,
+            default_schema="public",
+        )
+
+        assert ok is False
+        assert msg
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * FROM orders",
+            "SELECT o.total, c.name FROM orders o JOIN customers c ON c.id = o.customer_id",
+            "WITH x AS (SELECT * FROM customers) SELECT name FROM x",
+            "SELECT name FROM (SELECT * FROM customers) s",
+            "SELECT count(*) FROM customers",
+            "SELECT name FROM customers c WHERE EXISTS "
+            "(SELECT 1 FROM orders o WHERE o.customer_id = c.id)",
+        ],
+    )
+    def test_queries_that_never_read_the_column_pass_with_the_schema(self, sql):
+        assert validate_columns(
+            sql, ["customers.ssn"], dialect="postgresql", tables=TABLES,
+            default_schema="public",
+        ) == (True, "")
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT row_to_json(o) FROM orders o",
+            "SELECT row_to_json(s) FROM (SELECT name FROM customers) s",
+            "SELECT status FROM status",
+            "SELECT C.name FROM customers c",
+        ],
+    )
+    def test_row_values_without_the_column_pass(self, sql):
+        tables = {**TABLES, "status": ["id", "status"]}
+        assert validate_columns(
+            sql, ["customers.ssn"], dialect="postgresql", tables=tables, default_schema="public"
+        ) == (True, "")
+
+    def test_mysql_names_a_column_never_a_row(self):
+        tables = {**TABLES, "status": ["id", "status"]}
+        for sql, refused in [("SELECT status FROM status", False),
+                             ("SELECT `c`.`name` FROM customers c", False),
+                             ("SELECT c.ssn FROM customers c", True),
+                             ("SELECT * FROM customers", True)]:
+            ok, _ = validate_columns(sql, ["customers.ssn"], dialect="mysql", tables=tables,
+                                     default_schema="app")
+            assert ok is not refused, sql
+
+    def test_star_without_the_schema_is_refused_with_a_reason(self):
+        ok, msg = validate_columns("SELECT * FROM orders", ["customers.ssn"], dialect="postgresql")
+
+        assert ok is False
+        assert "list the columns" in msg
+
+    def test_unparseable_sql_fails_closed(self):
+        ok, msg = validate_columns("SELECT FROM WHERE (((", ["ssn"], dialect="postgresql")
+        assert ok is False
+        ok, msg = validate_tables("SELECT FROM WHERE (((", ["users"], dialect="postgresql")
+        assert ok is False
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * FROM customers WHERE id IN (SELECT id FROM admin)",
+            "SELECT * FROM pg_catalog.pg_user",
+            "SELECT * FROM generate_series(1, 3)",
+        ],
+    )
+    def test_table_outside_the_allowlist_is_refused(self, sql):
+        ok, _ = validate_tables(sql, ["customers"], dialect="postgresql", default_schema="public")
+
+        assert ok is False
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT ssn FROM secret.customers",
+            "SELECT * FROM customers c JOIN secret.customers s ON s.id = c.id",
+        ],
+    )
+    def test_a_bare_entry_allows_the_table_in_any_schema(self, sql):
+        """Only a schema-qualified entry pins the schema."""
+        assert validate_tables(
+            sql, ["customers"], dialect="postgresql", default_schema="public"
+        ) == (True, "")
+        ok, _ = validate_tables(
+            sql, ["public.customers"], dialect="postgresql", default_schema="public")
+        assert ok is False
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * FROM customers",
+            "SELECT * FROM public.customers",
+            "WITH orders AS (SELECT id FROM customers) SELECT * FROM orders",
+            "SELECT c.name FROM customers c WHERE EXISTS (SELECT 1 FROM customers c2)",
+        ],
+    )
+    def test_allowed_table_passes_by_any_spelling(self, sql):
+        assert validate_tables(
+            sql, ["customers"], dialect="postgresql", default_schema="public"
+        ) == (True, "")
+
+    def test_schema_qualified_allowlist_entry(self):
+        assert validate_tables("SELECT * FROM secret.customers", ["secret.customers"],
+                               dialect="postgresql", default_schema="public")[0] is True
+        assert validate_tables("SELECT * FROM customers", ["secret.customers"],
+                               dialect="postgresql", default_schema="public")[0] is False
+        assert validate_tables("SELECT * FROM public.customers", ["public.customers"],
+                               dialect="postgresql", default_schema="public")[0] is True
+        # Without the target the default schema is unknown, so this cannot be verified.
+        ok, msg = validate_tables("SELECT * FROM customers", ["public.customers"],
+                                  dialect="postgresql")
+        assert ok is False and "could not be checked" in msg

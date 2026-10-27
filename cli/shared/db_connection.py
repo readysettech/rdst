@@ -15,9 +15,10 @@ import os
 import select
 import socket
 import sqlite3
+import sys
 import threading
 import time
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 from typing import Dict, Any, Callable, Iterable, List, Literal, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,55 @@ DEFAULT_LANE = "rdst/unknown"
 # Bounds a PostgreSQL cancel: libpq's protocol cancel request, or each step of the side
 # connection that carries a pg_cancel_backend.
 POSTGRES_CANCEL_SECONDS = 3
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+_tls_warned: set = set()
+
+
+def _warns_on_stderr() -> bool:
+    """A person reads stderr: a terminal, outside JSON output and the MCP server."""
+    try:
+        if not sys.stderr.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    args = sys.argv[1:]
+    return not ('--json' in args or '_mcp_server' in args
+                or any(arg in ('--output=json', '--format=json') for arg in args)
+                or any(a in ('--output', '--format') and b == 'json'
+                       for a, b in zip(args, args[1:])))
+
+
+def unverified_tls_message(target_config: Dict[str, Any], *, labels: bool = False,
+                           name: Optional[str] = None) -> Optional[str]:
+    """Why the target's connection doesn't check whose server it reaches, and how to fix it.
+
+    None when it verifies TLS, connects to this machine, or goes through an SSH tunnel.
+    ``labels`` names the app's connection settings instead of config.toml keys.
+    """
+    host = str(target_config.get('host') or '').strip().casefold()
+    if (not host or host in _LOOPBACK_HOSTS or host.startswith('127.')
+            or target_config.get('ssh') or target_config.get('tls_verify')):
+        return None
+    name = name or target_config.get('name') or host
+    verify = ('turn on "Verify TLS certificate" (with a TLS CA path for a private CA)' if labels
+              else 'set tls_verify = true for this target (and tls_ca for a private CA)')
+    if not target_config.get('tls'):
+        return (f"RDST connects to {name} without requiring TLS, so the connection can be "
+                f"unencrypted and the server isn't checked. To encrypt it and check the "
+                f"server, {verify}.")
+    return (f"RDST connects to {name} over TLS without checking the server's certificate. "
+            f"To check it, {verify}.")
+
+
+def _warn_unverified_tls(target_config: Dict[str, Any], name: Optional[str]) -> None:
+    """Once per target and process, in a terminal."""
+    message = unverified_tls_message(target_config, name=name)
+    key = name or target_config.get('name') or target_config.get('host')
+    if message is None or key in _tls_warned or not _warns_on_stderr():
+        return
+    _tls_warned.add(key)
+    print(f"Warning: {message}", file=sys.stderr)
 
 
 def resolve_application_name(
@@ -187,6 +237,7 @@ def resolve_connection_params(
 
     # Determine SSL mode for PostgreSQL
     sslmode = 'verify-full' if tls_verify else ('require' if tls else 'prefer')
+    _warn_unverified_tls(target_config, target)
 
     application_name = resolve_application_name(
         target_config.get('application_name'), lane
@@ -244,9 +295,14 @@ def create_direct_connection(
     force_fresh_tunnel: bool = False,
     lane: Optional[str] = None,
     query_timeout_seconds: float | None = None,
+    read_only: bool = False,
 ):
     """
     Create a direct database connection from target configuration.
+
+    ``read_only`` runs every statement in a read-only transaction, for callers that run
+    SQL they did not write; a Readyset target gets a read-only session instead. A target
+    marked read_only gets a read-only session (``apply_read_only_session``).
 
     Args:
         target_config: Target configuration dict with keys:
@@ -280,6 +336,9 @@ def create_direct_connection(
     use_tls = params['tls']
     tls_verify = params['tls_verify']
     tls_ca = params['tls_ca']
+    # Readyset sends statements inside a transaction upstream instead of serving them
+    # from its caches, so it holds the setting in its session.
+    read_only_transactions = read_only and target_config.get('target_type') != 'readyset'
 
     # Validate required fields
     if not all([engine, host, port, user, database]):
@@ -300,6 +359,7 @@ def create_direct_connection(
                 hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
                 application_name=params['application_name'],
                 query_timeout_seconds=query_timeout_seconds,
+                read_only=read_only_transactions,
             )
         elif engine == 'mysql':
             query_timeouts = (
@@ -315,6 +375,7 @@ def create_direct_connection(
                 tls_verify=tls_verify, tls_ca=tls_ca,
                 hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
                 program_name=params['application_name'],
+                read_only=read_only_transactions,
                 **query_timeouts,
             )
         else:
@@ -327,7 +388,7 @@ def create_direct_connection(
             get_tunnel_manager().raise_if_failed(tunnel_target)
         raise
 
-    if params.get('read_only'):
+    if params.get('read_only') or (read_only and not read_only_transactions):
         apply_read_only_session(conn, engine)
     if lane == 'rdst/audit':
         apply_diagnostic_statement_timeout(conn, engine)
@@ -449,7 +510,11 @@ def apply_read_only_session(connection, engine: str) -> None:
     This is the only control here the database itself enforces; everything
     else inspects SQL as text and can be argued with. A target the user has
     declared read-only should refuse writes even if something upstream builds
-    a statement nobody intended.
+    a statement nobody intended. It is set once per connection, so statements
+    cost no extra round trips; paths that run SQL they did not write use
+    read-only transactions instead (``read_only_transaction`` and the
+    connections ``read_only=True`` creates), which leave nothing in a session
+    a transaction-mode pooler could hand to another client.
     """
     if engine == 'postgresql':
         # Native psycopg2 API; must run before any transaction is open, which
@@ -458,6 +523,163 @@ def apply_read_only_session(connection, engine: str) -> None:
     elif engine == 'mysql':
         with connection.cursor() as cursor:
             cursor.execute("SET SESSION TRANSACTION READ ONLY")
+
+
+@contextmanager
+def read_only_transaction(connection, engine: str):
+    """Run the enclosed statements in one read-only transaction, then commit it.
+
+    Opens the transaction explicitly (PostgreSQL ``BEGIN READ ONLY`` on an
+    autocommit connection, MySQL ``START TRANSACTION READ ONLY``) and sets nothing
+    on the session, so nothing outlives it on a pooled server connection. Rolls
+    back if the enclosed code raises. The statements that open and end the
+    transaction run before and after the block, outside anything it times.
+    """
+    if engine == 'mysql':
+        connection.query("START TRANSACTION READ ONLY")
+        finish = connection.commit
+        abort = connection.rollback
+    else:
+        if not connection.autocommit:
+            raise ValueError("read_only_transaction needs an autocommit PostgreSQL connection")
+        from psycopg2 import extensions
+
+        # A read-only connection's own cursors would wrap these statements in another
+        # transaction, so they go through a plain cursor.
+        control = (extensions.cursor(connection)
+                   if isinstance(connection, extensions.connection) else connection.cursor())
+        control.execute("BEGIN READ ONLY")
+        finish = functools.partial(control.execute, "COMMIT")
+        abort = functools.partial(control.execute, "ROLLBACK")
+    try:
+        yield
+    except BaseException:
+        try:
+            abort()
+        except Exception as exc:
+            logger.debug("Could not roll back a read-only transaction: %s", exc)
+        raise
+    finish()
+
+
+def _pg_read_only_statement(cursor, run: Callable[[], Any]) -> Any:
+    from psycopg2 import extensions
+
+    conn = cursor.connection
+    if not conn.autocommit:
+        # psycopg2 then opens each transaction with BEGIN READ ONLY; outside autocommit
+        # the flag stays in the client.
+        if conn.status == extensions.STATUS_READY:
+            if not conn.readonly:
+                conn.set_session(readonly=True)
+        elif not conn.readonly:
+            raise RuntimeError("A read-write transaction is open on a read-only connection")
+        return run()
+    if conn.info.transaction_status != extensions.TRANSACTION_STATUS_IDLE:
+        # Inside a transaction read_only_transaction opened.
+        return run()
+    with read_only_transaction(conn, 'postgresql'):
+        return run()
+
+
+_PG_READ_ONLY_CURSORS: Dict[type, type] = {}
+
+
+def _pg_read_only_cursor(base: type) -> type:
+    cls = _PG_READ_ONLY_CURSORS.get(base)
+    if cls is None:
+        def wrap(name: str) -> Callable[..., Any]:
+            method = getattr(base, name)
+            return lambda self, *args, **kwargs: _pg_read_only_statement(
+                self, lambda: method(self, *args, **kwargs))
+
+        cls = type(f"ReadOnly{base.__name__}", (base,), {
+            name: wrap(name) for name in (
+                "execute", "executemany", "callproc", "copy_expert", "copy_from", "copy_to")
+        })
+        _PG_READ_ONLY_CURSORS[base] = cls
+    return cls
+
+
+@functools.lru_cache(maxsize=1)
+def read_only_postgres_connection_class() -> type:
+    """psycopg2 connection class whose every statement runs in a read-only transaction.
+
+    In autocommit each statement gets its own ``BEGIN READ ONLY ... COMMIT``; otherwise
+    psycopg2 opens each transaction read-only. Nothing is set on the server session.
+    """
+    from psycopg2 import extensions
+    from shared.agent_activity import pg_connection_class
+
+    base = pg_connection_class() or extensions.connection
+
+    class ReadOnlyConnection(base):  # type: ignore[misc, valid-type]
+        def cursor(self, *args, **kwargs):
+            factory = kwargs.pop("cursor_factory", None)
+            if len(args) > 1:
+                factory = args[1]
+                args = args[:1] + args[2:]
+            chosen = factory or self.cursor_factory or extensions.cursor
+            return super().cursor(*args, cursor_factory=_pg_read_only_cursor(chosen), **kwargs)
+
+    return ReadOnlyConnection
+
+
+def _mysql_read_only_statement(cursor, run: Callable[[], Any]) -> Any:
+    from pymysql.constants import SERVER_STATUS
+
+    conn = cursor.connection
+    if conn.server_status & SERVER_STATUS.SERVER_STATUS_IN_TRANS:
+        # Inside a transaction this connection opened read-only.
+        return run()
+    if not conn.get_autocommit():
+        conn.query("START TRANSACTION READ ONLY")
+        return run()
+    with read_only_transaction(conn, 'mysql'):
+        return run()
+
+
+_MYSQL_READ_ONLY_CURSORS: Dict[type, type] = {}
+
+
+def _mysql_read_only_cursor(base: type) -> type:
+    import pymysql.cursors
+
+    if issubclass(base, pymysql.cursors.SSCursor):
+        # The transaction would have to stay open until the rows are read.
+        raise TypeError("Unbuffered cursors are not supported on read-only connections")
+    cls = _MYSQL_READ_ONLY_CURSORS.get(base)
+    if cls is None:
+        def wrap(name: str) -> Callable[..., Any]:
+            method = getattr(base, name)
+            return lambda self, *args, **kwargs: _mysql_read_only_statement(
+                self, lambda: method(self, *args, **kwargs))
+
+        cls = type(f"ReadOnly{base.__name__}", (base,), {
+            name: wrap(name) for name in ("execute", "executemany", "callproc")
+        })
+        _MYSQL_READ_ONLY_CURSORS[base] = cls
+    return cls
+
+
+@functools.lru_cache(maxsize=1)
+def read_only_mysql_connection_class() -> type:
+    """PyMySQL connection class whose every statement runs in a read-only transaction.
+
+    In autocommit each statement gets its own ``START TRANSACTION READ ONLY ...
+    COMMIT``; otherwise each transaction opens read-only. Nothing is set on the
+    server session.
+    """
+    import pymysql.connections
+
+    class ReadOnlyConnection(pymysql.connections.Connection):
+        def cursor(self, cursor=None):
+            return super().cursor(_mysql_read_only_cursor(cursor or self.cursorclass))
+
+        def begin(self):
+            self.query("START TRANSACTION READ ONLY")
+
+    return ReadOnlyConnection
 
 
 def postgres_ssl_kwargs(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -492,9 +714,13 @@ def postgres_connection_kwargs(
     params: Dict[str, Any],
     *,
     connect_timeout: int = 10,
+    read_only: bool = False,
     **overrides: Any,
 ) -> Dict[str, Any]:
-    """Build complete psycopg2 kwargs from resolved connection parameters."""
+    """Build complete psycopg2 kwargs from resolved connection parameters.
+
+    ``read_only`` connects with ``read_only_postgres_connection_class``.
+    """
     result = {
         'host': params['host'],
         'port': params['port'],
@@ -508,16 +734,21 @@ def postgres_connection_kwargs(
     result.update(overrides)
     from shared.agent_activity import pg_connection_kwargs
 
-    return pg_connection_kwargs(result)
+    return pg_connection_kwargs(
+        result, read_only_postgres_connection_class() if read_only else None)
 
 
 def create_mysql_connection_from_params(
     params: Dict[str, Any],
     *,
     connect_timeout: int = 10,
+    read_only: bool = False,
     **overrides: Any,
 ):
-    """Connect with PyMySQL, separating a tunnel socket from the TLS identity."""
+    """Connect with PyMySQL, separating a tunnel socket from the TLS identity.
+
+    ``read_only`` connects with ``read_only_mysql_connection_class``.
+    """
     overrides.setdefault(
         'program_name', params.get('application_name') or DEFAULT_LANE
     )
@@ -533,6 +764,7 @@ def create_mysql_connection_from_params(
         hostaddr=params.get('hostaddr'),
         connect_timeout=connect_timeout,
         connection_defaults=False,
+        read_only=read_only,
         **overrides,
     )
 
@@ -550,6 +782,7 @@ def _create_postgres_connection(
     connect_timeout: int = 10,
     application_name: Optional[str] = None,
     query_timeout_seconds: float | None = None,
+    read_only: bool = False,
 ):
     """Create PostgreSQL connection using psycopg2."""
     try:
@@ -585,8 +818,9 @@ def _create_postgres_connection(
 
         from shared.agent_activity import pg_connection_kwargs
 
+        connection_class = read_only_postgres_connection_class() if read_only else None
         try:
-            conn = psycopg2.connect(**pg_connection_kwargs(conn_params))
+            conn = psycopg2.connect(**pg_connection_kwargs(conn_params, connection_class))
         except psycopg2.OperationalError as e:
             # Connection poolers (Neon, Supavisor, PgBouncer) reject startup options. A
             # session SET would outlive this client on a transaction-mode pooler and cap the
@@ -594,7 +828,7 @@ def _create_postgres_connection(
             if 'options' not in conn_params or 'unsupported startup parameter' not in str(e):
                 raise
             conn_params.pop('options')
-            conn = psycopg2.connect(**pg_connection_kwargs(conn_params))
+            conn = psycopg2.connect(**pg_connection_kwargs(conn_params, connection_class))
         # Set autocommit for read-only queries
         conn.autocommit = True
         return conn
@@ -614,6 +848,7 @@ def _create_mysql_connection(
     hostaddr: Optional[str] = None,
     connect_timeout: int = 10,
     connection_defaults: bool = True,
+    read_only: bool = False,
     **overrides: Any,
 ):
     """Create MySQL connection using pymysql."""
@@ -624,6 +859,7 @@ def _create_mysql_connection(
         raise RuntimeError("pymysql not installed. Run: pip install pymysql")
     from shared.agent_activity import instrument_mysql
 
+    connect = read_only_mysql_connection_class() if read_only else pymysql.connect
     try:
         conn_params = {
             'host': host,
@@ -666,7 +902,7 @@ def _create_mysql_connection(
                 )
                 raw_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 raw_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                conn = pymysql.connect(defer_connect=True, **conn_params)
+                conn = connect(defer_connect=True, **conn_params)
                 conn.connect(sock=raw_socket)
                 return instrument_mysql(conn)
             except Exception:
@@ -674,7 +910,7 @@ def _create_mysql_connection(
                     raw_socket.close()
                 raise
 
-        return instrument_mysql(pymysql.connect(**conn_params))
+        return instrument_mysql(connect(**conn_params))
     except Exception as e:
         raise RuntimeError(f"Failed to connect to MySQL: {e}")
 

@@ -5,9 +5,11 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   APP_ORIGIN,
+  CONTENT_SECURITY_POLICY,
   createAppRequestHandler,
   isAppUrl,
   isRendererUrl,
+  isSafeExternalUrl,
   parseByteRange,
   resolveStaticPath,
   rewriteAccountReturnUrl,
@@ -45,7 +47,11 @@ async function backend(handler: RequestListener): Promise<string> {
   return `http://127.0.0.1:${address.port}`
 }
 
-async function handlerFor(handler: RequestListener, smokeAuth = false) {
+async function handlerFor(
+  handler: RequestListener,
+  smokeAuth = false,
+  apiToken?: string
+) {
   const base = await backend(handler)
   return {
     base,
@@ -53,6 +59,7 @@ async function handlerFor(handler: RequestListener, smokeAuth = false) {
       rootDir: bundle(),
       apiBaseUrl: () => base,
       smokeAuth,
+      apiToken,
     }),
   }
 }
@@ -74,6 +81,25 @@ describe('app origin', () => {
     ).toBe(false)
     expect(isRendererUrl('https://readyset.io/')).toBe(false)
   })
+
+  it('opens only web and mail links outside the app', () => {
+    expect(isSafeExternalUrl('https://docs.readyset.io/rdst')).toBe(true)
+    expect(isSafeExternalUrl('http://localhost:8080/')).toBe(true)
+    expect(isSafeExternalUrl('mailto:support@readyset.io')).toBe(true)
+    for (const url of [
+      'file:///C:/Windows/System32/calc.exe',
+      'smb://attacker.example/share/run.exe',
+      'search-ms:query=x&crumb=location:\\\\attacker.example\\share',
+      'ms-msdt:/id PCWDiagnostic',
+      'javascript:alert(1)',
+      'vbscript:msgbox',
+      'data:text/html,<script>1</script>',
+      'x-apple.systempreferences:com.apple.preference.security',
+      'rdst-app://ui/',
+      'not a url',
+    ])
+      expect(isSafeExternalUrl(url), url).toBe(false)
+  })
 })
 
 describe('static files', () => {
@@ -89,6 +115,30 @@ describe('static files', () => {
     expect(await asset.text()).toBe('run()')
     expect(await (await handle(app('/inbox?item=2'))).text()).toBe('RDST')
     expect(await (await handle(app('/'))).text()).toBe('RDST')
+  })
+
+  it('puts the content security policy on pages', async () => {
+    const handle = createAppRequestHandler({
+      rootDir: bundle(),
+      apiBaseUrl: () => null,
+    })
+    for (const route of ['/', '/index.html', '/inbox?item=2'])
+      expect(
+        (await handle(app(route))).headers.get('content-security-policy')
+      ).toBe(CONTENT_SECURITY_POLICY)
+    expect(
+      (await handle(app('/assets/app.js'))).headers.get(
+        'content-security-policy'
+      )
+    ).toBeNull()
+    const directives = CONTENT_SECURITY_POLICY.split('; ')
+    expect(directives).toContain(
+      "script-src 'self' https://us-assets.i.posthog.com"
+    )
+    expect(directives).toContain("object-src 'none'")
+    expect(CONTENT_SECURITY_POLICY).not.toMatch(
+      /script-src[^;]*'unsafe-(inline|eval)'/
+    )
   })
 
   it('answers byte ranges for video, which media elements stream in parts', async () => {
@@ -206,6 +256,29 @@ describe('api proxy', () => {
       app('/api/monitor/targets/db/settings?x=1', { method: 'PUT', body: '{}' })
     )
     expect(writes).toEqual(['/api/monitor/targets/db/settings'])
+  })
+
+  it("sends the backend's launch token, never one a page supplies", async () => {
+    const { handle } = await handlerFor(
+      (req, res) => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end(
+          `data: ${JSON.stringify({ token: req.headers['x-rdst-token'], host: req.headers.host })}\n\n`
+        )
+      },
+      false,
+      'launch-secret'
+    )
+    for (const init of [
+      undefined,
+      { headers: { 'x-rdst-token': 'page-guess', host: 'evil.example' } },
+      { method: 'POST', body: '{}' },
+    ]) {
+      const response = await handle(app('/api/monitor/inbox/stream', init))
+      const seen = JSON.parse((await response.text()).slice(6))
+      expect(seen.token).toBe('launch-secret')
+      expect(seen.host).toMatch(/^127\.0\.0\.1:\d+$/)
+    }
   })
 
   it('streams server-sent events and closes the upstream when the reader stops', async () => {

@@ -502,6 +502,7 @@ export function useConfigure(): UseConfigureReturn {
                       passwordEnv: data.password_env,
                       privileges: data.privileges,
                       queryCapture: data.query_capture,
+                      tlsWarning: data.tls_warning,
                       databaseEngine:
                         databaseEngine ??
                         (String(data.server_version || '').startsWith('MySQL')

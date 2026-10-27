@@ -905,6 +905,7 @@ class MonitorStore:
         guard = getattr(_STATEMENT_GUARD, "value", None)
         if guard is not None:
             guard.check()
+        shared_constants.ensure_private_file(self.path)
         conn = sqlite3.connect(self.path, isolation_level=None, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         try:

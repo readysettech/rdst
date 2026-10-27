@@ -28,6 +28,21 @@ extraFiles:
   # Tells a directly launched sidecar which build it is.
   - from: "${RDST_DESKTOP_MARKER}"
     to: sidecar/rdst/instance.json
+# Flipped in the Electron binary just before signing: the app runs only its own app.asar,
+# checked against the hash embedded at packaging (macOS and Windows), and ELECTRON_RUN_AS_NODE,
+# NODE_OPTIONS and (in flavors that ship to users) --inspect can't turn it into a general Node
+# runtime. A change build keeps --inspect for Playwright; harnesses that drive a shipped Linux
+# package turn it on in their own copy with scripts/inspect-fuse.mjs.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: ${RDST_DESKTOP_INSPECT}
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  # Pages come from the app scheme; none are file: URLs.
+  grantFileProtocolExtraPrivileges: false
+  # Flipping fuses invalidates an arm64 signature; an unsigned build needs a fresh ad-hoc one.
+  resetAdHocDarwinSignature: true
 # Tray state icons (problem, paused, offline) are drawn at runtime from these two.
 extraResources:
   - from: resources/tray.png

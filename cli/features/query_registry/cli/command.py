@@ -13,7 +13,11 @@ import signal
 import shutil
 import statistics
 import sys
-from shared.query_safety import validate_query_safety
+from shared.query_safety import (
+    SESSION_SETTING_FUNCTIONS,
+    side_effect_calls,
+    validate_query_safety,
+)
 import subprocess  # nosemgrep: gitlab.bandit.B404
 import tempfile
 import threading
@@ -1601,21 +1605,6 @@ class QueryCommand:
         if not resolved_queries:
             return RdstResult(ok=False, message="No queries to run. Provide query names/hashes or use --file.", data={})
 
-        # The registry is not a trusted store: entries arrive from --file, from
-        # `scan`, and from pg_stat_statements, so their text is only as
-        # trustworthy as whoever could write to those. Run mode executes them
-        # repeatedly and concurrently, so check before the first execution.
-        for entry, executable_sql in resolved_queries:
-            safety = validate_query_safety(executable_sql)
-            if not safety.get("safe"):
-                issues = "; ".join(safety.get("issues") or []) or "failed safety validation"
-                name = getattr(entry, "tag", None) or getattr(entry, "query_hash", "query")
-                return RdstResult(
-                    ok=False,
-                    message=f"Refusing to run '{name}': {issues}",
-                    data={},
-                )
-
         # Add warm-up slots: one per unique query (first execution of each is excluded)
         num_queries = len(resolved_queries)
         user_count = count  # preserve original user-specified count for display
@@ -1647,6 +1636,29 @@ class QueryCommand:
                 message=f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
                 data={"target": target},
             )
+
+        # The registry is not a trusted store: entries arrive from --file, from
+        # `scan`, and from pg_stat_statements, so their text is only as
+        # trustworthy as whoever could write to those. Run mode executes them
+        # repeatedly and concurrently, so check before the first execution, reading the
+        # quoting the way the target's engine does.
+        engine = str(target_config.get("engine") or "")
+        for entry, executable_sql in resolved_queries:
+            safety = validate_query_safety(executable_sql, engine)
+            # A read_only target's session setting is what stops a write the text doesn't
+            # show, and run mode executes on that session again and again.
+            setters = side_effect_calls(executable_sql, engine, SESSION_SETTING_FUNCTIONS)
+            if setters:
+                safety = {"safe": False, "issues": [
+                    f"{setters[0].lower()}() changes the session's settings"]}
+            if not safety.get("safe"):
+                issues = "; ".join(safety.get("issues") or []) or "failed safety validation"
+                name = getattr(entry, "tag", None) or getattr(entry, "query_hash", "query")
+                return RdstResult(
+                    ok=False,
+                    message=f"Refusing to run '{name}': {issues}",
+                    data={},
+                )
 
         # Warn about running queries against production
         if not skip_warning and not quiet and sys.stdout.isatty():

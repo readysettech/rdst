@@ -201,3 +201,26 @@ def test_tunnel_test_discards_cached_path_before_testing(monkeypatch):
     assert observed["tls"] is True
     assert observed["tls_verify"] is True
     assert observed["tls_ca"] == "/certs/root.pem"
+
+
+def test_tunnel_list_sends_the_token_of_the_server_on_its_port(monkeypatch, tmp_path):
+    """The desktop backend requires its launch token; it publishes it in desktop-server.json."""
+    import os
+
+    from features.agent_connect import discovery
+
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
+    discovery.write_discovery({"url": "http://127.0.0.1:19005", "port": 19005,
+                               "pid": os.getpid(), "token": "launch-token"})
+    seen = []
+
+    def urlopen(request, timeout):
+        seen.append((request.full_url, request.get_header("X-rdst-token")))
+        return FakeHttpResponse([])
+
+    monkeypatch.setattr("features.tunnel.cli.command.urlopen", urlopen)
+
+    assert TunnelCommand(console=Mock(), web_port=19005).execute("list").ok
+    assert TunnelCommand(console=Mock(), web_port=19006).execute("list").ok
+    assert seen == [("http://127.0.0.1:19005/api/tunnel/status", "launch-token"),
+                    ("http://127.0.0.1:19006/api/tunnel/status", None)]

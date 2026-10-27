@@ -23,7 +23,7 @@ class NameFormatPlan:
 
 def plan_name_format(sql, dialect):
     d = "postgres" if dialect in {"postgres", "postgresql"} else dialect
-    if d not in {"mysql", "postgres"} or not check_read_only(sql)["is_read_only"]:
+    if d not in {"mysql", "postgres"} or not check_read_only(sql, dialect)["is_read_only"]:
         return None
     try:
         trees = sqlglot.parse(sql, read=d)

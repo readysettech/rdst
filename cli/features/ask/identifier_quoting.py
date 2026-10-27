@@ -50,7 +50,7 @@ def plan_identifier_quoting(sql, dialect, schema, error):
         or not 1 <= len(sql) <= 20000
     ):
         return None
-    if not check_read_only(sql)["is_read_only"]:
+    if not check_read_only(sql, dialect)["is_read_only"]:
         return None
     try:
         statements = sqlglot.parse(sql, read="mysql")
@@ -143,6 +143,6 @@ def candidate_from_keywords(plan, rows):
         identifier = table.this
         if (identifier.meta.get("start"), identifier.meta.get("end", -2) + 1) in spans:
             identifier.set("quoted", True)
-    if original != parsed or not check_read_only(candidate)["is_read_only"]:
+    if original != parsed or not check_read_only(candidate, "mysql")["is_read_only"]:
         return None
     return candidate

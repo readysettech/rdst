@@ -36,7 +36,7 @@ def typed_rows_bytes(rows):
 
 
 def validate_exact(sql, schema, dialect):
-    checked = validate_sql_for_ask(sql, enforce_result_limit=False)
+    checked = validate_sql_for_ask(sql, enforce_result_limit=False, dialect=dialect)
     need(checked.get('is_valid') is True, 'sql-preflight-failed')
     need(checked.get('validated_sql', sql) == sql, 'sql-preflight-changed-frozen-bytes')
     columns = {name:list(table['columns']) for name,table in schema['tables'].items()}

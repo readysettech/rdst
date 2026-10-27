@@ -259,7 +259,7 @@ export function FeedbackChat({ isOpen, onClose }: FeedbackChatProps) {
                   key={i}
                   className="text-body-small text-content-layout-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
                 >
-                  <Markdown options={{ disableParsingRawHTML: true }}>
+                  <Markdown untrusted>
                     {escapeIntrawordUnderscores(msg.content)}
                   </Markdown>
                 </div>

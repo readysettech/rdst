@@ -64,6 +64,11 @@ def collect_outstanding_logins() -> bool:
     return _OAUTH.collect_outstanding_logins()
 
 
+def complete_login(login_id: str, completion: str) -> Optional[dict[str, Any]]:
+    """Land a DigitalOcean login whose browser returned with the broker's completion."""
+    return _OAUTH.complete_login(login_id, completion)
+
+
 def get_access_token() -> tuple[Optional[str], Optional[str]]:
     """Return (token, method) where method is 'oauth' or None."""
     token = _OAUTH.access_token()

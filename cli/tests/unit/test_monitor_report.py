@@ -261,7 +261,8 @@ def test_plain_explain_has_connection_timeout_and_self_marker(monkeypatch):
             return {"engine": "postgresql"}
 
     def connect(_config, **kwargs):
-        assert kwargs == {"lane": "rdst/analyze", "query_timeout_seconds": 5}
+        # PostgreSQL plans in a read-only transaction.
+        assert kwargs == {"lane": "rdst/analyze", "query_timeout_seconds": 5, "read_only": True}
         return Connection()
 
     monkeypatch.setattr("shared.config.targets.TargetsConfig", Config)

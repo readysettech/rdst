@@ -47,14 +47,21 @@ docker compose -f apps/rdst/e2e/docker-compose.relentless.yml \
   up -d --build --wait postgres mysql bastion
 ```
 
-Desktop mode needs a packaged build. An unpacked Linux build is enough:
+Desktop mode needs a packaged build. An unpacked Linux build of the change
+flavor (`cl`) is enough; it keeps the `--inspect` fuse the driver needs:
 
 ```bash
 cd apps/rdst-desktop
 pnpm build:web && pnpm build:sidecar && pnpm build
-pnpm exec electron-builder --linux --x64 --dir --publish never
-# executable: apps/rdst-desktop/dist/linux-unpacked/rdst-desktop
+node scripts/flavor.mjs cl
+pnpm exec electron-builder --config build/cl/electron-builder.yml --linux --x64 --dir --publish never
+# executable: apps/rdst-desktop/dist/cl/linux-unpacked/rdst-desktop-cl
 ```
+
+Release and staging packages ship with that fuse off. To drive one, turn it on
+in an unpacked copy first:
+`node ../rdst-desktop/scripts/inspect-fuse.mjs squashfs-root/rdst-desktop-staging`.
+The CI runs do this for the AppImages they unpack.
 
 ## Running
 
@@ -64,7 +71,7 @@ From `web-apps/apps/rdst/`:
 # Driver proof, no agent
 node relentless/selftest.ts --mode browser
 node relentless/selftest.ts --mode desktop \
-  --desktop-exec ../rdst-desktop/dist/linux-unpacked/rdst-desktop
+  --desktop-exec ../rdst-desktop/dist/cl/linux-unpacked/rdst-desktop-cl
 
 # One agent area; an hour at most, with no spend or turn cap unless
 # --budget or --max-turns sets one

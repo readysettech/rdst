@@ -1,19 +1,24 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
-import { app, BrowserWindow, ipcMain, autoUpdater as nativeUpdater, net } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  autoUpdater as nativeUpdater,
+  net,
+} from 'electron'
 import electronUpdater from 'electron-updater'
-
-import { installOrQuit } from './window-lifecycle.js'
 import {
   isNewerVersion,
   manualDownloadLinks,
   parseUpdateMetadata,
   resolveUpdateMode,
-  updateFeedUrl,
   type UpdateEnvironment,
   type UpdateStatePayload,
+  updateFeedUrl,
 } from './update-policy.js'
+import { installOrQuit } from './window-lifecycle.js'
 
 // electron-updater is CommonJS; named ESM imports are unreliable, so pull
 // autoUpdater off the default export.
@@ -96,7 +101,12 @@ function setupInPlaceUpdates(): void {
     })
   })
   const ready = (version: string) =>
-    broadcastState({ status: 'ready', version, downloadLinks: [], progress: 100 })
+    broadcastState({
+      status: 'ready',
+      version,
+      downloadLinks: [],
+      progress: 100,
+    })
   if (squirrel) {
     nativeUpdater.on('update-downloaded', () => {
       if (!pendingVersion) return
@@ -172,7 +182,11 @@ function setupUpdateNotifications(env: UpdateEnvironment): void {
 export function setupAutoUpdates(
   options: Omit<UpdateEnvironment, 'updatesEnabled'>,
   /** Ends the app's background work, then calls install; windows must close for it to run. */
-  beforeInstall: (install: () => void) => void
+  beforeInstall: (install: () => void) => void,
+  /** Whether an IPC message comes from RDST's own page; others are ignored. */
+  trustedSender: (
+    event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent
+  ) => boolean
 ): () => void {
   const env: UpdateEnvironment = {
     ...options,
@@ -193,8 +207,12 @@ export function setupAutoUpdates(
       )
     }
   }
-  ipcMain.handle('updates:get-state', () => currentState)
-  ipcMain.on('updates:install', installUpdate)
+  ipcMain.handle('updates:get-state', (event) =>
+    trustedSender(event) ? currentState : null
+  )
+  ipcMain.on('updates:install', (event) => {
+    if (trustedSender(event)) installUpdate()
+  })
 
   if (mode === 'auto') {
     setupInPlaceUpdates()

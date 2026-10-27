@@ -225,6 +225,31 @@ describe('AddDatabaseDialog', () => {
     ).toBeTruthy()
   })
 
+  it('says, without blocking the add, when the connection does not check the server', async () => {
+    const warning =
+      "RDST connects to demo without requiring TLS, so the connection can be unencrypted and the server isn't checked."
+    configure.testConnection.mockResolvedValue({
+      target: 'demo',
+      connected: true,
+      engine: 'PostgreSQL 16.3',
+      tlsWarning: warning,
+    })
+    renderDialog()
+
+    type('Connection string', 'postgresql://rdst@db.example.com/demo')
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+
+    expect(await screen.findByText(warning)).toBeTruthy()
+    expect(screen.getByText('Connected to PostgreSQL 16.3.')).toBeTruthy()
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Add and monitor',
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(false)
+  })
+
   it('reads a connection string into the fields and tests what it says', async () => {
     renderDialog()
 
@@ -756,7 +781,7 @@ describe('AddDatabaseDialog editing', () => {
     const { onSaved } = renderEdit()
 
     type('Name', 'orders-eu')
-    type('Host', 'orders-2.internal')
+    type('Database', 'orders_eu')
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith('orders-eu'))
@@ -765,8 +790,9 @@ describe('AddDatabaseDialog editing', () => {
       expect.objectContaining({
         name: 'orders-eu',
         engine: 'postgresql',
-        host: 'orders-2.internal',
+        host: 'orders.internal',
         port: 6432,
+        database: 'orders_eu',
         read_only: true,
         tls: true,
         password: undefined,
@@ -775,6 +801,35 @@ describe('AddDatabaseDialog editing', () => {
     )
     expect(selectGlobalTarget).toHaveBeenCalledWith('orders-eu')
     expect(configure.testConnection).not.toHaveBeenCalled()
+  })
+
+  it('asks for the password again before a new host gets it', async () => {
+    const { onSaved } = renderEdit()
+
+    type('Host', 'orders-2.internal')
+    expect(
+      (screen.getByLabelText('Password') as HTMLInputElement).placeholder
+    ).toBe('Enter it again for the new address')
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+
+    expect(
+      (
+        await screen.findAllByText(
+          'Enter the password again: RDST sends a saved password to a new address only when you type it.'
+        )
+      ).length
+    ).toBeGreaterThan(0)
+    expect(configure.updateTarget).not.toHaveBeenCalled()
+    expect(configure.testConnection).not.toHaveBeenCalled()
+
+    type('Password', 'n3w')
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith('orders'))
+    expect(configure.updateTarget).toHaveBeenCalledWith(
+      'orders',
+      expect.objectContaining({ host: 'orders-2.internal', password: 'n3w' })
+    )
   })
 
   it('keeps the name when the field is cleared', async () => {

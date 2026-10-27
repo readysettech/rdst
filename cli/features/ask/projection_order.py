@@ -31,7 +31,7 @@ def projection_order_shape(sql, dialect):
 def _cte_outer_projection(sql, dialect):
     """Admit only a bounded read-only CTE; its complete body stays untouched."""
     read = "postgres" if dialect in {"postgres", "postgresql"} else dialect
-    if read not in {"mysql", "postgres"} or not check_read_only(sql)["is_read_only"]:
+    if read not in {"mysql", "postgres"} or not check_read_only(sql, dialect)["is_read_only"]:
         return None
     try:
         statements = sqlglot.parse(sql, read=read)

@@ -24,6 +24,43 @@ from typing import Any, Callable, Dict, Optional
 
 from shared.constants import rdst_data_dir
 
+_OFF_VALUES = ("false", "0", "no", "off", "disable", "disabled")
+# The opt-out line as written, honored even when a typo elsewhere makes the file unreadable.
+_OPT_OUT_LINE = re.compile(
+    r"^\s*telemetry_enabled\s*=\s*[\"']?(false|0|no|off|disabled?)[\"']?\s*(#.*)?$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _is_off(value: Any) -> bool:
+    return value is False or (isinstance(value, str) and value.strip().lower() in _OFF_VALUES)
+
+
+def config_opts_out(text: str) -> bool:
+    """Whether config.toml turns telemetry off.
+
+    Accepts ``telemetry_enabled = false`` at the top level or under any table (a line appended
+    to the file lands in its last table), and ``enabled = false`` in a ``[telemetry]`` table.
+    """
+    import toml
+
+    if _OPT_OUT_LINE.search(text) or "telemetry_enabled = false" in text.lower():
+        return True
+    try:
+        data = toml.loads(text)
+    except Exception:
+        return False
+    telemetry = data.get("telemetry")
+    if isinstance(telemetry, dict) and _is_off(telemetry.get("enabled")):
+        return True
+    pending: list[Any] = [data]
+    while pending:
+        table = pending.pop()
+        if _is_off(table.get("telemetry_enabled")):
+            return True
+        pending.extend(value for value in table.values() if isinstance(value, dict))
+    return False
+
 # Will be lazy-imported to avoid startup cost
 _posthog = None
 _sentry_sdk = None
@@ -500,8 +537,7 @@ class TelemetryManager:
         config_file = self._rdst_dir / "config.toml"
         if config_file.exists():
             try:
-                content = config_file.read_text(encoding="utf-8")
-                if "telemetry_enabled = false" in content.lower():
+                if config_opts_out(config_file.read_text(encoding="utf-8")):
                     self._enabled = False
                     return False
             except Exception:

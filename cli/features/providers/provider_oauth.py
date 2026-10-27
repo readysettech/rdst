@@ -2,7 +2,10 @@
 
 Provider client secrets live only in the keyservice Worker, so a sign-in from
 this process is: hand the browser the broker's authorize URL, then claim the
-tokens exactly once with a one-time pickup key.
+tokens exactly once with a one-time pickup key plus the completion value the
+broker hands this server's return URL when the browser comes back. Without
+that completion the broker withholds the tokens, so an approval made in a
+browser that returned somewhere else never lands here.
 
 Tokens are never written to disk or keyring: restarting rdst signs the user
 out. Provider modules own their own naming, extra credential paths and API
@@ -142,7 +145,11 @@ class ProviderOAuth:
                 entry["detail"] = detail
 
     def start_login(self, return_url: Optional[str] = None) -> dict[str, Any]:
-        """Ask the keyservice to own the OAuth exchange for this sign-in."""
+        """Ask the keyservice to own the OAuth exchange for this sign-in.
+
+        ``return_url`` should reach ``complete_login`` on this server, which is
+        how the broker's completion value gets here.
+        """
         pickup_key = secrets.token_urlsafe(32)
         pickup_key_hash = hashlib.sha256(pickup_key.encode("ascii")).hexdigest()
         payload = {"pickup_key_hash": pickup_key_hash}
@@ -155,14 +162,49 @@ class ProviderOAuth:
         if not login_id or not authorize_url:
             raise self.broker_error("RDST sign-in service did not return a sign-in link")
 
-        self.register_login(login_id, {"mode": "broker", "pickup_key": pickup_key})
+        self.register_login(
+            login_id, {"mode": "broker", "pickup_key": pickup_key, "completion": ""}
+        )
         return {"login_id": login_id, "authorize_url": authorize_url}
 
-    def pickup(self, login_id: str, pickup_key: str) -> dict[str, Any]:
-        """Poll the broker once; a ready pickup consumes the key on both sides."""
+    def complete_login(self, login_id: str, completion: str) -> Optional[dict[str, Any]]:
+        """Collect the tokens with the completion a browser brought back.
+
+        Any page can send a browser here, so the value is kept only once the broker
+        accepts it; a rejected one leaves the login waiting for the real browser and
+        comes back marked ``rejected``. Returns the pickup outcome, or None for a login
+        this server did not start.
+        """
+        with self._registry_lock:
+            entry = self.registry.get(login_id)
+            if entry is None or entry.get("mode") != "broker" or not completion:
+                return None
+            pickup_key = str(entry["pickup_key"])
+        outcome = self.pickup(login_id, pickup_key, completion, untrusted=True)
+        if not outcome.get("rejected"):
+            with self._registry_lock:
+                entry = self.registry.get(login_id)
+                if entry is not None and not entry.get("completion"):
+                    entry["completion"] = completion
+        return outcome
+
+    def pickup(
+        self, login_id: str, pickup_key: str, completion: str = "", untrusted: bool = False
+    ) -> dict[str, Any]:
+        """Poll the broker once; a ready pickup consumes the key on both sides.
+
+        The broker answers "pending" until ``completion`` carries the value the
+        browser brought back to this server. With ``untrusted`` the completion has not
+        been vouched for yet, so a broker refusal does not end the login.
+        """
         try:
-            body = self.broker_post("result", {"login_id": login_id, "pickup_key": pickup_key})
+            body = self.broker_post(
+                "result",
+                {"login_id": login_id, "pickup_key": pickup_key, "completion": completion},
+            )
         except self.broker_error as exc:
+            if untrusted:
+                return {"state": "failed", "detail": str(exc), "rejected": True}
             self.mark_login(login_id, "failed", str(exc))
             return {"state": "failed", "detail": str(exc)}
 
@@ -205,13 +247,13 @@ class ProviderOAuth:
             self._last_collect = now
             self._prune_expired(now)
             candidates = [
-                (login_id, str(entry["pickup_key"]))
+                (login_id, str(entry["pickup_key"]), str(entry.get("completion") or ""))
                 for login_id, entry in self.registry.items()
                 if entry.get("mode") == "broker" and entry["status"] == "running"
             ]
         landed = False
-        for login_id, pickup_key in candidates:
-            if self.pickup(login_id, pickup_key).get("state") == "success":
+        for login_id, pickup_key, completion in candidates:
+            if self.pickup(login_id, pickup_key, completion).get("state") == "success":
                 landed = True
         return landed
 
@@ -227,8 +269,9 @@ class ProviderOAuth:
             if entry.get("mode") != "broker" or entry["status"] != "running":
                 return settled
             pickup_key = str(entry["pickup_key"])
+            completion = str(entry.get("completion") or "")
 
-        return self.pickup(login_id, pickup_key)
+        return self.pickup(login_id, pickup_key, completion)
 
     def tokens_from_broker(self, body: dict[str, Any]) -> dict[str, Any]:
         """Read the token set out of a broker reply, nested or flat."""

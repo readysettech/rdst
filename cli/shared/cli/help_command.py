@@ -789,12 +789,20 @@ rdst web
 # Specify host and port
 rdst web --host 0.0.0.0 --port 9000
 
+# Answer to a DNS name, e.g. behind a reverse proxy (repeatable)
+rdst web --allowed-host rdst.example.com
+
 # Clear persisted secure env vars from keyring
 rdst web --clear
 ```
 
 The web server provides a browser-based interface and REST API for all RDST
 functionality. Server dependencies are included with RDST.
+
+The server answers only to localhost, its --host address, and names passed with
+`--allowed-host` or `RDST_WEB_ALLOWED_HOSTS` (comma-separated). Requests for other
+names get HTTP 421; behind a reverse proxy or tunnel, allow the public name the
+browser uses. A GitHub Codespace's forwarded address is allowed automatically.
 
 ### rdst slack
 Manage Slack integrations for data agents.

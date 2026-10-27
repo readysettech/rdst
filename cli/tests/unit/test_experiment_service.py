@@ -430,6 +430,9 @@ def experiment_stubs(monkeypatch):
         lambda _target: {"engine": "postgresql"},
     )
     monkeypatch.setattr(
+        "features.cache.experiment_service._target_engine", lambda _target: "postgresql"
+    )
+    monkeypatch.setattr(
         "features.cache.experiment_service._readyset_query",
         lambda query, _engine: query,
     )
@@ -873,6 +876,27 @@ async def test_non_read_only_query_never_reaches_the_sandbox(experiment_stubs):
     )
     assert cache.statements == []
     assert manager.acquired == []
+
+
+@pytest.mark.asyncio
+async def test_postgres_dollar_quotes_are_read_with_the_origin_engine(experiment_stubs):
+    """A semicolon inside a dollar-quoted string is text on a PostgreSQL origin."""
+    cache = _Cache()
+    service = ReadysetExperimentService(_Manager(), cache)
+
+    events = [
+        event
+        async for event in service.compare(
+            owner_id="speed_test_123", target="origin", query="SELECT $$a;b$$",
+            iterations=3, warmup=1,
+        )
+    ]
+
+    assert not any(
+        isinstance(event, ErrorEvent) and event.code == "speed_test_read_only"
+        for event in events
+    )
+    assert cache.statements[0] == "EXPLAIN CREATE CACHE FROM SELECT $$a;b$$"
 
 
 @pytest.mark.asyncio

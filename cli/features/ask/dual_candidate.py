@@ -624,6 +624,7 @@ def generate_and_select(ctx: Any, llm_manager: Any) -> Any:
         validation = validate_sql_for_ask(
             alternate_sql,
             enforce_result_limit=False,
+            dialect=str(ctx.db_type or ""),
         )
         if not validation.get("is_valid"):
             diagnostics["status"] = "alternate_invalid"

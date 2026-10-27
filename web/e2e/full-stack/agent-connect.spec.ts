@@ -53,7 +53,7 @@ test('a coding agent connects and adds a database, then the user turns monitorin
     headers: { Host: 'evil.example' },
     data: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
   })
-  expect(rebound.status()).toBe(403)
+  expect(rebound.status()).toBe(421)
   await expect(agentStatus).toHaveAttribute('data-state', 'waiting')
 
   // The agent's first request to the prompt's URL ticks "connected".

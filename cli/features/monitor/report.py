@@ -281,13 +281,17 @@ def plain_explain(target: str, sql: str) -> dict[str, Any]:
     from shared.db_connection import create_direct_connection, rdst_self_marker
     from shared.query_safety import is_plain_explainable_write, validate_query_safety
 
-    if not validate_query_safety(sql).get("safe") and not is_plain_explainable_write(sql):
-        return {"error": "SQL is not safe to EXPLAIN"}
     config = TargetsConfig()
     config.load()
     target_config = config.get(target) or {}
+    engine = target_config.get("engine", "postgresql")
+    if not validate_query_safety(sql, engine).get("safe") and not is_plain_explainable_write(
+            sql, engine):
+        return {"error": "SQL is not safe to EXPLAIN"}
+    # PostgreSQL plans a write in a read-only transaction; MySQL refuses to.
     connection = create_direct_connection(
-        target_config, lane="rdst/analyze", query_timeout_seconds=5)
+        target_config, lane="rdst/analyze", query_timeout_seconds=5,
+        read_only=engine == "postgresql")
     work = _work(target)
     try:
         work.register_connection(connection, target_config.get("engine", "postgresql"), target_config)

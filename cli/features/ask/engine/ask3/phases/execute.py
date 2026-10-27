@@ -264,9 +264,12 @@ def _execute_postgres(
             }
 
         # Connect
+        # Ask only reads. The database enforces that for whatever the generated SQL calls,
+        # whatever the target's own read_only setting.
         conn = psycopg2.connect(**postgres_connection_kwargs(
             params,
             connect_timeout=max(1, math.ceil(timeout_seconds)) if timeout_seconds > 0 else 10,
+            read_only=True,
         ))
         if statement_cancel is not None and not statement_cancel.register(
             conn, DbType.POSTGRESQL, target, config
@@ -368,7 +371,8 @@ def _execute_mysql(
             if timeout_seconds > 0
             else {}
         )
-        conn = create_mysql_connection_from_params(params, **timeout_options)
+        # Ask only reads; see _execute_postgres.
+        conn = create_mysql_connection_from_params(params, read_only=True, **timeout_options)
         if statement_cancel is not None and not statement_cancel.register(
             conn, DbType.MYSQL, target, config
         ):

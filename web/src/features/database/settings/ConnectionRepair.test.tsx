@@ -68,16 +68,55 @@ it('shows the saved fields, keeps the password unless typed, and checks again', 
     (screen.getByLabelText('Password') as HTMLInputElement).placeholder
   ).toBe('Leave blank to keep it')
   expect(screen.getByRole('button', { name: /Details/ })).toBeTruthy()
-  fireEvent.change(host, { target: { value: '127.0.0.1' } })
+  fireEvent.change(screen.getByLabelText('Database'), {
+    target: { value: 'shop' },
+  })
   fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
   await waitFor(() => expect(onSaved).toHaveBeenCalled())
   expect(configure.updateTarget).toHaveBeenCalledWith(
     'database',
     expect.objectContaining({
-      host: '127.0.0.1',
+      host: 'localhost',
       port: 5432,
+      database: 'shop',
       password: undefined,
     })
   )
   expect(onClose).toHaveBeenCalled()
+})
+
+it('asks for the password again before a new host gets it', async () => {
+  const onSaved = vi.fn()
+  renderWithClient(
+    <ConnectionRepair
+      target="database"
+      open
+      onClose={vi.fn()}
+      reason="Connection refused"
+      onSaved={onSaved}
+    />
+  )
+  const host = await screen.findByLabelText('Host')
+  fireEvent.change(host, { target: { value: '127.0.0.1' } })
+  expect(
+    (screen.getByLabelText('Password') as HTMLInputElement).placeholder
+  ).toBe('Enter it again for the new address')
+  fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+
+  expect(
+    await screen.findByText(
+      'Enter the password again: RDST sends a saved password to a new address only when you type it.'
+    )
+  ).toBeTruthy()
+  expect(configure.updateTarget).not.toHaveBeenCalled()
+
+  fireEvent.change(screen.getByLabelText('Password'), {
+    target: { value: 'n3w' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+  await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  expect(configure.updateTarget).toHaveBeenCalledWith(
+    'database',
+    expect.objectContaining({ host: '127.0.0.1', password: 'n3w' })
+  )
 })

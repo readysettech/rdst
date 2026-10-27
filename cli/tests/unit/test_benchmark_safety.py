@@ -284,6 +284,27 @@ class TestStreamBenchmarkRails:
     """The rails must fire on the real streaming path, before any DB work."""
 
     @pytest.mark.asyncio
+    async def test_target_engine_decides_how_quoting_reads(self):
+        """A semicolon inside a PostgreSQL dollar-quoted string is text, not a second
+        statement; read without the engine it could be MySQL code."""
+        conn = _FakeConnection()
+        with (
+            patch("shared.db_connection.create_direct_connection", return_value=conn),
+            patch("shared.config.targets.create_targets_config",
+                  return_value=_FakeTargetsConfig()),
+        ):
+            events = await _collect(
+                QueryService().stream_benchmark(
+                    queries=[{"identifier": "q", "sql": "SELECT $$a;b$$"}],
+                    target="demo", mode="interval", interval_ms=0, concurrency=1,
+                    duration_seconds=1, max_count=2,
+                )
+            )
+
+        assert events[-1].type == "complete"
+        assert "SELECT $$a;b$$" in conn.executed
+
+    @pytest.mark.asyncio
     async def test_write_query_rejected_before_execution(self):
         service = QueryService()
         events = await _collect(

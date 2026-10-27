@@ -6,6 +6,7 @@ Provides async generator methods consumed by both CLI and web API.
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import re
 import subprocess
@@ -30,6 +31,8 @@ from .events import (
     CacheStatusEvent,
 )
 from .models import CacheInput, CacheOptions
+
+logger = logging.getLogger(__name__)
 
 # Bound on an interactive Readyset statement (SHOW, DROP, EXPLAIN).
 DEFAULT_READYSET_STATEMENT_TIMEOUT_MS = 30_000
@@ -138,6 +141,19 @@ class CacheService:
                 return (name, entry)
 
         return None
+
+    def _engine_of(self, database_target: str) -> str:
+        """The database's engine, which decides how a query's quoting reads, or "" when
+        its config can't be read (the query is then read under every engine's rules)."""
+        config = self._cache_target_config
+        if config is None:
+            try:
+                targets = TargetsConfig()
+                targets.load()
+                config = targets.get(database_target)
+            except Exception as exc:
+                logger.debug("Could not read the engine of %s: %s", database_target, exc)
+        return str((config or {}).get("engine") or "")
 
     # ------------------------------------------------------------------
     # Connection helpers
@@ -544,7 +560,9 @@ class CacheService:
             # anyway, so refuse anything else before it is interpolated.
             from features.query_registry.service import benchmark_read_only_reason
 
-            not_read_only = benchmark_read_only_reason(input_data.query)
+            not_read_only = benchmark_read_only_reason(
+                input_data.query, self._engine_of(input_data.target)
+            )
             if not_read_only:
                 yield ErrorEvent(
                     type="error",

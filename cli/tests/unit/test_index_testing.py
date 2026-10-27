@@ -77,9 +77,17 @@ class FakeConn:
         self._cursor = cursor
         self.autocommit = False
         self.closed = False
+        self.session = {}
+        self.rollbacks = 0
 
     def cursor(self):
         return self._cursor
+
+    def set_session(self, **kwargs):
+        self.session.update(kwargs)
+
+    def rollback(self):
+        self.rollbacks += 1
 
     def close(self):
         self.closed = True
@@ -99,7 +107,11 @@ def connect(monkeypatch):
 
         monkeypatch.setattr(index_testing, "psycopg2", mock.Mock(connect=mock.Mock(return_value=conn)))
         monkeypatch.setattr(index_testing, "resolve_connection_params", _resolve)
-        monkeypatch.setattr(index_testing, "postgres_connection_kwargs", lambda p, **kw: dict(p))
+        def _kwargs(p, **kw):
+            conn.kwargs = kw
+            return dict(p)
+
+        monkeypatch.setattr(index_testing, "postgres_connection_kwargs", _kwargs)
         return conn
 
     return _install
@@ -184,3 +196,18 @@ def test_scan_using_index_walks_nested_plans():
     }
     assert _scan_using_index(plan, "<7>btree_x") == "Index Scan"
     assert _scan_using_index(plan, "<8>btree_y") is None
+
+
+def test_runs_in_read_only_transactions_and_recovers_from_a_failed_index(connect):
+    """hypopg works inside a read-only transaction; a failed recommendation aborts the
+    transaction, so it is rolled back before the next one."""
+    conn = connect(FakeCursor())
+    verify_indexes(
+        "SELECT * FROM orders WHERE customer_id = 42",
+        RECS + [{"sql": "CREATE INDEX ON orders(nope)", "table": "orders", "columns": ["nope"]}],
+        "t",
+        target_config=PG_TARGET,
+    )
+    assert conn.kwargs["read_only"] is True
+    assert conn.autocommit is False
+    assert conn.rollbacks == 1

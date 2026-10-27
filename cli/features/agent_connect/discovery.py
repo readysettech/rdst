@@ -1,7 +1,9 @@
 """desktop-server.json: how local tools find the running RDST server and its MCP endpoint.
 
 The file lives in the RDST data directory with owner-only permissions. It's rewritten on
-every start and whenever the WSL address changes, and removed on a clean shutdown.
+every start and whenever the WSL address changes, and removed on a clean shutdown. When the
+server requires a per-launch API token (RDST_API_TOKEN), the file carries it as ``token`` so
+same-user CLI commands can call the server's /api routes.
 """
 
 from __future__ import annotations
@@ -44,6 +46,9 @@ def write_discovery(info: dict[str, Any], path: Path | None = None) -> Path:
     """Write ``info`` atomically, readable by the owner only."""
     path = path or discovery_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    if info.get("token") and os.name != "nt":
+        # Owner-only directory too, so the token's file can't be swapped by another user.
+        os.chmod(path.parent, 0o700)
     fd, temp = tempfile.mkstemp(prefix=".desktop-server.", dir=str(path.parent))
     try:
         if os.name != "nt":
@@ -172,11 +177,13 @@ class AgentConnectRuntime:
 
     def __init__(self) -> None:
         self.info: dict[str, Any] | None = None
+        self.token: str | None = None
         self.wsl: WslListener | None = None
         self._probe: asyncio.Task | None = None
 
     async def start(self, app: Any) -> None:
         app.state.agent_connect_runtime = self
+        self.token = getattr(app.state, "api_token", None)
         port_text = os.environ.get("RDST_WEB_PORT", "").strip()
         if not port_text.isdecimal():
             # Not started by `rdst web` (tests, embedded use): nothing to advertise.
@@ -193,7 +200,7 @@ class AgentConnectRuntime:
     def _publish(self, app: Any, info: dict[str, Any]) -> None:
         app.state.agent_connect = info
         try:
-            write_discovery(info)
+            write_discovery({**info, "token": self.token} if self.token else info)
             self.info = info
         except OSError:
             logger.warning("Couldn't write %s; agents can still connect from the app",

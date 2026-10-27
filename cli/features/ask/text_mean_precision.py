@@ -30,7 +30,7 @@ def plan_text_mean(sql, dialect, schema_info):
     if (
         dialect != "mysql"
         or schema_info is None
-        or not check_read_only(sql)["is_read_only"]
+        or not check_read_only(sql, dialect)["is_read_only"]
     ):
         return None
     try:

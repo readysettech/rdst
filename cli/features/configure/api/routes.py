@@ -23,16 +23,23 @@ from features.configure.models import ConfigureInput, ConfigureOptions
 from features.configure.service import ConfigureService
 from shared import product_telemetry
 from shared.api.guards import require_local_request
-from shared.config.targets import (
-    TargetsConfig,
-    default_port_for,
-    normalize_db_type,
-    validate_target_name,
+from shared.config.targets import TargetsConfig, validate_target_name
+from shared.password_resolver import (
+    bind_target_credentials,
+    check_password_env,
+    credential_endpoint,
+    resolve_password,
+    new_password_env,
+    store_target_password,
 )
-from shared.password_resolver import derive_password_env, store_target_password
 from shared.secret_store_service import SecretStoreService
 
 router = APIRouter()
+
+PASSWORD_FOR_NEW_ADDRESS = (
+    "Enter the password again: RDST sends a saved password to a new address only when you type "
+    "it."
+)
 
 
 # ============================================================================
@@ -84,6 +91,12 @@ class TargetData(BaseModel):
     @classmethod
     def empty_ssh_removes_section(cls, value):
         return None if value == {} else value
+
+    @field_validator("password_env")
+    @classmethod
+    def database_password_pointer(cls, value):
+        check_password_env(value)
+        return value
 
 
 class AddTargetRequest(BaseModel):
@@ -200,6 +213,7 @@ def _ssh_target_data(ssh: SshData) -> dict:
 
 
 def _password_env_for_request(
+    cfg: TargetsConfig,
     target_name: str,
     target: TargetData,
     existing: Optional[dict] = None,
@@ -210,27 +224,14 @@ def _password_env_for_request(
     if existing and existing.get("password_env"):
         return str(existing["password_env"])
     if target.password is not None:
-        return derive_password_env(target_name)
+        return new_password_env(target_name, cfg)
     return None
 
 
 def _connection_identity(target: dict) -> tuple:
-    """What makes two saved connections the same database: engine, address, database, user,
-    and the jump host they go through."""
-    engine = normalize_db_type(target.get("engine")) or "postgresql"
-    try:
-        port = int(target.get("port") or default_port_for(engine))
-    except (TypeError, ValueError):
-        port = target.get("port")
-    ssh = target.get("ssh") or {}
-    return (
-        engine,
-        str(target.get("host") or "").strip().casefold(),
-        port,
-        str(target.get("database") or "").strip(),
-        str(target.get("user") or "").strip(),
-        str(ssh.get("profile") or ssh.get("host") or "").casefold(),
-    )
+    """What makes two saved connections the same database: where its password is sent, and
+    the database."""
+    return (*credential_endpoint(target), str(target.get("database") or "").strip())
 
 
 def _saved_as(cfg: TargetsConfig, target: dict) -> Optional[str]:
@@ -240,6 +241,18 @@ def _saved_as(cfg: TargetsConfig, target: dict) -> Optional[str]:
         (name for name in cfg.list_targets() if _connection_identity(cfg.get(name) or {}) == wanted),
         None,
     )
+
+
+def _bind_credentials(cfg: TargetsConfig, name: str, proposed: dict,
+                      existing: Optional[dict], password_submitted: bool) -> dict:
+    """``proposed`` with only the credentials saved for its server; 422 for a pointer the caller
+    may not use."""
+    saved = {other: cfg.get(other) or {} for other in cfg.list_targets()}
+    try:
+        return bind_target_credentials(name, proposed, existing, saved,
+                                       password_submitted=password_submitted)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 def _name_taken(cfg: TargetsConfig, name: str, keep: Optional[str] = None) -> bool:
@@ -348,6 +361,8 @@ def _event_to_sse(event: ConfigureEvent) -> dict:
             data["privileges"] = event.privileges
         if event.query_capture is not None:
             data["query_capture"] = event.query_capture
+        if event.tls_warning:
+            data["tls_warning"] = event.tls_warning
         return {
             "event": "connection_test",
             "data": json.dumps(data),
@@ -477,7 +492,7 @@ async def add_target(
         raise HTTPException(409, f"Already added as {saved_as}.")
     service = ConfigureService()
     input_data = ConfigureInput(target_name=request.name)
-    password_env = _password_env_for_request(request.name, request.target)
+    password_env = _password_env_for_request(existing, request.name, request.target)
     target_data = {
         "engine": request.target.engine,
         "host": request.target.host,
@@ -492,6 +507,8 @@ async def add_target(
     }
     if request.target.ssh is not None:
         target_data["ssh"] = _ssh_target_data(request.target.ssh)
+    _bind_credentials(existing, request.name, target_data, None,
+                      request.target.password is not None)
     persisted = _store_submitted_password(request.target, password_env)
     options = ConfigureOptions(target_data=target_data)
 
@@ -545,8 +562,7 @@ async def update_target(
         blocker = service.rename_blocker(name)
         if blocker:
             raise HTTPException(409, blocker)
-    password_env = _password_env_for_request(name, request.target, existing)
-    _store_submitted_password(request.target, password_env)
+    password_env = _password_env_for_request(cfg, name, request.target, existing)
     input_data = ConfigureInput(target_name=name)
     target_data = {
         "engine": request.target.engine,
@@ -569,6 +585,15 @@ async def update_target(
         # Remove a legacy hand-edited inline password when it is explicitly
         # replaced. New password values are never written to config.toml.
         target_data["password"] = None
+    if existing:
+        proposed = {**existing, **target_data}
+        bound = _bind_credentials(cfg, name, proposed, existing,
+                                  request.target.password is not None)
+        for field in ("password", "password_env", "password_secret_arn", "password_secret_key"):
+            if field in proposed and field not in bound:
+                target_data[field] = None
+        password_env = target_data["password_env"]
+    _store_submitted_password(request.target, password_env)
     options = ConfigureOptions(target_data=target_data)
 
     result = None
@@ -668,23 +693,44 @@ async def test_connection(
     """Test a saved target or the current unsaved form values (SSE stream)."""
     require_local_request(http_request)
     via = _via(http_request)
+    target_data = None
+    refusal = None
+    if request is not None:
+        cfg = TargetsConfig()
+        cfg.load()
+        existing = cfg.get(name)
+        password = request.target.password
+        target_data = _bind_credentials(
+            cfg,
+            name,
+            {**(existing or {}), **request.target.model_dump(exclude_none=True)},
+            existing,
+            password is not None,
+        )
+        # A destination that can't have the saved password says why, instead of failing to
+        # sign in.
+        if (password is None and existing
+                and credential_endpoint(existing) != credential_endpoint(target_data)
+                and resolve_password(existing).available
+                and not resolve_password(target_data).available):
+            refusal = ConfigureConnectionTestEvent(
+                type="connection_test",
+                target_name=name,
+                status="failed",
+                code="TARGET_PASSWORD_REQUIRED",
+                category="target_password_required",
+                message=PASSWORD_FOR_NEW_ADDRESS,
+            )
+        if password is not None:
+            target_data["password"] = password.get_secret_value()
+        target_data["name"] = name
 
     async def _test_generator():
+        if refusal is not None:
+            _report_test(name, target_data, via, refusal)
+            yield _event_to_sse(refusal)
+            return
         service = ConfigureService()
-        target_data = None
-        if request is not None:
-            cfg = TargetsConfig()
-            cfg.load()
-            existing = cfg.get(name) or {}
-            target_data = {
-                **existing,
-                **request.target.model_dump(exclude_none=True),
-            }
-            password = request.target.password
-            if password is not None:
-                target_data["password"] = password.get_secret_value()
-            target_data["name"] = name
-
         async for event in service.test_connection(name, target_data):
             if isinstance(event, ConfigureConnectionTestEvent) and event.status != "in_progress":
                 _report_test(name, target_data, via, event)

@@ -139,7 +139,9 @@ def explain_create_cache_readyset(
         # allowed through.
         from features.query_registry.service import benchmark_read_only_reason
 
-        not_read_only = benchmark_read_only_reason(query)
+        not_read_only = benchmark_read_only_reason(
+            query, str((test_db_config or {}).get("engine") or "")
+        )
         if not_read_only:
             return {
                 "success": False,

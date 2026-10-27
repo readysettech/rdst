@@ -129,7 +129,8 @@ def _event_to_sse(event: InitEvent) -> dict:
 
 
 @router.get("/init/status")
-async def get_init_status() -> InitStatusResponse:
+async def get_init_status(http_request: Request) -> InitStatusResponse:
+    require_local_request(http_request)
     service = InitService()
     status = None
     async for event in service.get_status_events():
@@ -195,7 +196,8 @@ async def validate_init_stream(http_request: Request, request: InitValidateReque
 
 
 @router.get("/init/monitoring-upgrade")
-def monitoring_upgrade() -> MonitoringUpgradeResponse:
+def monitoring_upgrade(http_request: Request) -> MonitoringUpgradeResponse:
+    require_local_request(http_request)
     return MonitoringUpgradeResponse(**InitService().monitoring_upgrade())
 
 

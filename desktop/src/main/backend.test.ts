@@ -1,6 +1,7 @@
 import type { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
+import http from 'node:http'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
@@ -16,10 +17,13 @@ import {
   parseStartupMarker,
   preferredPort,
   removeDiscoveryFile,
+  reportsListening,
   StartupWatch,
   startBackend,
   stopBackend,
+  TOKEN_HEADER,
   terminateWindowsProcessTree,
+  tokenFetch,
 } from './backend.js'
 import { BackendLog } from './backend-log.js'
 
@@ -189,14 +193,18 @@ describe('startup markers', () => {
 })
 
 // A stand-in for `rdst web`: prints markers, optionally migrates for a while, then serves
-// /api/init/status. Modes: serve, migrate, hang, crash.
+// /api/init/status, answering 401 without RDST_API_TOKEN when that is set, and reports it is
+// listening as uvicorn does. Modes: serve, migrate, hang, crash.
 const FAKE_BACKEND = `
 import http from 'node:http'
 const [mode, ms, ...rest] = process.argv.slice(2)
 const arg = (name) => rest[rest.indexOf(name) + 1]
 const say = (marker) => console.log('RDST_STARTUP ' + JSON.stringify(marker))
-const serve = () => http.createServer((_req, res) => { res.writeHead(200); res.end('{}') })
-  .listen(Number(arg('--port')), arg('--host'))
+const token = process.env.RDST_API_TOKEN
+const serve = () => http.createServer((req, res) => {
+  res.writeHead(token && req.headers['x-rdst-token'] !== token ? 401 : 200); res.end('{}')
+}).listen(Number(arg('--port')), arg('--host'), () => console.error(
+  'INFO:     Uvicorn running on http://' + arg('--host') + ':' + arg('--port') + ' (Press CTRL+C to quit)'))
 say({ state: 'starting' })
 if (mode === 'crash') { console.error('boom'); process.exit(3) }
 if (mode === 'hang') setInterval(() => {}, 1000)
@@ -288,6 +296,113 @@ describe('startBackend', () => {
     })
     expect(migratingWhenStopped).toBe(false)
     await stopBackend(handle)
+  }, 15_000)
+})
+
+describe('backend identity', () => {
+  it("accepts only the server's own report that it listens on the backend's address", () => {
+    const base = 'http://127.0.0.1:47787'
+    expect(
+      reportsListening(
+        'INFO:     Uvicorn running on http://127.0.0.1:47787 (Press CTRL+C to quit)\r',
+        base
+      )
+    ).toBe(true)
+    expect(
+      reportsListening(
+        'Uvicorn running on http://127.0.0.1:47787 (Press CTRL+C to quit)',
+        base
+      )
+    ).toBe(true)
+    expect(
+      reportsListening(
+        'INFO:     Uvicorn running on http://127.0.0.1:477870 (Press CTRL+C to quit)',
+        base
+      )
+    ).toBe(false)
+    // Printed before the port is bound.
+    expect(
+      reportsListening(
+        'Starting RDST web server on http://127.0.0.1:47787',
+        base
+      )
+    ).toBe(false)
+    expect(
+      reportsListening(
+        'INFO:     127.0.0.1:5 - "GET /Uvicorn running on http://127.0.0.1:47787 (x HTTP/1.1" 404',
+        base
+      )
+    ).toBe(false)
+  })
+
+  it('adds the launch token to every request a fetcher sends', async () => {
+    const seen: Headers[] = []
+    const fetcher = tokenFetch('secret', async (_input, init) => {
+      seen.push(new Headers(init?.headers))
+      return new Response('{}')
+    })
+    await fetcher('http://127.0.0.1:1/api/x')
+    await fetcher('http://127.0.0.1:1/api/y', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [TOKEN_HEADER]: 'other' },
+    })
+    expect(seen.map((headers) => headers.get(TOKEN_HEADER))).toEqual([
+      'secret',
+      'secret',
+    ])
+    expect(seen[1]?.get('content-type')).toBe('application/json')
+  })
+
+  it('is ready only when its own process serves the port, with the token', async () => {
+    const handle = await startBackend({
+      resourcesPath: tempDir,
+      command: fake('serve'),
+      token: 'launch-secret',
+    })
+    try {
+      const status = `${handle.apiBaseUrl}/api/init/status`
+      expect((await fetch(status)).status).toBe(401)
+      expect((await tokenFetch('launch-secret')(status)).status).toBe(200)
+    } finally {
+      await stopBackend(handle)
+    }
+  }, 15_000)
+
+  it('never takes another program on its port for the backend', async () => {
+    const port = await findAvailablePort('127.0.0.1')
+    let probes = 0
+    const squatter = http.createServer((_req, res) => {
+      probes++
+      res.writeHead(200)
+      res.end('{}')
+    })
+    await new Promise<void>((resolve) =>
+      squatter.listen(port, '127.0.0.1', resolve)
+    )
+    try {
+      // The backend can't bind and exits; until then the squatter's answers don't count.
+      await expect(
+        startBackend({
+          resourcesPath: tempDir,
+          command: fake('serve'),
+          port,
+          token: 't',
+        })
+      ).rejects.toThrow('exited before it became ready')
+      // A backend still starting up is never mistaken for the squatter either.
+      await expect(
+        startBackend({
+          resourcesPath: tempDir,
+          command: fake('hang'),
+          port,
+          token: 't',
+          startupTimeoutMs: 600,
+        })
+      ).rejects.toThrow('Timed out waiting for RDST backend')
+      expect(probes).toBe(0)
+    } finally {
+      await new Promise((resolve) => squatter.close(resolve))
+    }
   }, 15_000)
 })
 

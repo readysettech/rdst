@@ -93,17 +93,18 @@ def test_index_recommendations(
             target=target, target_config=target_config, lane=ANALYZE_LANE
         )
         password = _resolve_explain_password(target_config, resolved["password"])
-        conn_params = postgres_connection_kwargs(resolved, password=password)
+        # hypopg keeps hypothetical indexes in session memory, so the check runs in
+        # read-only transactions: the planner sees the indexes and the query cannot write.
+        conn_params = postgres_connection_kwargs(resolved, password=password, read_only=True)
         conn = psycopg2.connect(**conn_params)
     except Exception as exc:
         return _skipped(SKIP_CONNECTION_FAILED, f"Could not connect for index testing: {exc}")
 
     try:
-        conn.autocommit = True
         with conn.cursor() as cur:
             status = _hypopg_status(cur)
             if status == "installed":
-                return _run_tests(cur, original_sql, recommendations)
+                return _run_tests(conn, cur, original_sql, recommendations)
             if status == "available":
                 return _skipped(
                     SKIP_HYPOPG_NOT_INSTALLED,
@@ -130,7 +131,7 @@ def test_index_recommendations(
             pass
 
 
-def _run_tests(cur, sql: str, recommendations: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _run_tests(conn, cur, sql: str, recommendations: List[Dict[str, Any]]) -> Dict[str, Any]:
     cur.execute("SELECT hypopg_reset()")
     baseline_plan = _explain(cur, sql)
     baseline_cost = _plan_cost(baseline_plan)
@@ -172,6 +173,8 @@ def _run_tests(cur, sql: str, recommendations: List[Dict[str, Any]]) -> Dict[str
                 )
         except Exception as exc:
             result["error"] = _clean_pg_error(exc)
+            # A failed statement aborts the transaction; the next recommendation needs a new one.
+            conn.rollback()
         finally:
             try:
                 cur.execute("SELECT hypopg_reset()")

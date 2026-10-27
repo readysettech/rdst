@@ -157,7 +157,7 @@ def _unsafe_function(issues: list[str]) -> str | None:
 
 
 @lru_cache(maxsize=TEXT_CACHE_ENTRIES)
-def _classify(text: str) -> tuple[bool, str, str | None]:
+def _classify(text: str, engine: str = "") -> tuple[bool, str, str | None]:
     if not (text or "").strip():
         return False, "no_text", ("RDST doesn't have this query's text yet, so there's "
                                   "nothing to analyze.")
@@ -178,8 +178,9 @@ def _classify(text: str) -> tuple[bool, str, str | None]:
     if kind != "select":
         label = first or "This statement"
         return False, "utility", f"{label} isn't a query, so there's no plan to analyze."
-    safety = validate_query_safety(text)
-    if not safety.get("safe"):
+    safety = validate_query_safety(text, engine)
+    # Text cut off inside a literal (a truncated capture) is left to the analysis to report.
+    if not safety.get("safe") and not safety.get("unterminated"):
         issues = list(safety.get("issues") or [])
         function = _unsafe_function(issues)
         if function:
@@ -194,9 +195,11 @@ def _classify(text: str) -> tuple[bool, str, str | None]:
 
 
 def analyzability(text: str, *, mean_ms: float | None = None,
-                  execute: bool = False) -> dict[str, Any]:
-    """`analyzable`, `analyzable_code`, `not_analyzable_reason` and `analysis_note`."""
-    ok, code, reason = _classify(text or "")
+                  execute: bool = False, engine: str = "") -> dict[str, Any]:
+    """`analyzable`, `analyzable_code`, `not_analyzable_reason` and `analysis_note`.
+
+    ``engine`` is the target's; it decides how the text's quoting reads."""
+    ok, code, reason = _classify(text or "", engine)
     note = None
     if ok and statement_kind(text or "") == "write":
         note = "RDST analyzes how it finds its rows, without running the write."

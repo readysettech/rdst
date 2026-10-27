@@ -289,7 +289,9 @@ def benchmark_queries(
         # Captured text is database-controlled and is about to be interpolated
         # into EXPLAIN / CREATE CACHE and executed in the timing loop, so only a
         # single read-only statement gets that far.
-        not_read_only = benchmark_read_only_reason(sql)
+        not_read_only = benchmark_read_only_reason(
+            sql, str((cache_config or {}).get("engine") or "")
+        )
         if not_read_only:
             results.append({
                 "query_hash": q_hash,

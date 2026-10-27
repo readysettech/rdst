@@ -69,6 +69,27 @@ describe("electron-builder flavors", () => {
     expect(flavorFacts("release", { RDST_BUILD_KEYSERVICE_URL: cl }).RDST_DESKTOP_KEYSERVICE).toBe("");
   });
 
+  it.each(Object.keys(flavors))("hardens the %s binary with fuses", (flavor) => {
+    const fuses = render(flavor).match(/^electronFuses:\n((?: {2}.*\n|\s*#.*\n)+)/m)?.[1] ?? "";
+    for (const line of [
+      "runAsNode: false",
+      "enableNodeOptionsEnvironmentVariable: false",
+      "enableEmbeddedAsarIntegrityValidation: true",
+      "onlyLoadAppFromAsar: true",
+      "grantFileProtocolExtraPrivileges: false",
+    ])
+      expect(fuses).toContain(`  ${line}\n`);
+    // Only a build that never reaches users keeps --inspect.
+    const inspect = flavors[flavor].updates === "enabled" ? "false" : "true";
+    expect(fuses).toContain(`  enableNodeCliInspectArguments: ${inspect}\n`);
+  });
+
+  it("refuses --inspect in every flavor that ships to users", () => {
+    expect(flavorFacts("release", {}).RDST_DESKTOP_INSPECT).toBe("false");
+    expect(flavorFacts("staging", {}).RDST_DESKTOP_INSPECT).toBe("false");
+    expect(flavorFacts("cl", {}).RDST_DESKTOP_INSPECT).toBe("true");
+  });
+
   it("refuses unknown flavors and placeholders", () => {
     expect(() => flavorFacts("prod")).toThrow("unknown desktop flavor 'prod'");
     expect(() => flavorFacts("toString")).toThrow("unknown desktop flavor");

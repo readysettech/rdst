@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sys
 
 import pytest
 
@@ -529,3 +530,82 @@ def test_an_agent_step_carries_the_agents_version_and_how_it_went_over_the_list(
     assert (sent[0]["proposed"], sent[0]["skipped"], sent[0]["unmentioned"]) == (3, 2, 1)
     assert "names" not in sent[0]
     assert sent[1]["step"] == "signin_retried" and "agent_version" not in sent[1]
+
+
+@pytest.mark.parametrize("text", [
+    "telemetry_enabled = false\n",
+    "telemetry_enabled=false\n",
+    "telemetry_enabled = 'false'\n",
+    "[telemetry]\nenabled = false\n",
+    "[telemetry]\ntelemetry_enabled = false\n",
+    # Appended to the end of the file, the line belongs to the last table.
+    'default = "shop"\n[targets.shop]\nhost = "db"\ntelemetry_enabled = false\n',
+    "telemetry_enabled = false\n[broken\n",
+])
+def test_config_opt_out_forms(text):
+    from shared.telemetry_manager import config_opts_out
+
+    assert config_opts_out(text)
+
+
+@pytest.mark.parametrize("text", [
+    "", 'default = "shop"\n', "telemetry_enabled = true\n", "[telemetry]\nenabled = true\n",
+])
+def test_config_without_an_opt_out_keeps_telemetry(text):
+    from shared.telemetry_manager import config_opts_out
+
+    assert not config_opts_out(text)
+
+
+def test_manager_reads_the_opt_out_from_its_config(monkeypatch, tmp_path):
+    from shared.telemetry_manager import TelemetryManager
+
+    monkeypatch.delenv("RDST_TESTING", raising=False)
+    monkeypatch.delenv("RDST_TELEMETRY", raising=False)
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
+    (tmp_path / "config.toml").write_text("[telemetry]\nenabled=false\n")
+
+    assert TelemetryManager().is_enabled() is False
+
+
+def test_database_errors_send_their_code_and_primary_message_only(fake):
+    import psycopg2.errors
+    import pymysql
+
+    unique = psycopg2.errors.UniqueViolation(
+        'duplicate key value violates unique constraint "people_ssn_key"\n'
+        "DETAIL:  Key (ssn)=(123-45-6789) already exists.\n")
+    product_telemetry.report_error("collector", unique)
+    duplicate = pymysql.err.IntegrityError(1062, "Duplicate entry '123-45-6789' for key 'ssn'")
+    product_telemetry.report_error("monitor_loop", duplicate)
+    wrapped = RuntimeError("Failed to connect to PostgreSQL: new row violates check constraint\n"
+                           "DETAIL:  Failing row contains (42, 123-45-6789, alice).")
+    product_telemetry.report_error("api", wrapped)
+
+    events = fake.named("app_error")
+    assert [event["error_class"] for event in events] == [
+        "UniqueViolation", "IntegrityError", "RuntimeError"]
+    assert events[1]["db_code"] == "1062"
+    assert events[2]["message"] == ("Failed to connect to PostgreSQL: new row violates check "
+                                    "constraint")
+    text = json.dumps(events)
+    for secret in ("123-45-6789", "alice", "Key (", "DETAIL", "Failing row"):
+        assert secret not in text
+    assert "duplicate key value violates unique constraint" in events[0]["message"]
+
+
+def test_logged_database_errors_drop_their_detail(fake):
+    import psycopg2.errors
+
+    handler = product_telemetry.AppErrorLogHandler()
+    try:
+        raise psycopg2.errors.NotNullViolation(
+            'null value in column "name"\nDETAIL:  Failing row contains (7, 555-12-3456).\n')
+    except psycopg2.errors.NotNullViolation:
+        record = logging.LogRecord("features.monitor", logging.ERROR, __file__, 1,
+                                   "Insert failed", None, sys.exc_info())
+    handler.emit(record)
+
+    (event,) = fake.named("app_error")
+    assert "555-12-3456" not in json.dumps(event)
+    assert event["message"].startswith("Insert failed: null value in column")

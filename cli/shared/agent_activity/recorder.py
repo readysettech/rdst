@@ -450,13 +450,27 @@ def _pg_connection_class() -> type | None:
     return RecordingConnection
 
 
-def pg_connection_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+def pg_connection_class() -> type | None:
+    """The psycopg2 connection class that records statements, for subclassing."""
+    return _pg_connection_class()
+
+
+def pg_connection_kwargs(
+    kwargs: dict[str, Any], connection_class: type | None = None
+) -> dict[str, Any]:
     """psycopg2.connect kwargs that record the connection's statements into the running
-    action. Unchanged when no action is running."""
+    action. Unchanged when no action is running.
+
+    ``connection_class`` (a subclass of ``pg_connection_class()``) replaces the
+    connection class, whether or not an action is running.
+    """
     activity = _CURRENT.get()
-    if activity is None or "connection_factory" in kwargs:
+    if "connection_factory" in kwargs:
         return kwargs
-    cls = _pg_connection_class()
+    if activity is None:
+        return kwargs if connection_class is None else {
+            **kwargs, "connection_factory": connection_class}
+    cls = connection_class or _pg_connection_class()
     if cls is None:
         return kwargs
     options = _OPTIONS_TIMEOUT.search(str(kwargs.get("options") or ""))

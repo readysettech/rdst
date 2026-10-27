@@ -86,7 +86,7 @@ def plan_integer_mean(sql: str, dialect: str, schema_info) -> MeanPlan | None:
     if (
         dialect != "mysql"
         or schema_info is None
-        or not check_read_only(sql)["is_read_only"]
+        or not check_read_only(sql, dialect)["is_read_only"]
     ):
         return None
     try:

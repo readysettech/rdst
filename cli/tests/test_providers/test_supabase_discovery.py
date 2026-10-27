@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from unittest.mock import patch
 
@@ -300,7 +301,7 @@ class TestSupabaseRoutes:
         assert done.json()["state"] == "success"
         assert supabase_oauth.get_access_token() == ("sba_broker", "oauth")
         assert broker.calls[0][1]["return_url"] == (
-            "http://localhost:3001/configure?connected=supabase"
+            "http://localhost:3001/api/providers/oauth-return?provider=supabase"
         )
 
     def test_login_uses_desktop_return_url(
@@ -311,11 +312,21 @@ class TestSupabaseRoutes:
 
         with patch("features.providers.supabase_oauth.requests.post", broker):
             response = fleet_router_client.post("/api/providers/supabase-login")
+            assert response.status_code == 200
+            # The browser comes back to this server first, then on to the deep link.
+            assert broker.calls[0][1]["return_url"] == (
+                "http://127.0.0.1:8787/api/providers/oauth-return?provider=supabase"
+            )
+            broker.result_status = "ready"
+            broker.completion = "c-1"
+            page = fleet_router_client.get(
+                "/api/providers/oauth-return",
+                params={"provider": "supabase", "login_id": "login-1", "completion": "c-1"},
+            )
 
-        assert response.status_code == 200
-        assert broker.calls[0][1]["return_url"] == (
-            "rdst://oauth-complete?provider=supabase"
-        )
+        assert page.status_code == 200
+        assert '"rdst://oauth-complete?provider=supabase"' in page.text
+        assert supabase_oauth.get_access_token() == ("sba_broker", "oauth")
 
     def test_login_broker_failure_returns_409(self, fleet_router_client):
         broker = _sb_broker()
@@ -359,6 +370,131 @@ class TestSupabaseRoutes:
         assert broker.calls == []
 
 
+class TestBrowserReturnBindsThePickup:
+    def test_pickup_waits_for_the_browser_to_bring_the_completion_back(
+        self, fleet_router_client
+    ):
+        broker = _sb_broker()
+        broker.completion = "c-1"
+        with patch("features.providers.supabase_oauth.requests.post", broker):
+            started = fleet_router_client.post("/api/providers/supabase-login").json()
+            broker.result_status = "ready"
+            waiting = fleet_router_client.get(f"/api/providers/supabase-login/{started['login_id']}")
+            page = fleet_router_client.get(
+                "/api/providers/oauth-return",
+                params={"provider": "supabase", "login_id": started["login_id"],
+                        "completion": "c-1"},
+            )
+            done = fleet_router_client.get(f"/api/providers/supabase-login/{started['login_id']}")
+
+        assert waiting.json()["state"] == "running"
+        assert "Connected to Supabase" in page.text
+        assert "window.close()" in page.text
+        assert done.json()["state"] == "success"
+        assert broker.calls[-1][1]["completion"] == "c-1"
+
+    # What a browser sends when the broker's page on the keyservice navigates here.
+    CROSS_SITE = {
+        "referer": "https://keyservice.readyset.io/",
+        "sec-fetch-site": "cross-site",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-dest": "document",
+    }
+
+    def _start_ready(self, fleet_router_client, broker):
+        broker.completion = "c-1"
+        started = fleet_router_client.post("/api/providers/supabase-login").json()
+        broker.result_status = "ready"
+        return started["login_id"]
+
+    def _return(self, fleet_router_client, login_id, **extra):
+        return fleet_router_client.get(
+            "/api/providers/oauth-return",
+            params={"provider": "supabase", "login_id": login_id, **extra},
+            headers=self.CROSS_SITE,
+        )
+
+    def test_cross_site_return_with_the_completion_lands_the_tokens(self, fleet_router_client):
+        broker = _sb_broker()
+        with patch("features.providers.supabase_oauth.requests.post", broker):
+            login_id = self._start_ready(fleet_router_client, broker)
+            page = self._return(fleet_router_client, login_id, completion="c-1")
+
+        assert page.status_code == 200
+        assert "Connected to Supabase" in page.text
+        assert page.headers["referrer-policy"] == "no-referrer"
+        assert supabase_oauth.get_access_token() == ("sba_broker", "oauth")
+
+    def test_cross_site_return_without_the_completion_lands_nothing(self, fleet_router_client):
+        broker = _sb_broker()
+        with patch("features.providers.supabase_oauth.requests.post", broker):
+            login_id = self._start_ready(fleet_router_client, broker)
+            missing = self._return(fleet_router_client, login_id)
+            wrong = self._return(fleet_router_client, login_id, completion="forged")
+            # Neither attempt spoils the login for the browser that really returns.
+            real = self._return(fleet_router_client, login_id, completion="c-1")
+
+        assert (missing.status_code, wrong.status_code) == (400, 403)
+        assert real.status_code == 200
+        assert supabase_oauth.get_access_token() == ("sba_broker", "oauth")
+
+    def test_return_for_a_login_started_elsewhere_lands_nothing(self, fleet_router_client):
+        page = fleet_router_client.get(
+            "/api/providers/oauth-return",
+            params={"provider": "supabase", "login_id": "not-mine", "completion": "c-1"},
+        )
+
+        assert page.status_code == 400
+        assert "sign-in not found" in page.text
+        assert supabase_oauth.get_access_token() == (None, None)
+
+    def test_return_route_refuses_unknown_providers(self, fleet_router_client):
+        page = fleet_router_client.get(
+            "/api/providers/oauth-return", params={"provider": "evil"})
+
+        assert page.status_code == 404
+
+
+class TestRemoteBrowserSignIn:
+    """`rdst web --host 0.0.0.0`: the broker can only return to this machine's loopback."""
+
+    @staticmethod
+    def _post(path, client, headers=None):
+        from httpx import ASGITransport, AsyncClient
+        from tests.test_providers.conftest import make_fleet_router_client
+
+        app = make_fleet_router_client().app
+
+        async def send():
+            transport = ASGITransport(app=app, client=client)
+            async with AsyncClient(transport=transport, base_url="http://10.0.0.5:8787") as http:
+                return await http.post(path, headers=headers or {})
+
+        return asyncio.run(send())
+
+    @pytest.mark.parametrize("provider", ["supabase", "digitalocean"])
+    def test_remote_browser_is_told_where_to_connect_from(self, provider):
+        broker = _sb_broker()
+        with patch("features.providers.provider_oauth.requests.post", broker):
+            response = self._post(
+                f"/api/providers/{provider}-login", ("10.0.0.9", 50000),
+                {"origin": "http://10.0.0.5:8787"})
+
+        assert response.status_code == 409
+        body = response.json()
+        assert body["code"] == f"{provider}_oauth_remote_browser"
+        assert "from a browser on the machine running RDST" in body["detail"]
+        assert broker.calls == []
+
+    def test_loopback_browser_still_starts_the_broker_flow(self, fleet_router_client):
+        broker = _sb_broker()
+        with patch("features.providers.supabase_oauth.requests.post", broker):
+            response = fleet_router_client.post("/api/providers/supabase-login")
+
+        assert response.status_code == 200
+        assert broker.calls[0][0] == broker.START_URL
+
+
 class TestStatusCollectsOrphanedLogin:
     def test_status_picks_up_login_after_ui_poll_died(self, monkeypatch):
         """A browser approval that lands after the UI stopped polling must
@@ -366,12 +502,13 @@ class TestStatusCollectsOrphanedLogin:
         from features.providers import supabase, supabase_oauth
 
         supabase_oauth._register_login(
-            "orphan-login", {"mode": "broker", "pickup_key": "pk"}
+            "orphan-login", {"mode": "broker", "pickup_key": "pk", "completion": "c-1"}
         )
 
         def fake_broker_post(action, payload):
             assert action == "result"
-            assert payload == {"login_id": "orphan-login", "pickup_key": "pk"}
+            assert payload == {
+                "login_id": "orphan-login", "pickup_key": "pk", "completion": "c-1"}
             return {"status": "ready", "tokens": {
                 "access_token": "at-orphan", "refresh_token": "rt",
                 "expires_in": 3600,

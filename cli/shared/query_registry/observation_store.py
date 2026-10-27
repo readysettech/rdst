@@ -729,6 +729,7 @@ class ObservationStore:
         self._write_conn = conn
 
     def _connect(self) -> sqlite3.Connection:
+        shared_constants.ensure_private_file(self._path)
         conn = sqlite3.connect(
             self._path, isolation_level=None, check_same_thread=False
         )

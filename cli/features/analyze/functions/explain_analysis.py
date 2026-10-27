@@ -471,9 +471,12 @@ def _execute_postgres_explain_analyze(
             target_config, resolved_params['password']
         )
 
+        # EXPLAIN ANALYZE runs the statement, and only the database can stop whatever it
+        # calls from writing; PostgreSQL still plans writes in a read-only transaction.
         conn_params = postgres_connection_kwargs(
             resolved_params,
             password=password,
+            read_only=True,
         )
 
         # FAST MODE: Skip EXPLAIN ANALYZE entirely, only run EXPLAIN
@@ -1014,8 +1017,10 @@ def _execute_mysql_explain_analyze(
                     error = None
                     try:
                         # Create new connection for this thread (cursors aren't thread-safe)
+                        # EXPLAIN ANALYZE runs the statement; the database keeps it to reads.
                         query_conn = create_mysql_connection_from_params(
                             mysql_params,
+                            read_only=True,
                             **conn_overrides,
                         )
                         monitor_run = analysis_lane.register(target, query_conn, 'mysql', target_config)

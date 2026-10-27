@@ -160,6 +160,7 @@
     "GET /mcp": "the local MCP endpoint a coding agent calls, not the UI",
     "POST /mcp": "the local MCP endpoint a coding agent calls, not the UI",
     "GET /api/providers/supabase-callback": "the OAuth redirect Supabase opens in the system browser, not app code",
+    "GET /api/providers/oauth-return": "the page the provider sign-in broker redirects the system browser to, not app code",
     "GET /api/top/realtime": "the legacy top view; /top now redirects to the Database page",
     "POST /api/analyze/quick": "not called by the UI",
     "POST /api/init/monitoring-upgrade/dismiss": "no page requests it since the redesign",

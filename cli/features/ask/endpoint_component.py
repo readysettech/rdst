@@ -39,7 +39,7 @@ def plan_endpoint_component(sql, dialect, schema):
     if (
         dialect not in ("mysql", "postgres", "postgresql")
         or schema is None
-        or not check_read_only(sql)["is_read_only"]
+        or not check_read_only(sql, dialect)["is_read_only"]
     ):
         return None
     d = "postgres" if dialect in ("postgres", "postgresql") else "mysql"

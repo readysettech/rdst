@@ -23,7 +23,7 @@ from shared.db_connection import (
 )
 from shared.llm import cents_to_tokens, format_tokens
 from shared.shell import environment_assignment
-from shared.password_resolver import derive_password_env
+from shared.password_resolver import new_password_env
 from shared.ssh_keys import discover_ssh_auth_options
 from shared.telemetry import telemetry
 
@@ -412,9 +412,7 @@ class ConfigurationWizard:
         if submitted_password:
             from shared.secret_store_service import SecretStoreService
 
-            password_env = merged.get("password_env") or derive_password_env(
-                target_name
-            )
+            password_env = merged.get("password_env") or new_password_env(target_name, cfg)
             merged["password_env"] = password_env
             SecretStoreService().set_secret(
                 password_env,
@@ -769,9 +767,7 @@ class ConfigurationWizard:
             + (" (leave blank to keep the existing password)" if existing else "")
             + ": "
         )
-        config["password_env"] = existing.get("password_env") or derive_password_env(
-            target_name
-        )
+        config["password_env"] = existing.get("password_env") or new_password_env(target_name)
         if password:
             config["password"] = password
 
@@ -1338,7 +1334,7 @@ class ConfigurationWizard:
             return existing["password_env"]
 
         if password_from_connstring or target_name:
-            return derive_password_env(target_name or "target")
+            return new_password_env(target_name or "target")
 
         return ""
 

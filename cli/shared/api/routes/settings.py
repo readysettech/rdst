@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Literal, Optional
 
@@ -150,12 +151,12 @@ async def set_email(request: Request, body: EmailRequest) -> EmailUpdateResponse
     cfg.save()
     _fire_email_captured(email, domain)
 
-    # New signups prove mailbox access through the keyservice — the same
-    # verification a trial registration performs, minus the trial token. An
-    # email already verified by any flow (trial, CLI audit report, this gate
-    # on another machine) comes back verified instantly and no email is sent.
-    # Names are deliberately NOT sent: they live on this machine and in
-    # telemetry only.
+    # This install proves mailbox access through the keyservice, the same
+    # verification a trial registration performs, minus the trial token. The
+    # click on the emailed link releases the report credential to this install
+    # alone, through /email/verify-poll, even for an address another flow or
+    # machine already verified. Names are deliberately NOT sent: they live on
+    # this machine and in telemetry only.
     from features.audit.email_service import EmailService
 
     result = EmailService().register_email(email)
@@ -319,7 +320,8 @@ async def verify_poll(request: Request) -> VerifyPollResponse:
 
     from features.audit.email_service import EmailService
 
-    status = EmailService().check_status(identity["email"])
+    # The check makes blocking keyservice requests; keep them off the event loop.
+    status = await asyncio.to_thread(EmailService().check_status, identity["email"])
     if status.get("error"):
         logger.warning("Email verification status check failed: %s", status["error"])
         raise HTTPException(
@@ -333,4 +335,5 @@ async def verify_poll(request: Request) -> VerifyPollResponse:
         cfg.add_verified_email(identity["email"], status["report_token"])
         cfg.save()
         return VerifyPollResponse(verified=True)
-    return VerifyPollResponse(verified=False)
+    # A report went out through another install's email: delivered, nothing to store.
+    return VerifyPollResponse(verified=bool(status.get("verified")))

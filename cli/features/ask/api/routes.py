@@ -27,6 +27,7 @@ from features.ask.service import AskService
 from features.ask.telemetry import ask_terminal_detector
 from features.schema.assessment_context import referenced_tables
 from shared import agent_activity
+from shared.api.guards import require_local_request
 from shared.api.models import AskRequest
 from shared.api.target_guard import TargetGuard, require_target_body
 from shared.telemetry import telemetry
@@ -262,6 +263,7 @@ class AskExamplesResponse(BaseModel):
 
 @router.get("/ask/examples", response_model=AskExamplesResponse)
 async def ask_examples(
+    http_request: Request,
     target: str = Query(..., description="Target to generate examples for"),
 ) -> AskExamplesResponse:
     """Example questions grounded in the target's schema.
@@ -270,6 +272,7 @@ async def ask_examples(
     caching per target; otherwise returns schema-safe fallbacks. Never surfaces
     hardcoded generic prompts. (Ports schema-grounded examples from CL 14059.)
     """
+    require_local_request(http_request)
     import asyncio
 
     from features.ask.example_questions import get_example_questions
@@ -303,6 +306,7 @@ class AskHistoryResponse(BaseModel):
 
 @router.get("/ask/history", response_model=AskHistoryResponse)
 async def ask_history(
+    http_request: Request,
     target: str | None = Query(None, description="Filter to one target"),
     limit: int = Query(50, ge=1, le=200),
 ) -> AskHistoryResponse:
@@ -314,6 +318,7 @@ async def ask_history(
     persistence landed have none. The SQL is the one that answered that question,
     in its original submitted form when stored, so a re-ask is faithful.
     """
+    require_local_request(http_request)
     from shared.query_registry import QueryRegistry
 
     registry = QueryRegistry()
@@ -340,6 +345,7 @@ async def ask(
     request: Request,
     guard: TargetGuard = Depends(require_target_body),
 ):
+    require_local_request(request)
     surface = request.headers.get("x-rdst-surface", "web")
     if surface not in {"desktop", "web"}:
         surface = "web"

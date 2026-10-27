@@ -268,7 +268,7 @@ def test_upgraded_library_analysis_and_benchmarks_follow_monitored_identity(old_
     app = FastAPI()
     app.include_router(monitor_routes.router, prefix="/api/monitor")
     app.include_router(registry_routes.router, prefix="/api")
-    with TestClient(app) as client:
+    with TestClient(app, client=("127.0.0.1", 50000)) as client:
         for entry in MANIFEST["queries"]:
             identity = hash_sql(entry["original_sql"] or entry["sql"])
             for analysis in MANIFEST["analyses"][entry["hash"]]:

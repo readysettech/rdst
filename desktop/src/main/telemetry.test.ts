@@ -95,7 +95,7 @@ describe('DesktopTelemetry', () => {
     expect(post).not.toHaveBeenCalled()
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toHaveLength(1)
 
-    telemetry.setBackend('http://127.0.0.1:9999')
+    telemetry.setBackend('http://127.0.0.1:9999', { 'X-RDST-Token': 't' })
     await telemetry.flush()
     expect(post).toHaveBeenCalledWith(
       'http://127.0.0.1:9999/api/telemetry/events',
@@ -107,7 +107,8 @@ describe('DesktopTelemetry', () => {
             properties: { stage: 'start', attempts: 4 },
           },
         ],
-      }
+      },
+      { 'X-RDST-Token': 't' }
     )
     expect(telemetry.pending).toHaveLength(0)
     expect(fs.existsSync(file)).toBe(false)
@@ -260,6 +261,27 @@ describe('direct startup failure capture', () => {
     )
     expect(telemetry.pending).toHaveLength(0)
     expect(fs.existsSync(file)).toBe(false)
+  })
+  it("never sends the backend's token to PostHog", async () => {
+    const post = vi.fn<EventPoster>(async () => true)
+    const telemetry = new DesktopTelemetry(
+      path.join(dir, 'queue.json'),
+      false,
+      post,
+      config(),
+      async () => true
+    )
+    telemetry.setBackend('http://127.0.0.1:9999', { 'X-RDST-Token': 'secret' })
+    telemetry.capture('desktop_startup_failed', { stage: 'start' })
+    telemetry.capture('tray_quit')
+    await telemetry.flush()
+    const calls = post.mock.calls
+    expect(calls.map(([url]) => url)).toEqual([
+      'https://posthog.invalid/capture/',
+      'http://127.0.0.1:9999/api/telemetry/events',
+    ])
+    expect(calls[0]?.[2]).toBeUndefined()
+    expect(calls[1]?.[2]).toEqual({ 'X-RDST-Token': 'secret' })
   })
   it('keeps offline failures scrubbed on disk and retries on the next launch', async () => {
     const file = path.join(dir, 'queue.json')

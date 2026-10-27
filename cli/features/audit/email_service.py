@@ -1,17 +1,136 @@
-"""Verified report delivery via the RDST keyservice."""
+"""Verified report delivery via the RDST keyservice.
+
+Registering an address sends a random pickup secret along; once the recipient
+clicks the link in the email that registration sent, /report-status hands the
+report credential to whoever presents that secret, which is only this install.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+import secrets
+import stat
+import tempfile
 import time
-from typing import Any, Dict, Optional
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Optional
 
+from filelock import FileLock
+
+from shared.constants import ensure_private_data_dir, rdst_data_dir
 from shared.keyservice import (
     DEFAULT_KEYSERVICE_URL,
     keyservice_base_url,
 )
+from shared.persistence import replace_with_retry
 
 KEYSERVICE_URL = keyservice_base_url()
+
+# Pickup secrets for registrations still waiting on their verification click, by
+# address, kept in a private file so a restart before the click still collects the
+# credential. Every registration keeps its own pickup, since each email's link approves
+# only its own; a pickup lives as long as the keyservice keeps it. The file lock covers
+# every process sharing the data dir (the web server and CLI runs).
+PICKUP_TTL_SECONDS = 86400
+MAX_PICKUPS_PER_EMAIL = 10
+# A status check presents only the newest few, so it stays a few short requests.
+MAX_PICKUPS_POLLED = 3
+_PICKUPS_FILE = "report-pickups.json"
+
+
+def _pickups_path() -> Path:
+    return ensure_private_data_dir() / _PICKUPS_FILE
+
+
+@contextmanager
+def _pickup_store() -> Iterator[Path]:
+    path = _pickups_path()
+    with FileLock(f"{path}.lock", timeout=10, mode=0o600):
+        yield path
+
+
+def _load_pickups() -> Dict[str, List[Dict[str, Any]]]:
+    """Live pickups by address; a file with unsafe ownership or permissions is ignored."""
+    try:
+        fd = os.open(_pickups_path(), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "r") as source:
+            info = os.fstat(source.fileno())
+            if not stat.S_ISREG(info.st_mode) or (os.name == "posix" and (
+                    info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600)):
+                return {}
+            values = json.loads(source.read(1 << 20))
+    except (OSError, ValueError):
+        return {}
+    now = time.time()
+    live: Dict[str, List[Dict[str, Any]]] = {}
+    for email, entries in (values if isinstance(values, dict) else {}).items():
+        kept = [entry for entry in (entries if isinstance(entries, list) else [])
+                if isinstance(entry, dict) and isinstance(entry.get("pickup"), str)
+                and isinstance(entry.get("expires_at"), (int, float))
+                and entry["expires_at"] > now]
+        if kept:
+            live[email] = kept
+    return live
+
+
+def _save_pickups(pickups: Dict[str, List[Dict[str, Any]]]) -> None:
+    path = _pickups_path()
+    if not pickups:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return
+    fd, temporary = tempfile.mkstemp(prefix=".report-pickups-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as destination:
+            if os.name == "posix":
+                os.fchmod(destination.fileno(), 0o600)
+            json.dump(pickups, destination)
+            destination.flush()
+            os.fsync(destination.fileno())
+        replace_with_retry(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
+
+
+def _remember_pickup(email: str, pickup: str) -> None:
+    with _pickup_store():
+        pickups = _load_pickups()
+        entries = pickups.get(email, [])
+        entries.append({"pickup": pickup, "expires_at": time.time() + PICKUP_TTL_SECONDS})
+        pickups[email] = entries[-MAX_PICKUPS_PER_EMAIL:]
+        _save_pickups(pickups)
+
+
+def _pickups_for(email: str) -> List[str]:
+    """This address's pickups, newest first: the latest email is the likeliest clicked."""
+    with _pickup_store():
+        entries = _load_pickups().get(email, [])
+    return [entry["pickup"] for entry in reversed(entries)]
+
+
+def _discard_pickup(email: str, pickup: str) -> None:
+    """Drop a pickup no email waits on; a store that cannot be written keeps it to expire."""
+    try:
+        _forget_pickups(email, [pickup])
+    except Exception:
+        pass
+
+
+def _forget_pickups(email: str, used: List[str]) -> None:
+    with _pickup_store():
+        pickups = _load_pickups()
+        kept = [entry for entry in pickups.get(email, []) if entry["pickup"] not in used]
+        if kept:
+            pickups[email] = kept
+        else:
+            pickups.pop(email, None)
+        _save_pickups(pickups)
 
 
 class EmailService:
@@ -42,8 +161,19 @@ class EmailService:
         mode: str,
     ) -> Dict[str, Any]:
         import httpx2 as httpx
+        pickup = secrets.token_urlsafe(32)
+        # Stored before anything is sent: a pickup that cannot be kept would leave an email
+        # in the inbox whose click can never be collected here.
         try:
-            payload: Dict[str, Any] = {"email": email}
+            _remember_pickup(email, pickup)
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": (f"Could not save the verification state in {rdst_data_dir()} "
+                          f"({exc}). No email was sent."),
+            }
+        try:
+            payload: Dict[str, Any] = {"email": email, "pickup": pickup}
             if html:
                 payload["html"] = html
                 payload["subject"] = subject or "RDST Report"
@@ -58,14 +188,23 @@ class EmailService:
                 )
                 data = resp.json()
                 if resp.status_code in (200, 201):
+                    if data.get("verified"):
+                        # Delivered or already verified: no email waits on this pickup.
+                        _discard_pickup(email, pickup)
                     return data
+                _discard_pickup(email, pickup)
                 return {"success": False, "error": data.get("detail", f"HTTP {resp.status_code}")}
         except Exception as e:
+            # The email may still have gone out, so the pickup stays until it expires.
             return {"success": False, "error": str(e)}
 
     def check_status(self, email: str) -> Dict[str, Any]:
-        """Single non-blocking verification check for `email`."""
-        return self._sync(self._check_status(email))
+        """One verification check for `email`. A check that outlasts its deadline reads
+        as still pending; the next one picks up from the stored pickups."""
+        try:
+            return self._sync(self._check_status(email))
+        except TimeoutError:
+            return {"verified": False, "pending": True}
 
     def poll_verification(
         self, email: str, timeout_seconds: int = 300, interval: float = 3.0
@@ -80,21 +219,46 @@ class EmailService:
         return {"verified": False, "timed_out": True}
 
     async def _check_status(self, email: str) -> Dict[str, Any]:
+        """Present each pickup this address holds until one of their links was clicked.
+
+        The collected credential is the account's, so every other pickup for the address
+        is then spent; an expired pickup never collects anything. A report this address
+        queued that went out through a click on another install's email reads as
+        verified for delivery, with no credential.
+        """
         import httpx2 as httpx
+        pickups = _pickups_for(email)[:MAX_PICKUPS_POLLED]
+        spent: List[str] = []
+        released = False
+        data: Dict[str, Any] = {"verified": False}
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    f"{self._url}/report-status",
-                    params={"email": email},
-                )
-                if resp.status_code == 200:
-                    return resp.json()
-                return {
-                    "verified": False,
-                    "error": f"Verification service returned HTTP {resp.status_code}",
-                }
+                for pickup in pickups or [None]:
+                    resp = await client.get(
+                        f"{self._url}/report-status",
+                        params={"email": email},
+                        headers={"X-RDST-Report-Pickup": pickup} if pickup else None,
+                    )
+                    if resp.status_code != 200:
+                        return {
+                            "verified": False,
+                            "error": f"Verification service returned HTTP {resp.status_code}",
+                        }
+                    data = resp.json()
+                    released = released or bool(data.get("report_released"))
+                    if pickup and data.get("expired"):
+                        spent.append(pickup)
+                    if data.get("report_token"):
+                        spent = _pickups_for(email)
+                        break
         except Exception as exc:
             return {"verified": False, "error": str(exc)}
+        finally:
+            if spent:
+                _forget_pickups(email, spent)
+        if released and not data.get("report_token"):
+            return {**data, "verified": True, "report_token": None, "report_released": True}
+        return data
 
     def send_report(
         self,

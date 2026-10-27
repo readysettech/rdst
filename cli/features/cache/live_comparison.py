@@ -19,6 +19,7 @@ from .performance_comparison import (
     ComparisonController,
     _execute_on_connection,
     _open_persistent_connection,
+    origin_config,
 )
 
 MIN_COMPARE_CONCURRENCY_PER_LANE = 1
@@ -241,7 +242,7 @@ def run_live_comparison(
     origin = _LaneRunner(
         "origin",
         query,
-        original_db_config,
+        origin_config(original_db_config),
         controller,
         measurements,
         on_execute=emit_origin_start,

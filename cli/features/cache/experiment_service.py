@@ -15,7 +15,7 @@ from typing import Any, AsyncGenerator, Callable
 
 import sqlglot
 
-from features.query_registry.service import benchmark_read_only_reason
+from features.query_registry.service import benchmark_execution_reason
 from shared.async_utils import start_blocking
 from shared.config.targets import TargetsConfig
 from shared.deploy.sandbox_manager import (
@@ -342,8 +342,10 @@ class ReadysetExperimentService:
 
         # The request supplies this SQL and it is both interpolated into cache
         # DDL and executed against the origin, so a speed test only ever runs a
-        # single read-only statement.
-        not_read_only = benchmark_read_only_reason(query)
+        # single read-only statement, read with the origin engine's quoting.
+        not_read_only = benchmark_execution_reason(
+            query, await _blocking_call(_target_engine, target)
+        )
         if not_read_only:
             await queue.put(
                 ErrorEvent(
@@ -670,6 +672,18 @@ def _origin_benchmark_executions(
     if isinstance(count, bool) or not isinstance(count, int) or count < 0:
         return None
     return count
+
+
+def _target_engine(target: str) -> str:
+    """The target's engine, or "" when it can't be read; the query is then read under
+    every engine's quoting rules."""
+    try:
+        config = TargetsConfig()
+        config.load()
+        return str((config.get(target) or {}).get("engine") or "")
+    except Exception as exc:
+        logger.debug("Could not read the engine of target %s: %s", target, exc)
+        return ""
 
 
 def _origin_connection_config(target: str) -> dict[str, Any]:

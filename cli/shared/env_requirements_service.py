@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, List
 
 from shared.account_session import (
@@ -12,7 +11,7 @@ from shared.account_session import (
 )
 from shared.anthropic_env import anthropic_key_rejected, get_anthropic_source
 from shared.config.targets import TargetsConfig
-from shared.password_resolver import resolve_password
+from shared.password_resolver import implicit_password_envs, resolve_password
 from shared.secret_store_service import SecretStoreService
 
 
@@ -35,34 +34,15 @@ class EnvRequirementsService:
         """Return {password_env: {"targets": [...], "target_data": <first target's data>}}."""
         mapping: Dict[str, Dict[str, Any]] = {}
         target_names = cfg.list_targets()
-        used_names = {
-            (cfg.get(target) or {}).get("password_env", "").strip()
-            for target in target_names
-            if (cfg.get(target) or {}).get("password_env", "").strip()
-        }
+        implicit = implicit_password_envs({t: cfg.get(t) or {} for t in target_names})
 
         for target in target_names:
             target_data = cfg.get(target) or {}
             password_env = (target_data.get("password_env") or "").strip()
             if not password_env:
-                if target_data.get("password") or target_data.get(
-                    "password_secret_arn"
-                ):
+                if target not in implicit:
                     continue
-                base_name = (
-                    "RDST_"
-                    + (
-                        re.sub(r"[^A-Z0-9]+", "_", target.upper()).strip("_")
-                        or "TARGET"
-                    )
-                    + "_PASSWORD"
-                )
-                password_env = base_name
-                suffix = 2
-                while password_env in used_names:
-                    password_env = f"{base_name}_{suffix}"
-                    suffix += 1
-                used_names.add(password_env)
+                password_env = implicit[target]
                 target_data = {**target_data, "password_env": password_env}
             if password_env not in mapping:
                 mapping[password_env] = {"targets": [], "target_data": target_data}

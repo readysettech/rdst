@@ -69,7 +69,7 @@ def test_history_route_reads_the_query_on_one_database(data_dir):
     _record("shop", [_stats("aaa", 12.0, 30.0, 300)])
     app = FastAPI()
     app.include_router(routes.router, prefix="/api")
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
 
     body = client.get("/api/query-registry/queries/aaa/benchmarks?target=shop").json()
     assert len(body["runs"]) == 1
