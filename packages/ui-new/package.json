@@ -120,7 +120,7 @@
   "dependencies": {
     "@tanstack/react-router": "catalog:tanstack",
     "@rs/ui-icons": "workspace:*",
-    "react-hook-form": "7.65.0",
+    "react-hook-form": "7.91.0",
     "@radix-ui/react-accessible-icon": "catalog:radix",
     "@radix-ui/react-alert-dialog": "catalog:radix",
     "@radix-ui/react-radio-group": "catalog:radix",
@@ -138,11 +138,11 @@
     "@radix-ui/react-slot": "catalog:radix",
     "@radix-ui/react-switch": "catalog:radix",
     "@radix-ui/react-toast": "catalog:radix",
-    "markdown-to-jsx": "7.7.15",
-    "motion": "12.23.24",
-    "date-fns": "4.1.0",
+    "markdown-to-jsx": "9.10.3",
+    "motion": "14.6.0",
+    "date-fns": "4.4.0",
     "date-fns-tz": "3.2.0",
-    "zustand": "5.0.8",
+    "zustand": "5.0.16",
     "prismjs": "1.30.0",
     "vaul": "1.1.2"
   }

@@ -1,1 +1,1 @@
-export { compiler, type MarkdownToJSX } from 'markdown-to-jsx'
+export { compiler, type MarkdownToJSX } from 'markdown-to-jsx/react'

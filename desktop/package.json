@@ -28,15 +28,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "electron-updater": "^6.6.2"
+    "electron-updater": "^6.8.11"
   },
   "devDependencies": {
     "@rs/typescript-config": "workspace:*",
     "@types/node": "catalog:common",
     "electron": "^45.0.0",
-    "electron-builder": "^26.0.12",
-    "tsup": "^8.5.0",
+    "electron-builder": "^26.18.0",
+    "tsup": "^9.0.0",
     "typescript": "catalog:common",
-    "vitest": "^3.2.4"
+    "vitest": "^5.0.5"
   }
 }

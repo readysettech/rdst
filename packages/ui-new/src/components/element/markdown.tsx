@@ -1,4 +1,4 @@
-import { compiler, type MarkdownToJSX } from 'markdown-to-jsx'
+import { compiler, type MarkdownToJSX } from 'markdown-to-jsx/react'
 import './markdown.css'
 
 export const proseClassName = 'rs-markdown'

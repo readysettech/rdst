@@ -93,4 +93,20 @@ describe('FeedbackChat', () => {
       await screen.findByText('Turn on pg_stat_statements first.')
     ).toBeTruthy()
   })
+
+  it('shows raw HTML in a reply as text and drops script links', async () => {
+    vi.mocked(chatReport).mockResolvedValue({
+      reply:
+        'Try <img src=x onerror="alert(1)"> or [this](javascript:alert(1)).',
+      ai: true,
+    })
+    renderWithClient(<FeedbackChat isOpen onClose={() => {}} />)
+
+    type('Help')
+    expect(await screen.findByText(/<img src=x onerror/)).toBeTruthy()
+    expect(screen.getByRole('log').querySelector('img')).toBeNull()
+    expect(screen.getByText('this').closest('a')?.hasAttribute('href')).toBe(
+      false
+    )
+  })
 })

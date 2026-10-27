@@ -139,8 +139,8 @@ export const DropdownContent = forwardRef<
 })
 
 export const DropdownSubContent = forwardRef<
-  ComponentRef<typeof DropdownMenu.Content>,
-  ComponentPropsWithoutRef<typeof DropdownMenu.Content> &
+  ComponentRef<typeof DropdownMenu.SubContent>,
+  ComponentPropsWithoutRef<typeof DropdownMenu.SubContent> &
     WithClassName & { open?: boolean }
 >(({ className, open, children, ...rest }, ref) => {
   const transition = getTransition()

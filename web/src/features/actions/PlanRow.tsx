@@ -150,6 +150,7 @@ export function PlanRow({
             )}
           >
             {named.name}
+            {named.detail ? ' ' : null}
             {named.detail ? (
               <span
                 className={cn(
@@ -157,7 +158,6 @@ export function PlanRow({
                   tier !== 'later' && 'text-content-layout-2'
                 )}
               >
-                {' '}
                 {named.detail}
               </span>
             ) : null}

@@ -46,7 +46,7 @@ services:
         done
 
   browser:
-    image: mcr.microsoft.com/playwright:v1.61.0-noble
+    image: mcr.microsoft.com/playwright:v1.64.1-noble
     # Root so writes to the mounted checkout succeed, matching the pipeline's
     # other docker steps. Override locally to keep artifacts owned by your user.
     user: "${RDST_E2E_BROWSER_USER:-0:0}"

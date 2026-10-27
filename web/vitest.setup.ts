@@ -48,6 +48,15 @@ Object.defineProperty(globalThis, 'ResizeObserver', {
   writable: true,
 })
 
+// jsdom loads no Tailwind CSS, so the children of flex and grid containers keep
+// display: inline instead of being blockified as in a browser. Accessible names put
+// a space between block children only, so a label and count laid out with gap would
+// read "Open3" here and "Open 3" in a browser.
+const layout = document.createElement('style')
+layout.textContent =
+  ':where(.flex, .inline-flex, .grid, .inline-grid) > * { display: block }'
+document.head.append(layout)
+
 beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()
