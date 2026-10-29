@@ -458,6 +458,8 @@ export type RdstEventProperties = {
   /** The agent was signed out: the user opened its sign-in, then RDST saw it signed in. */
   find_agent_sign_in: { agent: string; via?: 'terminal' | 'app' }
   find_agent_signed_in: { agent: string }
+  /** The user picked another agent for the search than the one RDST offered. */
+  find_agent_switched: { agent: string }
   /** The user copied the paste prompt. */
   agent_prompt_copied: { attempt_id: string | null }
   /** The find view closed, and where the user stood: what stopped them, if anything. */

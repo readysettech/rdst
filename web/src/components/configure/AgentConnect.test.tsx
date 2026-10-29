@@ -546,6 +546,55 @@ describe('AgentConnect finding databases', () => {
     return rows
   }
 
+  it('lets the user pick the agent, and asks a signed-out one to sign in before searching', async () => {
+    const calls = routeFetch([
+      {
+        key: 'codex:local',
+        id: 'codex',
+        side: 'local',
+        label: 'Codex',
+        name: 'Codex',
+        signed_in: true,
+      },
+      {
+        key: 'claude:local',
+        id: 'claude',
+        side: 'local',
+        label: 'Claude Code',
+        name: 'Claude',
+        signed_in: false,
+      },
+    ])
+    renderFull()
+    expect(
+      (await screen.findByTestId('search-with-agent')).textContent
+    ).toContain('Search for databases with Codex')
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Use Claude Code instead (signed out)',
+      })
+    )
+    expect(screen.getByTestId('search-with-agent').textContent).toContain(
+      'Search for databases with Claude'
+    )
+    fireEvent.click(screen.getByTestId('search-with-agent'))
+    expect(await screen.findByTestId('agent-sign-in')).toBeTruthy()
+    // Nothing runs with an agent that can't sign in yet.
+    expect(calls.some(([url]) => url.endsWith('/scan'))).toBe(false)
+    expect(
+      screen.getByRole('button', { name: 'Use Codex instead' })
+    ).toBeTruthy()
+  })
+
+  it('offers a new search once one has finished', async () => {
+    routeFetch([])
+    renderFull()
+    await look()
+    fireEvent.click(screen.getByTestId('search-again'))
+    expect(await screen.findByTestId('scan-computer')).toBeTruthy()
+    expect(screen.queryAllByTestId('found-database')).toHaveLength(0)
+  })
+
   it('imports local databases on a click, and connects one manually with what it found', async () => {
     const calls = routeFetch([])
     const { onSignIn, onFillIn } = renderFull()

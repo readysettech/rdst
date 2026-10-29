@@ -529,14 +529,14 @@ async def nightly(engine: str, target: str):
         "DELETE FROM report_run WHERE target=? AND ts>=? AND ts<?", (target, start, end)))
     report = await run_report(target, "nightly", store=store)
 
-    def drop_orphans(conn) -> None:
-        # A notice whose report went with today's runs makes the Inbox ask for it, and the
-        # page reports the 404. Today's summary points at the new run by now and stays.
-        notices = ("SELECT id FROM inbox_item WHERE target=? AND type IN "
-                   "('report_ready','daily_summary') AND json_extract(body_json,'$.report_id') "
-                   "NOT IN (SELECT id FROM report_run WHERE target=?)")
-        conn.execute(f"DELETE FROM inbox_event WHERE item_id IN ({notices})", (target, target))
-        conn.execute(f"DELETE FROM inbox_item WHERE id IN ({notices})", (target, target))
+    def unlink_orphans(conn) -> None:
+        # Any Inbox item (a notice, a fix, a measured change) that names a report that went
+        # with today's runs makes the page ask for it, and the page reports the 404. Its link
+        # goes; the item stays. Today's summary points at the new run by now.
+        conn.execute("UPDATE inbox_item SET body_json=json_remove(body_json,'$.report_id') "
+                     "WHERE target=? AND json_type(body_json,'$.report_id')='integer' AND "
+                     "json_extract(body_json,'$.report_id') NOT IN "
+                     "(SELECT id FROM report_run WHERE target=?)", (target, target))
 
-    await asyncio.to_thread(store._write, drop_orphans)
+    await asyncio.to_thread(store._write, unlink_orphans)
     return {"id": report.get("id"), "state": report["state"]}

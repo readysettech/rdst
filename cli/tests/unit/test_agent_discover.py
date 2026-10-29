@@ -1257,3 +1257,30 @@ def test_a_search_whose_agent_failed_says_so_and_shows_what_rdst_found(monkeypat
     assert item.state == "failed" and len(item.candidates) == 1
     assert item.message == "Claude Code couldn't go through what RDST found: API Error: 529 " \
                            "overloaded"
+
+
+def test_a_stale_agent_list_answers_at_once_and_refreshes_behind(monkeypatch):
+    """Asking each agent whether it's signed in takes seconds on Windows; the add dialog gets
+    the last answer straight away while a fresh one is worked out."""
+    import threading
+
+    calls = []
+    release = threading.Event()
+
+    def slow():
+        calls.append(1)
+        release.wait(5)
+        return [CLAUDE]
+
+    monkeypatch.setattr(discover, "_find_agents", slow)
+    monkeypatch.setattr(discover, "_detected", (0.0, [discover.Agent("codex", "local", "x")]))
+    monkeypatch.setattr(discover, "_refreshing", False)
+    stale = discover.detect()
+    assert [agent.id for agent in stale] == ["codex"]
+    assert [agent.id for agent in discover.detect()] == ["codex"]
+    release.set()
+    for _ in range(50):
+        if discover._detected and discover._detected[1] == [CLAUDE]:
+            break
+        time.sleep(0.05)
+    assert discover.detect() == [CLAUDE] and len(calls) == 1

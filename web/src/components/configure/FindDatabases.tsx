@@ -978,6 +978,8 @@ export function FindDatabases({
 }) {
   const [agents, setAgents] = useState<DiscoveryAgent[] | null>(null)
   const [agentKey, setAgentKey] = useState<string | null>(null)
+  // The agent picked for the search is signed out: its sign-in shows before anything runs.
+  const [signInFirst, setSignInFirst] = useState(false)
   const [scan, setScan] = useState<DiscoveryRun | null>(() =>
     lastImport && Date.now() - lastImport.at < RESULTS_KEPT_MS
       ? lastImport.run
@@ -1926,12 +1928,49 @@ export function FindDatabases({
               primary
               title={`Search for databases with ${agent.name}`}
               caption={`${agent.label} helps search for databases on this computer and figures out the ones you've been working with most recently. ${agent.name} can then drive the setup in RDST.`}
-              onClick={() => void look(true)}
+              onClick={() =>
+                agent.signed_in === false
+                  ? setSignInFirst(true)
+                  : void look(true)
+              }
               testId="search-with-agent"
               logo={<AgentLogo agent={agent.id} size={26} />}
               info={`RDST looks through your projects, agent sessions, terminal history, Docker and running databases to find the ones you've used recently. Then ${agent.label} picks out the ones you've worked on most and suggests those. It's read-only, so nothing on your computer or your databases changes.`}
             />
-            <div className="-mt-2 flex justify-end">
+            {signInFirst && agent.signed_in === false && (
+              <AgentSignIn
+                agent={agent}
+                inApp={appFor(agent)}
+                retryLabel="Search now"
+                onSignedIn={() =>
+                  void reloadAgents().then(() => {
+                    setSignInFirst(false)
+                    void look(true)
+                  })
+                }
+              />
+            )}
+            <div className="-mt-2 flex flex-wrap items-center justify-end gap-1">
+              {(agents ?? [])
+                .filter((other) => other.key !== agent.key)
+                .map((other) => (
+                  // Any agent here can search; one that's signed out asks for its sign-in.
+                  <Button
+                    key={other.key}
+                    variant="primary"
+                    modifier="ghost"
+                    size="small"
+                    label={`Use ${other.label} instead${other.signed_in === false ? ' (signed out)' : ''}`}
+                    onClick={() => {
+                      trackEvent('find_agent_switched', { agent: other.key })
+                      setAgentKey(other.key)
+                      setSignInFirst(false)
+                    }}
+                    data-testid={`use-agent-${other.key}`}
+                  >
+                    <AgentLogo agent={other.id} size={14} className="mr-1.5" />
+                  </Button>
+                ))}
               <Button
                 variant="primary"
                 modifier="ghost"
@@ -2079,6 +2118,24 @@ export function FindDatabases({
               }
             />
           </div>
+        )}
+        {scan.state === 'done' && (!search || search.state !== 'running') && (
+          // A finished search stays a click away from a new one, with any agent.
+          <Button
+            variant="primary"
+            modifier="ghost"
+            size="small"
+            className="-ml-2"
+            label="Search again"
+            onClick={() => {
+              lastImport = null
+              setScan(null)
+              setSearch(null)
+              setPicked(null)
+              setShowAll(false)
+            }}
+            data-testid="search-again"
+          />
         )}
         {scan.state === 'failed' && (
           <Button

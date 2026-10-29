@@ -86,6 +86,8 @@ class Agent:
 
 _detect_lock = threading.Lock()
 _detected: tuple[float, list[Agent]] | None = None
+# A background detection is under way, so a stale answer doesn't start another.
+_refreshing = False
 # The default WSL distro and its user's home, from the last detection on Windows.
 wsl_home: tuple[str, str] | None = None
 
@@ -353,11 +355,33 @@ def forget_detected() -> None:
 
 
 def detect(refresh: bool = False) -> list[Agent]:
-    """The coding agents RDST can run, here and (on Windows) inside WSL."""
-    global _detected
+    """The coding agents RDST can run, here and (on Windows) inside WSL. Asking each one
+    whether it's signed in takes seconds, so a stale answer comes back at once while a fresh
+    one is worked out in the background; ``refresh`` waits for a fresh one."""
+    global _refreshing
     with _detect_lock:
-        if not refresh and _detected and time.time() - _detected[0] < DETECT_TTL_SECONDS:
+        if not refresh and _detected:
+            if time.time() - _detected[0] >= DETECT_TTL_SECONDS and not _refreshing:
+                _refreshing = True
+                threading.Thread(target=_detect_now, name="rdst-agent-detect",
+                                 daemon=True).start()
             return list(_detected[1])
+    return _detect_now()
+
+
+def _detect_now() -> list[Agent]:
+    global _detected, _refreshing
+    try:
+        agents = _find_agents()
+    finally:
+        with _detect_lock:
+            _refreshing = False
+    with _detect_lock:
+        _detected = (time.time(), agents)
+    return list(agents)
+
+
+def _find_agents() -> list[Agent]:
     if sys.platform == "darwin":
         # A login shell runs the user's startup files as RDST, and anything they touch in
         # Downloads or Documents makes macOS ask about RDST. The usual install folders come
@@ -380,9 +404,7 @@ def detect(refresh: bool = False) -> list[Agent]:
     agents += [agent for agent in _detect_wsl() if agent.id not in found]
     # One that can run comes first: it's the one the dialog offers.
     agents.sort(key=lambda agent: agent.signed_in is False)
-    with _detect_lock:
-        _detected = (time.time(), agents)
-    return list(agents)
+    return agents
 
 
 _apps: tuple[float, list[str]] | None = None
