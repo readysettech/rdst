@@ -118,9 +118,10 @@ function truncate(text: string, limit: number) {
     : { text, truncated: false }
 }
 
-/** A bare `e12` is a ref from the last `snapshot`; anything else a selector. */
+/** A bare `e12`, or `f2e12` inside a frame, is a ref from the last `snapshot`; anything else a
+ * selector. */
 function locate(page: Page, target: string): Locator {
-  return /^e\d+$/.test(target)
+  return /^(?:f\d+)?e\d+$/.test(target)
     ? page.locator(`aria-ref=${target}`)
     : page.locator(target)
 }
@@ -238,7 +239,7 @@ export class Session {
   /** Locate TARGET and remember a replayable form of it for the command log. */
   private async target(target: string): Promise<Locator> {
     this.resolvedTarget = target
-    if (/^e\d+$/.test(target)) {
+    if (/^(?:f\d+)?e\d+$/.test(target)) {
       // Read the role and name from the snapshot the ref came from; taking
       // another snapshot here would renumber the refs.
       const line = this.lastSnapshot

@@ -104,7 +104,7 @@ try {
 
   await check('snapshot returns refs', async () => {
     const snapshot = await rt('snapshot', [], { 'max-chars': '5000' })
-    return /\[ref=e\d+\]/.test(snapshot.text)
+    return /\[ref=(?:f\d+)?e\d+\]/.test(snapshot.text)
   })
 
   // A scratch input of the selftest's own, so no product screen is involved.

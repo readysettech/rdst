@@ -61,7 +61,7 @@ const until = finding ? String(finding.ts) : undefined
 const quote = (text: string) => JSON.stringify(text)
 const locator = (command: Command, index = 0) => {
   const target = command.result?.target ?? command.args?.[index] ?? ''
-  return /^e\d+$/.test(target)
+  return /^(?:f\d+)?e\d+$/.test(target)
     ? `page.locator(${quote(`aria-ref=${target}`)}) /* TODO: ref was not resolved; use a role locator */`
     : `page.locator(${quote(target)})`
 }

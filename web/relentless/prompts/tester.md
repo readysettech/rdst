@@ -22,7 +22,7 @@ screenshots. Nothing else is available; do not try other commands.
 
 ```
 rt status                         mode, URLs, dependencies, evidence counts
-rt snapshot [TARGET]              accessibility tree with refs like [ref=e12]
+rt snapshot [TARGET]              accessibility tree with refs like [ref=e12] or [ref=f2e12]
 rt screenshot [TARGET] --label L  PNG path; Read it to see the screen
 rt text [TARGET]                  visible text (defaults to #main-content)
 rt goto /path | reload | back | forward
@@ -55,7 +55,7 @@ rt finding --json '{...}'         file a finding
 rt finish --status passed|failed|blocked --summary '...'
 ```
 
-TARGET is a ref from your latest snapshot (`e12`) or a Playwright selector:
+TARGET is a ref from your latest snapshot (`e12`, `f2e12`) or a Playwright selector:
 `role=button[name="Save"]`, `role=dialog >> role=button[name="Cancel"]`,
 `text=Add target`, `[name="host"]`. Refs go stale after the page changes;
 take a new snapshot. Put text that begins with `-` after a bare `--`:
