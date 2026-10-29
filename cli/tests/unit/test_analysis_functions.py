@@ -196,6 +196,30 @@ class TestReadysetCacheability:
         result = check_readyset_cacheability("SELECT RAND()")
         assert result["cacheable"] is False
 
+    def test_blockers_name_only_constructs_in_the_sql(self):
+        """Names inside identifiers, literals, and quoted names are not function calls."""
+        result = check_readyset_cacheability(
+            "SELECT products.id, products.brand, products.slug FROM products "
+            "WHERE products.slug = $1")
+        assert result["cacheable"] is True
+        assert result["issues"] == []
+        result = check_readyset_cacheability(
+            "SELECT session_id, user_uuid, known_at, \"rand\" FROM visits "
+            "WHERE note = 'now() for update' AND json_data IS NOT NULL")
+        assert result["issues"] == [] and result["warnings"] == []
+        result = check_readyset_cacheability("SELECT id FROM users ORDER BY RANDOM() LIMIT 1")
+        assert result["issues"] == ["Uses non-deterministic RANDOM() function"]
+        result = check_readyset_cacheability("SELECT CURRENT_TIMESTAMP")
+        assert result["issues"] == ["Uses non-deterministic CURRENT_TIMESTAMP function"]
+        result = check_readyset_cacheability('SELECT id AS "--", RANDOM() AS n FROM products')
+        assert result["issues"] == ["Uses non-deterministic RANDOM() function"]
+        result = check_readyset_cacheability("SELECT id FROM products -- ORDER BY RANDOM()")
+        assert result["issues"] == []
+        result = check_readyset_cacheability(
+            "SELECT t.\"o'brien\", NOW() AS seen_at FROM "
+            "(SELECT primarytitle AS \"o'brien\" FROM title_basics) t LIMIT 1")
+        assert result["issues"] == ["Uses non-deterministic NOW() function"]
+
     def test_for_update_not_cacheable(self):
         """Test FOR UPDATE makes query uncacheable."""
         result = check_readyset_cacheability("SELECT * FROM users FOR UPDATE")

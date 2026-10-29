@@ -6,8 +6,8 @@ from features.ask.sql_validation import validate_filter_literal_provenance
 
 def test_candidate_v4_constructs_service_with_frozen_flags():
     flags = ask_profile_service_flags("candidate-v4")
-    assert len(flags) == 40
-    assert sum(flags.values()) == 28
+    assert len(flags) == 41
+    assert sum(flags.values()) == 29
     assert flags["projection_contract_enabled"] is True
     assert flags["declared_count_enabled"] is False
     assert flags["dual_candidate_selection_enabled"] is False

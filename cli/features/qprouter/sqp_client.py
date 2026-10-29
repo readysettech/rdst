@@ -14,6 +14,8 @@ import requests
 # Some SQP builds accept this header on mutating endpoints; it is harmless for
 # core routes and keeps compatibility with older demo images.
 API_KEY_HEADER = "X-QueryPilot-Api-Key"
+# The admin API is a local container, which a configured HTTP proxy cannot reach.
+DIRECT = {"http": None, "https": None}
 
 
 class SqpError(RuntimeError):
@@ -54,7 +56,8 @@ class SqpAdminClient:
 
     def _get(self, path: str) -> Any:
         try:
-            r = requests.get(self.base + path, headers=self._headers(False), timeout=self.timeout)
+            r = requests.get(self.base + path, headers=self._headers(False), timeout=self.timeout,
+                             proxies=DIRECT)
         except requests.RequestException as e:
             raise SqpError(f"GET {path} failed: {e}") from e
         if r.status_code >= 400:
@@ -64,7 +67,8 @@ class SqpAdminClient:
     def _post(self, path: str, body: dict | None = None) -> Any:
         try:
             r = requests.post(self.base + path, json=body or {},
-                              headers=self._headers(True), timeout=self.timeout)
+                              headers=self._headers(True), timeout=self.timeout,
+                              proxies=DIRECT)
         except requests.RequestException as e:
             raise SqpError(f"POST {path} failed: {e}") from e
         if r.status_code >= 400:
@@ -73,7 +77,8 @@ class SqpAdminClient:
 
     def _delete(self, path: str) -> None:
         try:
-            r = requests.delete(self.base + path, headers=self._headers(True), timeout=self.timeout)
+            r = requests.delete(self.base + path, headers=self._headers(True), timeout=self.timeout,
+                                proxies=DIRECT)
         except requests.RequestException as e:
             raise SqpError(f"DELETE {path} failed: {e}") from e
         if r.status_code >= 400:

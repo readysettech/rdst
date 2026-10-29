@@ -337,6 +337,39 @@ def test_judge_and_analysis_outcomes():
     assert stopped["decision"] == "Ran EXPLAIN ANALYZE with a 1.5 s timeout"
 
 
+def test_an_analysis_that_ended_early_names_only_what_ran():
+    failed = {"state": "failed", "mode": "analyze",
+              "error": "Workflow failed: Step 'CollectDatabaseSchema' timed out after 10 seconds."}
+    assert analysis_outcome(failed, [])["decision"] == "Stopped before any statement ran"
+    assert analysis_outcome(failed, [{"kind": "catalog"}])["decision"] == (
+        "Stopped before the query ran")
+    assert analysis_outcome(failed, [{"kind": "explain"}])["decision"] == (
+        "Ran EXPLAIN only, without executing the query")
+    assert analysis_outcome({**failed, "state": "running"}, [])["decision"] == (
+        "Stopped before any statement ran")
+
+
+def test_failed_analyses_recorded_as_running_explain_analyze_are_corrected(data_dir):
+    store = AgentActivityStore()
+    claim = "Ran EXPLAIN ANALYZE"
+    nothing = store.append(_entry(HOUR, outcome="failed", decision=claim))
+    catalog = store.append(_entry(HOUR + 1, outcome="cancelled", decision=claim),
+                           [{"sql": "SELECT relname FROM pg_class", "kind": "catalog"}])
+    ran = store.append(_entry(HOUR + 2, outcome="failed", decision=claim),
+                       [{"sql": "EXPLAIN ANALYZE SELECT 1", "kind": "explain_analyze"}])
+    done = store.append(_entry(HOUR + 3, decision=claim))
+    store._write(lambda conn: conn.execute(
+        "DELETE FROM activity_meta WHERE key='unrun_analyses_corrected'"))
+    from shared.agent_activity import store as store_module
+
+    store_module._OPENED.clear()
+    store = AgentActivityStore()
+    assert [store.entry(entry_id)["decision"] for entry_id in (nothing, catalog, ran, done)] == [
+        "Stopped before any statement ran", "Stopped before the query ran", claim, claim]
+    exported = {row["id"]: row["decision"] for row in store.export_rows()}
+    assert exported[nothing] == "Stopped before any statement ran"
+
+
 
 def test_an_analysis_restart_recovery_gave_up_on_is_recorded_as_failed(data_dir):
     record_recovery_failures([{"id": 4, "target": "db", "query_key": "k1", "reason": "user",
@@ -508,6 +541,24 @@ def test_daily_reports_carry_the_day_they_cover(data_dir):
     reports = {item["report_id"]: item for item in store.page(action="daily_snapshot")["items"]}
     assert (reports[7]["period_start"], reports[7]["period_end"]) == (HOUR - 86400, HOUR)
     assert reports[3]["period_start"] == HOUR - 2 * 86400
+
+
+def test_an_interrupted_report_keeps_its_id_and_says_it_was_interrupted(data_dir):
+    import asyncio
+
+    @recorder.recorded_snapshot
+    async def run_report(target, trigger):
+        agent_activity.describe(report_id=9, period_start=HOUR, period_end=HOUR + 600)
+        agent_activity.record_ai_call(provider="readyset", model="glm",
+                                      operation="monitor_report")
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(run_report("db", "user"))
+    [item] = AgentActivityStore().page(action="daily_snapshot")["items"]
+    assert (item["outcome"], item["summary"], item["report_id"], item["subject"]) == (
+        "failed", "Interrupted before it finished", 9, "On request")
+    assert AgentActivityStore().entry(item["id"])["run_ref"] == "report_run:9"
 
 
 def test_folded_lines_name_their_database_and_the_page_states_one_retention(data_dir):

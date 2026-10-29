@@ -101,7 +101,7 @@ function ActivityRow({
       <span className="text-mono-small tabular-nums text-content-layout-3">
         {clockTime(item.ts)}
       </span>
-      <span className="flex min-w-0 flex-wrap items-center gap-2 text-body-small text-content-layout-1">
+      <span className="flex min-w-0 flex-wrap items-center gap-2 text-body-small text-content-layout-1 wrap-anywhere">
         {line.text}
         {line.detail && (
           <span
@@ -122,7 +122,8 @@ function ActivityRow({
       <span className="text-caption text-content-layout-3">{line.place}</span>
     </>
   )
-  if (removed) return <ListRow className="min-h-11.5 py-2">{cells}</ListRow>
+  if (removed || !line.link)
+    return <ListRow className="min-h-11.5 py-2">{cells}</ListRow>
   return (
     <ListRow asChild interactive className="min-h-11.5 py-2">
       <Link to={line.link.to as never} search={line.link.search as never}>

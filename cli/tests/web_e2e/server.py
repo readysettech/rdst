@@ -33,6 +33,7 @@ from tests.web_e2e.fakes import (
     fake_docker_runtime_status,
     fake_sandbox_manager,
     fake_probe_upstream,
+    fake_check_anthropic_key,
     fake_autocomplete_schema,
     FakeJevClient,
     fake_assessment_context,
@@ -53,6 +54,7 @@ from features.scan.api import routes as scan_routes
 from features.schema.api import routes as schema_routes
 from features.schema.api import semantic_layer_routes
 from features.top.api import routes as top_routes
+from shared.api.routes import env as env_routes
 
 
 analyze_routes.AnalyzeService = FakeAnalyzeService
@@ -67,6 +69,7 @@ scan_routes.ScanService = FakeScanService
 semantic_layer_routes.SchemaService = FakeSchemaService
 top_routes.TopService = FakeTopService
 schema_routes.collect_all_tables_schema = fake_autocomplete_schema
+env_routes.check_anthropic_key = fake_check_anthropic_key
 
 from features.query_registry import assessment as assessment_module
 

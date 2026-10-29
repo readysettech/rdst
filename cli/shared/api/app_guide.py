@@ -80,7 +80,7 @@ Under "Advanced" you can choose:
 - "Analyze automatically" - busiest queries first, new ones as they appear.
 - "Measure real timings" - runs read-only SELECTs with a time limit (EXPLAIN ANALYZE). Off, RDST reads plans with EXPLAIN only and your queries never run.
 
-Click "Turn on monitoring". Signed out, the dialog asks you to sign in first, because monitoring's AI is free with a Readyset account; after you sign in, monitoring turns on. "Turn on without AI" is there too, but then monitoring only charts the database. If you're not ready, "Finish later" saves the database so you can finish from its page.
+Click "Turn on monitoring". Signed out, the dialog asks you to sign in first, because monitoring's AI is free with a Readyset account; after you sign in, monitoring turns on. "Turn on without AI" is there too: monitoring then charts the database, alerts on connection problems and lists server settings, maintenance and indexes to drop on Actions, but deep analysis, new indexes, query rewrites and nightly reports need AI. If you're not ready, "Finish later" saves the database so you can finish from its page.
 
 **What monitoring collects.** RDST reads your database's query statistics: which queries ran, how often, and how long they took, plus health numbers like connections, cache hit ratio, and rollbacks and deadlocks. It reads every minute, and every 10 seconds for the first few minutes after you turn it on. Detailed readings are kept for a while and then rolled up. "Keep readings" in Settings sets how long (7, 30 or 90 days).
 
@@ -191,7 +191,7 @@ While it runs, you can cache queries, "Turn on QueryPilot", and compare the Read
 
 AI is free with a Readyset account. Signed out, AI pages ask you to "Sign in" or "Use my own Anthropic key instead".
 
-Turning on monitoring asks you to sign in, because its checks, deep analysis and nightly reports use AI. You can turn it on without AI, but then RDST only charts the database and alerts on connection problems; deep analysis and Actions wait until you sign in.
+Turning on monitoring asks you to sign in, because its checks, deep analysis and nightly reports use AI. You can turn it on without AI: RDST still charts the database, alerts on connection problems and lists server settings, maintenance and indexes to drop on Actions, while deep analysis, new indexes, query rewrites and nightly reports wait until you sign in.
 
 To sign in, choose "Sign in", then "Continue with Google" or enter your email for a sign-in link. Your databases, history and settings carry over.
 

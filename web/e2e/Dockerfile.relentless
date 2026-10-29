@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.64.1-noble
+FROM mcr.microsoft.com/playwright:v1.61.0-noble
 
 # The desktop app's runtime libraries (its .deb dependencies), a private
 # Secret Service for each run's keychain, a virtual display for Electron, Python

@@ -21,6 +21,7 @@ import {
   ms,
   paneMeta,
   pct,
+  REASON_MAX,
   saves,
   speedup,
   stepList,
@@ -389,12 +390,18 @@ function Field({
   value,
   onChange,
   placeholder,
+  maxLength,
+  min,
+  problem,
 }: {
   label: string
   type?: 'text' | 'date'
   value: string
   onChange: (value: string) => void
   placeholder?: string
+  maxLength?: number
+  min?: string
+  problem?: string
 }) {
   const id = useId()
   return (
@@ -410,12 +417,34 @@ function Field({
         type={type}
         value={value}
         placeholder={placeholder}
+        maxLength={maxLength}
+        min={min}
+        aria-invalid={problem ? true : undefined}
         onChange={(event) => onChange(event.target.value)}
         className="h-8.5 bg-surface-layout-2 text-body-small"
       />
+      {problem ? (
+        <Text
+          as="p"
+          level="caption"
+          className="mt-1 text-content-negative-soft"
+        >
+          {problem}
+        </Text>
+      ) : maxLength && value.length >= maxLength ? (
+        <Text as="p" level="caption" className="mt-1 text-content-layout-3">
+          {maxLength} characters at most
+        </Text>
+      ) : null}
     </div>
   )
 }
+
+const VERB_FAILED = {
+  set_aside: "Couldn't set this change aside",
+  dismiss: "Couldn't dismiss this change",
+  did_it: "Couldn't mark this change done",
+} as const
 
 function PlanVerbs({ card, now }: { card: PlanCard; now: number }) {
   const verb = usePlanVerb()
@@ -423,7 +452,11 @@ function PlanVerbs({ card, now }: { card: PlanCard; now: number }) {
   const [dismissOpen, setDismissOpen] = useState(false)
   const [until, setUntil] = useState(() => isoDate(now + 7 * DAY))
   const [reason, setReason] = useState('')
+  const [failure, setFailure] = useState<string | null>(null)
   const { toast } = useToast()
+  const untilAt = dayStart(until)
+  const tomorrow = isoDate(now + DAY)
+  const pastDate = untilAt !== null && untilAt <= now
   const key = { target: card.database, id: card.id }
   // Set aside and Dismiss take the change off the list, so each offers an Undo.
   const undone = (name: 'set_aside' | 'dismiss') => () => {
@@ -444,14 +477,42 @@ function PlanVerbs({ card, now }: { card: PlanCard; now: number }) {
       ),
     })
   }
+  // A popover closes once its verb lands; on an error it stays open, says why, and keeps
+  // what was typed.
   const run = (
     name: 'set_aside' | 'dismiss' | 'did_it',
-    extra: { until?: number; reason?: string } = {}
-  ) =>
+    extra: { until?: number; reason?: string } = {},
+    close?: () => void
+  ) => {
+    setFailure(null)
     verb.mutate(
       { ...key, verb: name, ...extra },
-      { onSuccess: name === 'did_it' ? undefined : undone(name) }
+      {
+        onSuccess: () => {
+          close?.()
+          if (name !== 'did_it') undone(name)()
+        },
+        onError: (error) => {
+          if (close) setFailure(`${VERB_FAILED[name]}: ${error.message}`)
+          else
+            toast({
+              title: VERB_FAILED[name],
+              description: error.message,
+              variant: 'negative',
+            })
+        },
+      }
     )
+  }
+  const opened = (setOpen: (open: boolean) => void) => (open: boolean) => {
+    setFailure(null)
+    setOpen(open)
+  }
+  const failed = failure ? (
+    <p role="alert" className="text-caption text-content-negative-soft">
+      {failure}
+    </p>
+  ) : null
   return (
     <div className="contents" data-testid="plan-verbs">
       <Button
@@ -462,7 +523,7 @@ function PlanVerbs({ card, now }: { card: PlanCard; now: number }) {
         disabled={verb.isPending}
         onClick={() => run('did_it')}
       />
-      <Popover open={asideOpen} onOpenChange={setAsideOpen}>
+      <Popover open={asideOpen} onOpenChange={opened(setAsideOpen)}>
         <PopoverTrigger asChild>
           <Button
             variant="primary"
@@ -477,31 +538,43 @@ function PlanVerbs({ card, now }: { card: PlanCard; now: number }) {
           aria-label="Set aside"
           className="w-72 flex-col gap-3 p-4"
         >
-          <Field label="Until" type="date" value={until} onChange={setUntil} />
+          <Field
+            label="Until"
+            type="date"
+            value={until}
+            onChange={setUntil}
+            min={tomorrow}
+            problem={pastDate ? 'Pick a date after today' : undefined}
+          />
           <Field
             label="Reason"
             value={reason}
             onChange={setReason}
             placeholder="Optional"
+            maxLength={REASON_MAX}
           />
+          {failed}
           <Button
             variant="primary"
             modifier="outline"
             size="small"
             label="Set aside"
             className="self-end"
-            disabled={verb.isPending || dayStart(until) === null}
-            onClick={() => {
-              run('set_aside', {
-                until: dayStart(until) ?? now + 7 * DAY,
-                reason: reason.trim() || undefined,
-              })
-              setAsideOpen(false)
-            }}
+            disabled={verb.isPending || untilAt === null || pastDate}
+            onClick={() =>
+              run(
+                'set_aside',
+                {
+                  until: untilAt ?? now + 7 * DAY,
+                  reason: reason.trim() || undefined,
+                },
+                () => setAsideOpen(false)
+              )
+            }
           />
         </PopoverContent>
       </Popover>
-      <Popover open={dismissOpen} onOpenChange={setDismissOpen}>
+      <Popover open={dismissOpen} onOpenChange={opened(setDismissOpen)}>
         <PopoverTrigger asChild>
           <Button
             variant="primary"
@@ -521,7 +594,9 @@ function PlanVerbs({ card, now }: { card: PlanCard; now: number }) {
             value={reason}
             onChange={setReason}
             placeholder="Why this change isn't worth it"
+            maxLength={REASON_MAX}
           />
+          {failed}
           <Button
             variant="primary"
             modifier="outline"
@@ -529,10 +604,11 @@ function PlanVerbs({ card, now }: { card: PlanCard; now: number }) {
             label="Dismiss"
             className="self-end"
             disabled={verb.isPending}
-            onClick={() => {
-              run('dismiss', { reason: reason.trim() || undefined })
-              setDismissOpen(false)
-            }}
+            onClick={() =>
+              run('dismiss', { reason: reason.trim() || undefined }, () =>
+                setDismissOpen(false)
+              )
+            }
           />
         </PopoverContent>
       </Popover>

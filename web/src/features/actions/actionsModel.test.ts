@@ -22,6 +22,7 @@ import {
   queryChange,
   saves,
   speedup,
+  statements,
   stepList,
   tierGroups,
   whatIf,
@@ -402,6 +403,37 @@ describe('the plan', () => {
     expect(allSql([rewrite])).toBe('')
   })
 
+  it('copies server settings with the index changes', () => {
+    const workMem = card({
+      id: 1,
+      kind: 'setting',
+      type: 'change_setting',
+      title: 'Raise work_mem',
+      sql: "ALTER SYSTEM SET work_mem = '64MB';\nSELECT pg_reload_conf();",
+      rollback_sql: 'ALTER SYSTEM RESET work_mem;\nSELECT pg_reload_conf();',
+    })
+    const buffers = card({
+      id: 2,
+      kind: 'setting',
+      type: 'change_setting',
+      title: 'Raise shared_buffers',
+      sql: "ALTER SYSTEM SET shared_buffers = '2GB';",
+      rollback_sql: null,
+      restart: true,
+    })
+    const index = card({ id: 3 })
+    expect(allSql([workMem, buffers, index])).toBe(
+      [
+        `-- ${ENGINE_NOTE.postgresql}`,
+        `-- 1. Raise work_mem\n${workMem.sql}`,
+        `-- 2. Raise shared_buffers\n${buffers.sql}\n-- Takes effect after a restart.`,
+        `-- 3. Change 3\n${index.sql}`,
+        `-- To undo these changes, run these:\n-- 1. Raise work_mem\n-- ALTER SYSTEM RESET work_mem;\n-- SELECT pg_reload_conf();\n-- 3. Change 3\n-- ${index.rollback_sql}`,
+      ].join('\n\n')
+    )
+    expect(allSql([buffers])).not.toContain('CONCURRENTLY keeps writes')
+  })
+
   it("says MySQL can't roll index changes back in a transaction", () => {
     const mysql = card({
       id: 6,
@@ -471,6 +503,52 @@ describe('migrations', () => {
     expect(text).toContain(
       `-- U20261008095630__add_an_index_on_posts_score.sql\n${change.rollback_sql}`
     )
+  })
+
+  it('runs each statement of a setting change on its own, both ways', () => {
+    const setting = {
+      title: 'Raise work_mem',
+      sql: "ALTER SYSTEM SET work_mem = '16MB';\nSELECT pg_reload_conf();",
+      rollback_sql:
+        "ALTER SYSTEM SET work_mem = '4MB';\nSELECT pg_reload_conf();",
+    }
+    const alembic = migration('alembic', setting, at)
+    const executes = (value: string) =>
+      `        op.execute(\n            """\n            ${value}\n            """\n        )`
+    expect(alembic).toContain(
+      `def upgrade() -> None:\n    with op.get_context().autocommit_block():\n${executes("ALTER SYSTEM SET work_mem = '16MB';")}\n${executes('SELECT pg_reload_conf();')}\n`
+    )
+    expect(alembic).toContain(
+      `def downgrade() -> None:\n    with op.get_context().autocommit_block():\n${executes("ALTER SYSTEM SET work_mem = '4MB';")}\n${executes('SELECT pg_reload_conf();')}\n`
+    )
+    const rails = migration('rails', setting, at)
+    expect(rails).toContain('  disable_ddl_transaction!')
+    expect(rails).toContain(
+      "  def down\n    execute <<~SQL\n      ALTER SYSTEM SET work_mem = '4MB';\n    SQL\n    execute <<~SQL\n      SELECT pg_reload_conf();\n    SQL\n  end"
+    )
+    const prisma = migration('prisma', setting, at)
+    expect(prisma).toContain(
+      "-- prisma/migrations/20261008095630_raise_work_mem/migration.sql\n-- Raise work_mem\nALTER SYSTEM SET work_mem = '16MB';\n"
+    )
+    expect(prisma).toContain(
+      '-- prisma/migrations/20261008095631_raise_work_mem/migration.sql\n-- Raise work_mem\nSELECT pg_reload_conf();\n'
+    )
+    expect(prisma).toContain('-- To roll back, run each statement on its own:')
+    expect(migration('flyway', setting, at)).toContain(
+      'executeInTransaction=false'
+    )
+  })
+
+  it('splits a script into statements, comments kept with the next one', () => {
+    expect(
+      statements(
+        "-- 25% of RAM\nALTER SYSTEM SET shared_buffers = '4GB';\n\nVACUUM a;\n-- then restart"
+      )
+    ).toEqual([
+      "-- 25% of RAM\nALTER SYSTEM SET shared_buffers = '4GB';",
+      'VACUUM a;\n-- then restart',
+    ])
+    expect(statements('SELECT 1')).toEqual(['SELECT 1'])
   })
 
   it('says so where a change has no rollback, and keeps transactions for plain DDL', () => {

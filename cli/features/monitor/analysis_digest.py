@@ -327,6 +327,16 @@ def _findings(analysis: Any) -> list[str]:
     return found[:MAX_FINDINGS]
 
 
+def efficient(rating: str | None, findings: list[str]) -> bool:
+    """The analysis rated the query good or better; one without a rating, by its concerns."""
+    return rating in GOOD_RATINGS if rating else not findings
+
+
+def analyzed_status(digest: dict[str, Any]) -> str:
+    """An analyzed query without a ready fix: healthy only when the analysis rated it so."""
+    return "healthy" if digest.get("efficient") else "no_fix"
+
+
 def headline(fix: dict[str, Any] | None, rating: str | None, findings: list[str]) -> str:
     if fix is not None and fix["kind"] == "index":
         return fix["title"].replace("Add an index on", "Needs an index on", 1)
@@ -334,7 +344,7 @@ def headline(fix: dict[str, Any] | None, rating: str | None, findings: list[str]
         return "A rewrite could make it faster"
     if fix is not None:
         return "A setting change could help"
-    if rating in GOOD_RATINGS or not findings:
+    if efficient(rating, findings):
         return "Already efficient"
     return "No fix found"
 
@@ -366,7 +376,8 @@ def digest_from_analysis(key: str, job: dict[str, Any], analysis: Any) -> dict[s
             "plan_summary": plan_summary(analysis, mode), "findings": findings,
             "fix": fixes[0] if fixes else None, "other_fixes": fixes[1:4],
             "headline": headline(fixes[0] if fixes else None, rating, findings),
-            "fix_ready": fix_ready(fixes[0] if fixes else None)}
+            "fix_ready": fix_ready(fixes[0] if fixes else None),
+            "efficient": efficient(rating, findings)}
 
 
 def _timestamp(value: Any) -> int | None:
@@ -433,4 +444,4 @@ def summary_for_job(job: dict[str, Any] | None) -> dict[str, Any] | None:
             "rating": digest["rating"], "efficiency_score": digest["efficiency_score"],
             "fix_kind": (digest["fix"] or {}).get("kind") if digest["fix"] else None,
             # The 'Fix ready' chip: an actionable recommendation with SQL, else 'Analyzed'.
-            "fix_ready": digest["fix_ready"]}
+            "fix_ready": digest["fix_ready"], "efficient": digest["efficient"]}

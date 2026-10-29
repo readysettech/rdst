@@ -4,6 +4,7 @@ import {
   completeAccountLogin,
   fetchAccountLoginContext,
   fetchAccountLoginStatus,
+  setAccountLoginVerifier,
 } from './api'
 import { isDesktopRuntime } from './desktop'
 
@@ -25,6 +26,30 @@ function authClient(context: AccountLoginResponse) {
   })
 }
 
+// The PKCE verifier the auth client keeps for this sign-in, in its own storage format.
+function storedCodeVerifier(loginId: string): string | null {
+  const raw = window.localStorage.getItem(
+    `${storageKey(loginId)}-code-verifier`
+  )
+  if (!raw) return null
+  let value: unknown = raw
+  try {
+    value = JSON.parse(raw)
+  } catch {
+    /* stored unencoded */
+  }
+  return typeof value === 'string' ? (value.split('/')[0] ?? null) : null
+}
+
+// On desktop the emailed or OAuth link returns to RDST's local server, which finishes the
+// sign-in with this verifier even if this window has reloaded or moved on.
+async function handOverCodeVerifier(context: AccountLoginResponse) {
+  if (!isDesktopRuntime()) return
+  const verifier = storedCodeVerifier(context.login_id)
+  if (verifier)
+    await setAccountLoginVerifier(context.login_id, context.state, verifier)
+}
+
 export async function sendAccountMagicLink(
   context: AccountLoginResponse,
   email: string
@@ -34,6 +59,7 @@ export async function sendAccountMagicLink(
     options: { emailRedirectTo: context.callback_url },
   })
   if (error) throw error
+  await handOverCodeVerifier(context)
 }
 
 export async function startAccountOAuth(
@@ -50,6 +76,7 @@ export async function startAccountOAuth(
   if (error) throw error
   if (!data.url)
     throw new Error('Readyset sign-in returned no authorization URL')
+  await handOverCodeVerifier(context)
   if (isDesktopRuntime()) {
     window.open(data.url, '_blank', 'noopener,noreferrer')
   } else {

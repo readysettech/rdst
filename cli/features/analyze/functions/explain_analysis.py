@@ -820,6 +820,7 @@ def _execute_postgres_explain_analyze(
                 "execution_time_ms": execution_time_ms,
                 "rows_examined": _extract_postgres_rows_examined(plan_data),
                 "rows_returned": _extract_postgres_rows_returned(plan_data),
+                "filter_rows": _extract_postgres_filter_rows(plan_data),
                 "cost_estimate": _extract_postgres_cost(plan_data),
                 "actual_time_ms": _extract_postgres_actual_time(plan_data),
                 "planning_time_ms": plan_data.get('Planning Time', 0),
@@ -1008,6 +1009,8 @@ def _execute_mysql_explain_analyze(
                 worker_state = _AnalyzeWorkerState('connection_id')
                 query_result = worker_state.result
                 query_lock = worker_state.lock
+                # The EXPLAIN ANALYZE round trip alone, without lane or connection waits.
+                statement_time = {}
 
                 def execute_explain_analyze():
                     """Execute EXPLAIN ANALYZE in separate thread with its own connection."""
@@ -1034,9 +1037,14 @@ def _execute_mysql_explain_analyze(
                             explain_query = f"{_SELF_MARKER}EXPLAIN ANALYZE {analyze_sql}"
                             # Safe: sql parameter is user\'s query to analyze (intended functionality), validated by query_safety.py
 
+                            def run_timed():
+                                began = time.perf_counter()
+                                query_cursor.execute(explain_query)  # nosem
+                                statement_time['ms'] = (time.perf_counter() - began) * 1000
+
                             if not worker_state.begin_execution():
                                 return
-                            analysis_lane.execute(monitor_run, lambda: query_cursor.execute(explain_query))  # nosem
+                            analysis_lane.execute(monitor_run, run_timed)
                             worker_state.mark_database_completion()
                             results = query_cursor.fetchall()
                             data = results
@@ -1236,7 +1244,8 @@ def _execute_mysql_explain_analyze(
                 # Check results
                 if query_snapshot['data'] and not user_skipped:
                     # EXPLAIN ANALYZE completed successfully
-                    plan_time_ms = _extract_mysql_actual_time(query_snapshot['data'])
+                    plan_time_ms = _extract_mysql_actual_time(
+                        query_snapshot['data'], statement_time.get('ms'))
                     return {
                         "success": True,
                         "explain_plan": query_snapshot['data'],
@@ -1400,9 +1409,12 @@ def _extract_postgres_rows_examined(plan_data: Dict[str, Any]) -> int:
     Uses 'Actual Rows' from EXPLAIN ANALYZE output, falling back to
     'Plan Rows' (estimated) when ANALYZE data isn't available. A node's
     output excludes the rows its filter read and discarded, so those count too.
+    Measured counts are per loop (per worker in a parallel scan), so each counts
+    once per loop.
     """
     def extract_from_node(node):
-        total = _get_plan_row_count(node) + (node.get('Rows Removed by Filter') or 0)
+        total = ((_get_plan_row_count(node) + (node.get('Rows Removed by Filter') or 0))
+                 * (node.get('Actual Loops') or 1))
         for child in node.get('Plans', []):
             total += extract_from_node(child)
         return total
@@ -1410,6 +1422,26 @@ def _extract_postgres_rows_examined(plan_data: Dict[str, Any]) -> int:
     if isinstance(plan_data, dict) and 'Plan' in plan_data:
         return extract_from_node(plan_data['Plan'])
     return 0
+
+
+def _extract_postgres_filter_rows(plan_data: Dict[str, Any]) -> Optional[Dict[str, int]]:
+    """The rows measured filters kept and discarded, across all loops; None without filters."""
+    kept = removed = 0
+    found = False
+
+    def visit(node):
+        nonlocal kept, removed, found
+        if 'Rows Removed by Filter' in node and node.get('Actual Rows') is not None:
+            loops = node.get('Actual Loops') or 1
+            kept += node['Actual Rows'] * loops
+            removed += node['Rows Removed by Filter'] * loops
+            found = True
+        for child in node.get('Plans', []):
+            visit(child)
+
+    if isinstance(plan_data, dict) and 'Plan' in plan_data:
+        visit(plan_data['Plan'])
+    return {"kept": kept, "read": kept + removed} if found else None
 
 
 def _extract_postgres_rows_returned(plan_data: Dict[str, Any]) -> int:
@@ -1504,21 +1536,37 @@ _MYSQL_NUMBER = r'[0-9]+(?:\.[0-9]+)?(?:e[-+]?[0-9]+)?'
 _MYSQL_ACTUAL_TIME = re.compile(
     rf'\(actual time=({_MYSQL_NUMBER})\.\.({_MYSQL_NUMBER}) rows=({_MYSQL_NUMBER}) '
     rf'loops=({_MYSQL_NUMBER})\)')
+_MYSQL_PROJECTION_SUBQUERY = re.compile(r'^\s*-> Select #\d+ \(subquery in projection\b')
 
 
-def _extract_mysql_actual_time(results: List[Dict[str, Any]]) -> Optional[float]:
-    """The root operation's measured time in ms from MySQL EXPLAIN ANALYZE output.
+def _extract_mysql_actual_time(
+    results: List[Dict[str, Any]], statement_ms: Optional[float] = None,
+) -> Optional[float]:
+    """The statement's measured time in ms from MySQL EXPLAIN ANALYZE output.
 
-    Each node reports "actual time=<first row>..<last row>" averaged per loop, so the root's
-    total is its last-row time times its loops. None when the root carries no timing.
+    Each node reports "actual time=<first row>..<last row>" averaged per loop, so a node's
+    total is its last-row time times its loops. The root covers the iterator tree, but a
+    subquery in projection is listed as its own block and can run outside that tree (once per
+    returned row), so each such block's total is added. When an iterator already ran it (a sort
+    on it, a materialized derived table), that sum overcounts; statement_ms, the measured
+    EXPLAIN ANALYZE round trip, caps it. None when the root carries no timing.
     """
     for row in results:
         if isinstance(row, dict) and isinstance(row.get('EXPLAIN'), str):
-            root = row['EXPLAIN'].lstrip().split('\n', 1)[0]
-            match = _MYSQL_ACTUAL_TIME.search(root)
-            if match:
-                return float(match.group(2)) * float(match.group(4))
-            return None
+            lines = row['EXPLAIN'].strip().split('\n')
+            match = _MYSQL_ACTUAL_TIME.search(lines[0])
+            if not match:
+                return None
+            root_ms = float(match.group(2)) * float(match.group(4))
+            subquery_ms = 0.0
+            for header, first in zip(lines, lines[1:]):
+                block = (_MYSQL_PROJECTION_SUBQUERY.match(header)
+                         and _MYSQL_ACTUAL_TIME.search(first))
+                if block:
+                    subquery_ms += float(block.group(2)) * float(block.group(4))
+            if subquery_ms and statement_ms is not None:
+                return max(root_ms, min(root_ms + subquery_ms, statement_ms))
+            return root_ms + subquery_ms
     return None
 
 

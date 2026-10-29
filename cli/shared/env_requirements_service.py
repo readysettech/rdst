@@ -9,7 +9,11 @@ from shared.account_session import (
     AccountSessionError,
     access_token,
 )
-from shared.anthropic_env import anthropic_key_rejected, get_anthropic_source
+from shared.anthropic_env import (
+    anthropic_key_rejected,
+    get_anthropic_source,
+    startup_anthropic_key,
+)
 from shared.config.targets import TargetsConfig
 from shared.password_resolver import implicit_password_envs, resolve_password
 from shared.secret_store_service import SecretStoreService
@@ -170,6 +174,7 @@ class EnvRequirementsService:
                 "selected_provider": selected_provider,
                 "anthropic_key_configured": anthropic_available,
                 "readyset_account_connected": account_signed_in,
+                "anthropic_key_in_startup_env": startup_anthropic_key() is not None,
             }
         )
 

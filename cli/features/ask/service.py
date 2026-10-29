@@ -541,6 +541,7 @@ class AskService:
         month_component_enabled: bool = False,
         endpoint_component_enabled: bool = False,
         null_extremum_enabled: bool = False,
+        ranked_nulls_last_enabled: bool = False,
         projection_order_enabled: bool = False,
         output_completion_enabled: bool = False,
         occurrence_percentage_enabled: bool = False,
@@ -572,6 +573,7 @@ class AskService:
         self._month_component_enabled = month_component_enabled
         self._endpoint_component_enabled = endpoint_component_enabled
         self._null_extremum_enabled = null_extremum_enabled
+        self._ranked_nulls_last_enabled = ranked_nulls_last_enabled
         self._projection_order_enabled = projection_order_enabled
         self._output_completion_enabled = output_completion_enabled
         self._occurrence_percentage_enabled = occurrence_percentage_enabled
@@ -789,6 +791,7 @@ class AskService:
             ctx.resolved_column_validation_enabled = (
                 self._resolved_column_validation_enabled
             )
+            ctx.ranked_nulls_last_enabled = self._ranked_nulls_last_enabled
             Status = get_status_enum()
 
             yield AskStatusEvent(

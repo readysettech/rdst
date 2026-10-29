@@ -71,6 +71,7 @@ import {
   detectNotificationBlock,
   healthFor,
   type NotificationHealth,
+  testNotificationProblem,
   watchNotificationHealth,
 } from './notification-health.js'
 import { checkPackagedWorkflow } from './packaged-smoke.js'
@@ -960,6 +961,7 @@ function buildTrayMenu(): void {
       click: () => {
         settings.setNotificationsEnabled(!settings.notificationsEnabled)
         refreshTrayMenu()
+        notificationsEnabledChanged()
       },
     },
     ...(notificationHealth?.blocked && notificationHealth.trayLabel
@@ -974,16 +976,9 @@ function buildTrayMenu(): void {
     {
       label: 'Send test notification',
       click: () => {
-        showNotification(
-          'RDST test notification',
-          'Notifications from RDST show up like this.',
-          focusMainWindow,
-          false,
-          'test'
-        )
-        setTimeout(() => {
-          void notificationWatch?.refresh()
-        }, 2_000).unref?.()
+        void sendTestNotification().then((problem) => {
+          if (problem) void explainTestNotification(problem)
+        })
       },
     },
     { type: 'separator' },
@@ -1033,6 +1028,47 @@ function createTray(): void {
     onChange: applyTrayStatus,
   })
   refreshTrayMenu()
+}
+
+/** Shows the test notification, or returns why the OS won't show it and what to do. */
+async function sendTestNotification(): Promise<string | null> {
+  const health = (await notificationWatch?.refresh()) ?? notificationHealth
+  const problem = testNotificationProblem(health)
+  if (problem) return problem
+  showNotification(
+    'RDST test notification',
+    'Notifications from RDST show up like this.',
+    focusMainWindow,
+    false,
+    'test'
+  )
+  setTimeout(() => {
+    void notificationWatch?.refresh()
+  }, 2_000).unref?.()
+  return null
+}
+
+async function explainTestNotification(problem: string): Promise<void> {
+  const fixable = notificationHealth?.settingsUrl != null
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    message: "RDST couldn't show the test notification",
+    detail: problem,
+    buttons: fixable ? ['Open notification settings', 'Close'] : ['Close'],
+    defaultId: 0,
+    cancelId: fixable ? 1 : 0,
+  })
+  if (fixable && response === 0) openNotificationSettings()
+}
+
+/** The window's Push to this computer switch follows the tray's Notifications. */
+function notificationsEnabledChanged(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(
+      'desktop:notifications-enabled',
+      settings.notificationsEnabled
+    )
+  }
 }
 
 function showNotification(
@@ -1243,6 +1279,7 @@ async function startApplication(): Promise<void> {
       notificationHealth ?? (await notificationWatch?.refresh()) ?? null
   )
   onIpc('desktop:open-notification-settings', openNotificationSettings)
+  handleIpc('desktop:send-test-notification', sendTestNotification)
   // A coding agent changed monitoring through RDST's MCP server, out of the proxy's sight.
   onIpc('desktop:refresh-tray', () => refreshTrayMenu())
   handleIpc('desktop:get-start-at-login', startAtLoginStatus)

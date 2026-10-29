@@ -11,9 +11,10 @@ import {
   useUpdateMonitorSettings,
 } from '@/lib/monitor/hooks'
 import type { NotifyEvents, QuietHours } from '@/lib/monitor/types'
+import { useDesktopNotificationHealth } from '@/lib/useDesktopNotificationHealth'
 import {
+  sendTestNotification,
   setDesktopNotifications,
-  showDesktopNotification,
   useDesktopNotificationsOn,
 } from './desktopNotifications'
 import { MuteRulesDialog } from './MuteRulesList'
@@ -170,10 +171,20 @@ function Controls({ target }: { target: string }) {
 export function NotificationSettings({ target }: { target?: string }) {
   const [open, setOpen] = useState(false)
   const [rulesOpen, setRulesOpen] = useState(false)
+  // The last test's outcome: null once shown, else why it couldn't be.
+  const [tested, setTested] = useState<{ problem: string | null } | null>(null)
   const push = useDesktopNotificationsOn()
+  const health = useDesktopNotificationHealth()
+  const blocked = push && health?.blocked ? health.message : null
   return (
     <>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next)
+          setTested(null)
+        }}
+      >
         <PopoverTrigger asChild>
           <IconButton
             icon="notification"
@@ -201,6 +212,15 @@ export function NotificationSettings({ target }: { target?: string }) {
             checked={push}
             onChange={(on) => void setDesktopNotifications(on)}
           />
+          {blocked && (
+            <Text
+              as="p"
+              level="caption"
+              className="px-2.5 py-2 text-content-warning-soft"
+            >
+              {blocked}
+            </Text>
+          )}
           {push && (
             <Row label="Test notification">
               <Button
@@ -209,10 +229,22 @@ export function NotificationSettings({ target }: { target?: string }) {
                 modifier="ghost"
                 size="small"
                 onClick={() =>
-                  showDesktopNotification({ title: 'RDST test notification' })
+                  void sendTestNotification().then((problem) =>
+                    setTested({ problem })
+                  )
                 }
               />
             </Row>
+          )}
+          {push && tested && (
+            <Text asChild level="caption">
+              <output
+                className={`block px-2.5 py-2 ${tested.problem ? 'text-content-warning-soft' : 'text-content-layout-3'}`}
+              >
+                {tested.problem ??
+                  "Sent. If it didn't appear, check the system's notification settings."}
+              </output>
+            </Text>
           )}
           {target ? (
             <Controls target={target} />

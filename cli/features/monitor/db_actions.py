@@ -162,7 +162,9 @@ def setting_steps(parameter: str, recommended: str, engine: str, restart: bool) 
     """Numbered steps, one per line: the value, where to set it, and when it takes effect."""
     managed = ("On RDS, Aurora, Cloud SQL or Azure, set it in the instance's parameter group "
                "instead; the SQL needs a superuser.")
-    run = (f"Run the SQL below to set {parameter}. {managed}")
+    run = (f"Run the SQL below to set {parameter}. {managed}" if engine == "mysql" else
+           f"Run the SQL below to set {parameter}, each statement on its own: ALTER SYSTEM "
+           f"can't run inside a transaction. {managed}")
     if engine == "mysql":
         apply = ("Restart MySQL; the new value takes effect then." if restart else
                  "SET PERSIST applies it now and keeps it across restarts.")

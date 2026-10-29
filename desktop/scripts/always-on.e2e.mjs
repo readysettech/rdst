@@ -7,7 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const { _electron } = await import(process.env.RDST_PLAYWRIGHT_MODULE ||
-  '../../../node_modules/.pnpm/playwright@1.64.1/node_modules/playwright/index.mjs')
+  '../../../node_modules/.pnpm/playwright@1.61.0/node_modules/playwright/index.mjs')
 
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const sourceDir = path.resolve(appDir, '../../../rdst')

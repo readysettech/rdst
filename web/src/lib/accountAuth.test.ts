@@ -8,6 +8,7 @@ import {
   completeAccountLogin,
   fetchAccountLoginContext,
   fetchAccountLoginStatus,
+  setAccountLoginVerifier,
 } from './api'
 
 const signInWithOtp = vi.fn()
@@ -27,6 +28,7 @@ vi.mock('./api', async () => {
     completeAccountLogin: vi.fn(),
     fetchAccountLoginContext: vi.fn(),
     fetchAccountLoginStatus: vi.fn(),
+    setAccountLoginVerifier: vi.fn(),
   }
 })
 
@@ -70,6 +72,25 @@ describe('RDST account authentication', () => {
 
   afterEach(() => {
     delete window.rdstDesktop
+  })
+
+  it('hands the desktop sign-in verifier to RDST so the link finishes it', async () => {
+    signInWithOtp.mockImplementation(async () => {
+      window.localStorage.setItem(
+        'rdst-account-login-1-code-verifier',
+        JSON.stringify('verifier-1')
+      )
+      return { error: null }
+    })
+
+    await sendAccountMagicLink(context, 'person@example.com')
+
+    expect(setAccountLoginVerifier).toHaveBeenCalledWith(
+      'login-1',
+      'state-1',
+      'verifier-1'
+    )
+    window.localStorage.clear()
   })
 
   it('sends magic links back through the Keyservice callback', async () => {

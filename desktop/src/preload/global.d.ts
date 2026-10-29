@@ -28,6 +28,8 @@ declare global {
           callback: (health: NotificationHealth) => void
         ) => () => void
         openSettings: () => void
+        sendTest: () => Promise<string | null>
+        onEnabledChange: (callback: (enabled: boolean) => void) => () => void
       }
       startup: {
         openLogs: () => void

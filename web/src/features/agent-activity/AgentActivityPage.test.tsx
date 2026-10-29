@@ -307,6 +307,120 @@ describe('AgentActivityPage', () => {
     __resetBackgroundRunsForTests()
   })
 
+  it('lists a finished analysis as soon as it stops running', async () => {
+    let running = true
+    const finished = entry({
+      id: 9,
+      ts: at(9, 55),
+      subject: 'SELECT on posts by id',
+      query_key: 'q9',
+      outcome: 'cancelled',
+      summary: 'Cancelled by you',
+    })
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url.endsWith('/analyze/cancel') && init?.method === 'POST') {
+        running = false
+        return Promise.resolve(jsonResponse({ id: 1, state: 'skipped' }))
+      }
+      return Promise.resolve(
+        url.includes('/api/agent-activity')
+          ? jsonResponse({
+              items: running ? ITEMS : [finished, ...ITEMS],
+              next_cursor: null,
+              targets: ['demo'],
+            })
+          : url === '/api/status'
+            ? jsonResponse({ targets: [{ name: 'demo' }] })
+            : url.endsWith('/targets/demo/analyze-jobs')
+              ? jsonResponse({
+                  jobs: [],
+                  queue: {
+                    running: running
+                      ? {
+                          query_key: 'q9',
+                          display_name: 'SELECT on posts by id',
+                        }
+                      : null,
+                  },
+                })
+              : jsonResponse({}, 404)
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderWithClient(<AgentActivityPage />)
+    const region = await screen.findByRole('region', { name: 'Running now' })
+    await within(region).findByText('Analyzing SELECT on posts by id')
+    const today = await screen.findByRole('region', { name: 'Today' })
+    expect(
+      within(today).queryByText('Stopped analyzing SELECT on posts by id')
+    ).toBeNull()
+    fireEvent.click(within(region).getByRole('button', { name: 'Cancel' }))
+    await within(today).findByText('Stopped analyzing SELECT on posts by id')
+    expect(screen.queryByText('Analyzing SELECT on posts by id')).toBeNull()
+  })
+
+  it('opens no report from an interrupted run recorded without one', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url.includes('/api/agent-activity')
+            ? jsonResponse({
+                items: [
+                  entry({
+                    id: 8,
+                    action: 'daily_snapshot',
+                    subject: 'On request',
+                    outcome: 'cancelled',
+                  }),
+                ],
+                next_cursor: null,
+                targets: ['demo'],
+              })
+            : jsonResponse({}, 404)
+        )
+      )
+    )
+    renderWithClient(<AgentActivityPage />)
+    const today = await screen.findByRole('region', { name: 'Today' })
+    expect(
+      within(today).getByText("Couldn't finish the report you asked for")
+    ).toBeTruthy()
+    expect(
+      within(today).getByText('Interrupted before it finished')
+    ).toBeTruthy()
+    expect(within(today).queryAllByRole('link')).toHaveLength(0)
+  })
+
+  it('wraps long details inside their column', async () => {
+    const detail = `relation ${'"title_basics"."primary_title"'.repeat(8)} does not exist`
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url.includes('/api/agent-activity')
+            ? jsonResponse({
+                items: [
+                  entry({
+                    subject: 'SELECT on title_basics',
+                    outcome: 'failed',
+                    summary: detail,
+                  }),
+                ],
+                next_cursor: null,
+                targets: ['demo'],
+              })
+            : jsonResponse({}, 404)
+        )
+      )
+    )
+    renderWithClient(<AgentActivityPage />)
+    const today = await screen.findByRole('region', { name: 'Today' })
+    const cell = within(today).getByText(detail).parentElement
+    expect(cell?.className).toContain('min-w-0')
+    expect(cell?.className).toContain('wrap-anywhere')
+  })
+
   it('shows the empty state when nothing happened', async () => {
     vi.stubGlobal(
       'fetch',

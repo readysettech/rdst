@@ -6,11 +6,16 @@ import type { ConfiguredDatabase } from '../lib/monitor/hooks'
 import { renderWithClient } from '../test-utils'
 import { SHOWN_DATABASES, Sidebar } from './Sidebar'
 
-const routerState = vi.hoisted(() => ({ pathname: '/' }))
+const routerState = vi.hoisted(() => ({
+  pathname: '/',
+  search: {} as Record<string, string>,
+}))
 
 vi.mock('@tanstack/react-router', () => ({
   useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
-    select({ location: { pathname: routerState.pathname } }),
+    select({
+      location: { pathname: routerState.pathname, search: routerState.search },
+    }),
   useNavigate: () => vi.fn(),
   Link: ({
     to,
@@ -98,6 +103,7 @@ const databaseNav = () => screen.getByRole('navigation', { name: 'Databases' })
 afterEach(() => {
   cleanup()
   routerState.pathname = '/'
+  routerState.search = {}
   Object.assign(inboxUnread, { count: 0, actNow: 0 })
   runs.list = []
   selection.target = 'demo'
@@ -240,6 +246,19 @@ describe('Sidebar', () => {
         .getByRole('link', { name: /analytics/ })
         .getAttribute('aria-current')
     ).toBeNull()
+  })
+
+  it("keeps a full analysis's database lit", () => {
+    configured.databases = [db('demo'), db('analytics')]
+    routerState.pathname = '/results'
+    routerState.search = { query: 'SELECT 1', target: 'analytics' }
+    renderSidebar()
+    const current = within(databaseNav())
+      .getAllByRole('link')
+      .filter((link) => link.getAttribute('aria-current') === 'page')
+    expect(current).toEqual([
+      within(databaseNav()).getByRole('link', { name: /analytics/ }),
+    ])
   })
 
   it('folds databases past eight under "N more"', () => {

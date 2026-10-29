@@ -532,6 +532,24 @@ describe('useDemo provision persists across navigation', () => {
     await waitFor(() => expect(result.current.phase).toBe('failed'))
     expect(result.current.error).toBe('ReadySet did not snapshot in time.')
   })
+
+  it('opens on why the start stopped when RDST restarted during it, until dismissed', async () => {
+    const stopped = 'Setup stopped when RDST restarted. Start the demo again.'
+    vi.stubGlobal('fetch', mockFetch({ ...idleStatus, last_error: stopped }))
+
+    const { result } = renderHook(() => useDemo())
+    await waitFor(() => expect(result.current.phase).toBe('failed'))
+    expect(result.current.error).toBe(stopped)
+
+    act(() => result.current.dismissFailure())
+    expect(result.current.phase).toBe('idle')
+    expect(fetch).toHaveBeenCalledWith('/api/demo/dismiss-error', {
+      method: 'POST',
+    })
+    await act(() => result.current.refreshStatus())
+    expect(result.current.phase).toBe('idle')
+    expect(result.current.error).toBeNull()
+  })
 })
 
 describe('useDemo QueryPilot and policy changes', () => {

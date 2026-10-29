@@ -1,7 +1,12 @@
 // Desktop notifications for inbox items the monitor marks `notified`. The choice is kept in
 // the backend's preferences and cached in localStorage; each browser still needs the OS
-// permission, whose prompt runs when it is turned on.
+// permission, whose prompt runs when it is turned on. In the desktop app the switch is the
+// app's own (the tray's Notifications), and the app shows the pushes, window open or closed.
 import { useSyncExternalStore } from 'react'
+import {
+  getDesktopNotifications,
+  getDesktopSystemNotifications,
+} from '@/lib/desktop'
 
 const STORAGE_KEY = 'rdst_inbox_desktop_notifications'
 const CHANGE_EVENT = 'rdst_inbox_desktop_notifications_changed'
@@ -35,6 +40,19 @@ export function hydrateDesktopNotifications(
 ) {
   if (hydrated || typeof window === 'undefined') return
   hydrated = true
+  const system = getDesktopSystemNotifications()
+  if (system) {
+    const follow = (enabled: boolean, saved?: boolean | null) => {
+      storeChoice(enabled)
+      if (saved !== enabled) saveChoice(enabled)
+    }
+    void system
+      .get()
+      .then((enabled) => follow(enabled, fromBackend))
+      .catch(() => undefined)
+    getDesktopNotifications()?.onEnabledChange?.((enabled) => follow(enabled))
+    return
+  }
   if (fromBackend === undefined) return
   let local: string | null = null
   try {
@@ -59,8 +77,10 @@ export function desktopNotificationSupport(): DesktopNotificationSupport {
 
 export function desktopNotificationsEnabled(): boolean {
   try {
+    const on = window.localStorage.getItem(STORAGE_KEY) === '1'
+    if (getDesktopSystemNotifications()) return on
     return (
-      window.localStorage.getItem(STORAGE_KEY) === '1' &&
+      on &&
       desktopNotificationSupport() === 'ok' &&
       window.Notification.permission === 'granted'
     )
@@ -72,7 +92,10 @@ export function desktopNotificationsEnabled(): boolean {
 /** Turns desktop notifications on (asking the OS first) or off. Resolves to the new state. */
 export async function setDesktopNotifications(on: boolean): Promise<boolean> {
   let enabled = false
-  if (on && desktopNotificationSupport() === 'ok') {
+  const system = getDesktopSystemNotifications()
+  if (system) {
+    enabled = await system.set(on).catch(() => desktopNotificationsEnabled())
+  } else if (on && desktopNotificationSupport() === 'ok') {
     const permission =
       window.Notification.permission === 'granted'
         ? 'granted'
@@ -99,7 +122,7 @@ export function useDesktopNotificationsOn(): boolean {
 }
 
 export function showDesktopNotification(data: Record<string, unknown>) {
-  if (!desktopNotificationsEnabled()) return
+  if (!desktopNotificationsEnabled() || getDesktopSystemNotifications()) return
   const title = typeof data.title === 'string' ? data.title : 'New inbox alert'
   const target = typeof data.target === 'string' ? data.target : undefined
   // Stream rows are inbox events: `item_id` is the item, `id` the event.
@@ -115,5 +138,27 @@ export function showDesktopNotification(data: Record<string, unknown>) {
     }
   } catch {
     /* some embedded browsers expose Notification but refuse to construct it */
+  }
+}
+
+/** Shows a test notification. Resolves to why it couldn't be shown and what to do, or null. */
+export async function sendTestNotification(): Promise<string | null> {
+  const sendTest = getDesktopNotifications()?.sendTest
+  if (sendTest)
+    return sendTest().catch(
+      () =>
+        "RDST couldn't send the test notification. Try again from the tray menu."
+    )
+  if (desktopNotificationSupport() === 'unsupported')
+    return "This browser can't show notifications. Alerts still appear in the Inbox."
+  if (window.Notification.permission !== 'granted')
+    return 'This browser blocks notifications from RDST. Allow them in the site settings, then send the test again.'
+  try {
+    new window.Notification('RDST test notification', {
+      body: 'Notifications from RDST show up like this.',
+    })
+    return null
+  } catch {
+    return "This browser can't show notifications here. Alerts still appear in the Inbox."
   }
 }

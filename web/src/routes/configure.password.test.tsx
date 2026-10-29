@@ -332,6 +332,53 @@ describe('Settings row password save', () => {
     )
   })
 
+  it('offers a connected account, not a new sign-in, from Update key', async () => {
+    mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    vi.mocked(useTrialSource).mockReturnValue({
+      envRequirements: {
+        keyring_available: true,
+        telemetry_enabled: true,
+        requirements: [],
+      },
+      envRequirementsQuery: {} as never,
+      anthropicRequirement: {
+        kind: 'anthropic_api_key',
+        accepted_names: ['ANTHROPIC_API_KEY'],
+        target: null,
+        satisfied: true,
+        source: 'secure_store',
+        selected_provider: 'claude',
+        anthropic_key_configured: true,
+        readyset_account_connected: true,
+      },
+      anthropicSource: 'secure_store',
+      isTrialSource: false,
+      trialStatus: undefined,
+    })
+
+    renderWithClient(<SettingsPage search={{ panel: 'ai' }} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update key' }))
+    expect(
+      screen.queryByRole('button', {
+        name: "Don't have a key? Sign in to Readyset",
+      })
+    ).toBeNull()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use Hosted by Readyset instead' })
+    )
+
+    await waitFor(() =>
+      expect(vi.mocked(setAiProvider).mock.calls[0]?.[0]).toBe('readyset')
+    )
+    expect(
+      screen.queryByRole('heading', { name: 'Sign in to Readyset' })
+    ).toBeNull()
+  })
+
   it('switches from the included AI back to a saved Anthropic key', async () => {
     mockUseConfigure(vi.fn().mockResolvedValue(undefined))
     vi.mocked(useFleetStatus).mockReturnValue(

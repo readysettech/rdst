@@ -176,6 +176,22 @@ describe('held analyses', () => {
     ).toBe("Couldn't analyze")
   })
 
+  it('reads No fix found, in the warning tone, for an analysis without a fix that is not healthy', () => {
+    const noFix = { ...query(null), status: 'no_fix' as const }
+    expect(rowChip(noFix)).toMatchObject({
+      label: 'No fix found',
+      variant: 'warning',
+    })
+    expect(rowChip({ ...noFix, status: 'healthy' })?.label).toBe('Healthy')
+    expect(
+      filterRows([noFix, { ...noFix, key: 'other', status: 'healthy' }], {
+        status: 'no_fix',
+        table: null,
+        q: '',
+      }).map((row) => row.status)
+    ).toEqual(['no_fix'])
+  })
+
   it('drops Analyzing once monitoring is off, unless a job still runs', () => {
     expect(rowChip(query({ queue_state: 'today' }), false)).toBeNull()
     expect(

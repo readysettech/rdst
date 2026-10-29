@@ -371,6 +371,22 @@ class TestExplainAnalysisHelpers:
         }
         assert explain_analysis._extract_postgres_rows_examined(plan_data) == 18425
 
+    def test_postgres_rows_count_every_parallel_worker(self):
+        explain_analysis = _import_module_directly(
+            "explain_analysis",
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
+        )
+        scan = {"Node Type": "Seq Scan", "Parallel Aware": True, "Actual Rows": 10,
+                "Actual Loops": 3, "Filter": "(customer_id = 31415)",
+                "Rows Removed by Filter": 999990}
+        plan_data = {"Plan": {"Node Type": "Aggregate", "Actual Rows": 1, "Actual Loops": 1,
+                              "Plans": [{"Node Type": "Gather", "Actual Rows": 30,
+                                         "Actual Loops": 1, "Plans": [scan]}]}}
+        assert explain_analysis._extract_postgres_rows_examined(plan_data) == 3_000_031
+        assert explain_analysis._extract_postgres_filter_rows(plan_data) == {
+            "kept": 30, "read": 3_000_000}
+        assert explain_analysis._extract_postgres_filter_rows({"Plan": {"Plan Rows": 5}}) is None
+
     def test_postgres_rows_returned(self):
         """Test PostgreSQL rows returned extraction."""
         explain_analysis = _import_module_directly(

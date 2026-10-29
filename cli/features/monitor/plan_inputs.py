@@ -15,7 +15,7 @@ from shared.monitor.monitor_store import EVERYTHING_ELSE, MonitorStore
 from shared.monitor.statements import _tables as query_tables, statement_kind
 
 WINDOW_S = 7 * 86400
-# Below this much observation, write rates come from the engine's lifetime counters.
+# Below this much observation, query totals reach back over the whole window.
 MIN_OBSERVED_S = 600
 TOP_QUERIES = 25
 _USING = re.compile(r"\bUSING\s+(\w+)", re.I)
@@ -83,37 +83,42 @@ def _existing(store: MonitorStore, target: str, start: int) -> list[dict[str, An
     return existing
 
 
-def _tables(store: MonitorStore, target: str, start: int, now: int, observed_s: int,
-            counter_age_s: int, updated: dict[str, set[str]]) -> dict[str, dict[str, Any]]:
-    hours = store.read('SELECT "table",bucket_start,ins+upd+del writes,upd,hot_upd,seconds '
-                       'FROM table_activity WHERE target=? AND bucket_start>=?',
-                       (target, start // 3600 * 3600))
-    window: dict[str, dict[str, float]] = {}
-    for row in hours:
-        entry = window.setdefault(row["table"].lower(), {"writes": 0, "upd": 0, "hot_upd": 0,
-                                                         "peak": 0.0})
+def _write_rates(store: MonitorStore, target: str, since: int, now: int,
+                 table: str | None = None) -> dict[str, dict[str, float]]:
+    """Each table's writes between RDST's readings since `since`, by lowercased name.
+
+    Only the differences between readings count: the engine's own totals reach back to bulk
+    loads and traffic from before RDST watched, which say nothing about the writes now.
+    """
+    rows = store.read('SELECT "table",ins+upd+del writes,upd,hot_upd,seconds FROM table_activity '
+                      'WHERE target=? AND bucket_start>=? AND (? IS NULL OR lower("table")=?)',
+                      (target, since // 3600 * 3600, table, table))
+    span = max(1, now - since)
+    rates: dict[str, dict[str, float]] = {}
+    for row in rows:
+        entry = rates.setdefault(row["table"].lower(), {"writes": 0, "upd": 0, "hot_upd": 0,
+                                                        "peak": 0.0})
         entry["writes"] += row["writes"]
         entry["upd"] += row["upd"]
         entry["hot_upd"] += row["hot_upd"]
         if row["seconds"]:
             entry["peak"] = max(entry["peak"], row["writes"] / row["seconds"])
+    for entry in rates.values():
+        entry["writes_per_s"] = entry["writes"] / span
+    return rates
+
+
+def _tables(store: MonitorStore, target: str, since: int, now: int,
+            updated: dict[str, set[str]]) -> dict[str, dict[str, Any]]:
+    rates = _write_rates(store, target, since, now)
     tables = {}
-    span = max(1, now - start)
     for row in store.read("SELECT * FROM table_state WHERE target=?", (target,)):
         name = row["table"].lower()
-        lifetime = row["ins"] + row["upd"] + row["del"]
-        measured = window.get(name)
-        if observed_s >= MIN_OBSERVED_S and measured is not None:
-            writes_per_s = measured["writes"] / span
-            upd, hot = measured["upd"], measured["hot_upd"]
-            peak = measured["peak"]
-        elif observed_s >= MIN_OBSERVED_S:
-            writes_per_s, upd, hot, peak = 0.0, 0, 0, 0.0
-        else:
-            writes_per_s = lifetime / max(1, counter_age_s)
-            upd, hot, peak = row["upd"], row["hot_upd"], writes_per_s
-        tables[name] = {"writes_per_s": round(writes_per_s, 3), "peak_writes_per_s": round(peak, 3),
-                        "hot_ratio": hot / upd if upd else None,
+        measured = rates.get(name) or {"writes_per_s": 0.0, "upd": 0, "hot_upd": 0, "peak": 0.0}
+        upd = measured["upd"]
+        tables[name] = {"writes_per_s": round(measured["writes_per_s"], 3),
+                        "peak_writes_per_s": round(measured["peak"], 3),
+                        "hot_ratio": measured["hot_upd"] / upd if upd else None,
                         "live_rows": row["live_rows"], "size_bytes": row["size_bytes"],
                         "updated_columns": sorted(updated.get(name, set()))}
     return tables
@@ -201,8 +206,7 @@ def gather(store: MonitorStore, target: str, now: int, engine: str,
     return {"engine": engine, "now": now, "observed_s": observed_s,
             "counter_age_s": max(0, now - counter_since),
             "existing": _existing(store, target, start),
-            "tables": _tables(store, target, start, now, observed_s, max(0, now - counter_since),
-                              updated),
+            "tables": _tables(store, target, max(start, observed_since), now, updated),
             "queries": queries, "replicas": _replicas(store, target),
             "filtered": {table: sorted(columns) for table, columns in filtered.items()},
             "writers": writers,
@@ -229,30 +233,20 @@ def _bare(column: str) -> str:
 def write_cost(store: MonitorStore, target: str, text: str, engine: str, now: int) -> dict[str, Any] | None:
     """What one write statement's table pays per write: its write rate and indexes kept.
 
-    The last day of RDST's readings when it has watched long enough, else the engine's own
-    totals since its counters began.
+    The rate is the one the index plan uses, measured over the same window of RDST's readings.
     """
     shape = write_shape(text, engine)
     meta = store.read("SELECT * FROM stats_meta WHERE target=?", (target,))
     if not shape or not shape["table"] or not meta:
         return None
-    table = shape["table"]
-    start = max(now - 86400, meta[0]["observed_since"])
-    if now - start >= MIN_OBSERVED_S:
-        row = store.read('SELECT COALESCE(SUM(ins+upd+del),0) writes,COALESCE(SUM(upd),0) upd,'
-                         'COALESCE(SUM(hot_upd),0) hot FROM table_activity WHERE target=? '
-                         'AND lower("table")=? AND bucket_start>=?',
-                         (target, table, start // 3600 * 3600))[0]
-        span = now - start
-    else:
-        rows = store.read('SELECT ins+upd+del writes,upd,hot_upd hot FROM table_state '
-                          'WHERE target=? AND lower("table")=?', (target, table))
-        if not rows:
-            return None
-        row, span = rows[0], now - meta[0]["counter_since"]
+    table = shape["table"].lower()
+    since = max(now - WINDOW_S, meta[0]["observed_since"])
+    measured = _write_rates(store, target, since, now, table).get(table) or \
+        {"writes_per_s": 0.0, "upd": 0, "hot_upd": 0}
     indexes = store.read('SELECT COUNT(*) n FROM index_snapshot WHERE target=? AND lower("table")=?',
                          (target, table))[0]["n"]
-    return {"table": table, "verb": shape["verb"], "set_columns": shape["set_columns"],
-            "table_writes_per_s": round(row["writes"] / max(1, span), 3),
+    return {"table": shape["table"], "verb": shape["verb"], "set_columns": shape["set_columns"],
+            "table_writes_per_s": round(measured["writes_per_s"], 3),
             "indexes_maintained": indexes,
-            "hot_ratio": row["hot"] / row["upd"] if row["upd"] and engine == "postgresql" else None}
+            "hot_ratio": measured["hot_upd"] / measured["upd"]
+            if measured["upd"] and engine == "postgresql" else None}

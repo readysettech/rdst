@@ -10,6 +10,7 @@ import { EmptyState } from '@rs/ui-new/empty-state'
 import { Popover, PopoverContent, PopoverTrigger } from '@rs/ui-new/popover'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
+import { useToast } from '@rs/ui-new/use-toast'
 import { type ReactNode, useId, useState } from 'react'
 import { SqlCode } from '@/features/database/queries/SqlCode'
 import {
@@ -25,6 +26,7 @@ import {
   dateOf,
   dayLabel,
   queryChange,
+  REASON_MAX,
   STATUS_LABEL,
   saves,
 } from './actionsModel'
@@ -211,6 +213,7 @@ function Undo({ row, rollback }: { row: AppliedRow; rollback: string }) {
   const verb = usePlanVerb()
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
+  const { toast } = useToast()
   const id = useId()
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -240,9 +243,15 @@ function Undo({ row, rollback }: { row: AppliedRow; rollback: string }) {
             id={id}
             value={reason}
             placeholder="Optional"
+            maxLength={REASON_MAX}
             onChange={(event) => setReason(event.target.value)}
             className="h-8.5 bg-surface-layout-2 text-body-small"
           />
+          {reason.length >= REASON_MAX ? (
+            <Text as="p" level="caption" className="mt-1 text-content-layout-3">
+              {REASON_MAX} characters at most
+            </Text>
+          ) : null}
         </div>
         <Button
           variant="primary"
@@ -252,13 +261,23 @@ function Undo({ row, rollback }: { row: AppliedRow; rollback: string }) {
           className="self-end"
           disabled={verb.isPending}
           onClick={() => {
-            verb.mutate({
-              target: row.database,
-              id: row.id,
-              verb: 'undid_it',
-              reason: reason.trim() || undefined,
-            })
-            setOpen(false)
+            verb.mutate(
+              {
+                target: row.database,
+                id: row.id,
+                verb: 'undid_it',
+                reason: reason.trim() || undefined,
+              },
+              {
+                onSuccess: () => setOpen(false),
+                onError: (error) =>
+                  toast({
+                    title: "Couldn't mark this change undone",
+                    description: error.message,
+                    variant: 'negative',
+                  }),
+              }
+            )
           }}
         />
       </PopoverContent>

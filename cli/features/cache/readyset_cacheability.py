@@ -1,42 +1,44 @@
 import re
 from typing import Dict, Any, List
 
-from shared.query_registry.sql_normalizer import mask_string_literals
+from shared.query_registry.sql_normalizer import blank_comments_and_quoted, mask_string_literals
 
 
+# Each pattern matches the query's code: string literals and quoted identifiers are blanked
+# first, and names match whole words, so a column such as products.brand is not RAND().
 UNCACHEABLE_PATTERNS = {
     # Non-deterministic functions
-    'NOW': 'Uses non-deterministic NOW() function',
-    'CURRENT_TIMESTAMP': 'Uses non-deterministic CURRENT_TIMESTAMP function',
-    'CURRENT_DATE': 'Uses non-deterministic CURRENT_DATE function',
-    'CURRENT_TIME': 'Uses non-deterministic CURRENT_TIME function',
-    'RAND': 'Uses non-deterministic RAND() function',
-    'RANDOM': 'Uses non-deterministic RANDOM() function',
-    'UUID': 'Uses non-deterministic UUID() function',
+    r'\bNOW\s*\(': 'Uses non-deterministic NOW() function',
+    r'\bCURRENT_TIMESTAMP\b': 'Uses non-deterministic CURRENT_TIMESTAMP function',
+    r'\bCURRENT_DATE\b': 'Uses non-deterministic CURRENT_DATE function',
+    r'\bCURRENT_TIME\b': 'Uses non-deterministic CURRENT_TIME function',
+    r'\bRAND\s*\(': 'Uses non-deterministic RAND() function',
+    r'\bRANDOM\s*\(': 'Uses non-deterministic RANDOM() function',
+    r'\b(?:UUID|UUID_SHORT|GEN_RANDOM_UUID|UUID_GENERATE_V[14])\s*\(':
+        'Uses non-deterministic UUID() function',
 
     # Locking and transaction-specific
-    'FOR UPDATE': 'Contains FOR UPDATE locking clause',
-    'LOCK IN SHARE MODE': 'Contains LOCK IN SHARE MODE clause',
+    r'\bFOR\s+UPDATE\b': 'Contains FOR UPDATE locking clause',
+    r'\bLOCK\s+IN\s+SHARE\s+MODE\b': 'Contains LOCK IN SHARE MODE clause',
 
     # Temp tables and session-specific
-    'TEMPORARY': 'Uses temporary tables',
-    'SESSION': 'Uses session-specific variables or tables',
+    r'\bTEMPORARY\b': 'Uses temporary tables',
+    r'@@SESSION\b|\bSESSION_USER\b': 'Uses session-specific variables or tables',
 
     # Stored procedures
-    'CALL ': 'Calls stored procedures',
+    r'\bCALL\s+\w+\s*\(': 'Calls stored procedures',
 
     # Some aggregate window functions may not be supported
-    'OVER (': 'May contain unsupported window functions',
+    r'\bOVER\s*\(': 'May contain unsupported window functions',
 }
 
 # Patterns that require special attention
 WARNING_PATTERNS = {
-    'UNION': 'UNION queries may have limited support',
-    'RECURSIVE': 'Recursive CTEs may not be supported',
-    'JSON_': 'JSON functions may have limited support',
-    'LATERAL': 'LATERAL joins may not be supported',
+    r'\bUNION\b': 'UNION queries may have limited support',
+    r'\bRECURSIVE\b': 'Recursive CTEs may not be supported',
+    r'\bJSON_\w+\s*\(': 'JSON functions may have limited support',
+    r'\bLATERAL\b': 'LATERAL joins may not be supported',
 }
-
 
 def check_readyset_cacheability(query: str = None, sql: str = None, **kwargs) -> Dict[str, Any]:
     """
@@ -136,10 +138,9 @@ def check_readyset_cacheability(query: str = None, sql: str = None, **kwargs) ->
 
 
 def _normalize_for_analysis(query: str) -> str:
-    """Normalize query for pattern matching."""
-    # Remove comments
-    query = re.sub(r'--.*$', '', query, flags=re.MULTILINE)
-    query = re.sub(r'/\*.*?\*/', '', query, flags=re.DOTALL)
+    """Normalize query for pattern matching: its code only, upper-cased."""
+    # Blank comments, literal values and quoted names
+    query = blank_comments_and_quoted(query)
 
     # Normalize whitespace
     query = re.sub(r'\s+', ' ', query)
@@ -158,7 +159,7 @@ def _find_blocking_issues(normalized_query: str) -> List[str]:
     issues = []
 
     for pattern, reason in UNCACHEABLE_PATTERNS.items():
-        if pattern in normalized_query:
+        if re.search(pattern, normalized_query):
             issues.append(reason)
 
     return issues
@@ -169,7 +170,7 @@ def _find_warnings(normalized_query: str) -> List[str]:
     warnings = []
 
     for pattern, reason in WARNING_PATTERNS.items():
-        if pattern in normalized_query:
+        if re.search(pattern, normalized_query):
             warnings.append(reason)
 
     return warnings

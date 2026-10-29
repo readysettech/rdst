@@ -610,6 +610,14 @@ async def fake_probe_upstream(target_config):
     )
 
 
+def fake_check_anthropic_key(key):
+    del key
+    return fixtures.value(
+        "anthropic_key_check",
+        default={"valid": True, "reason": "ok", "model": None},
+    )
+
+
 class FakeScanService(ScanService):
     async def scan_directory(self, input_data, options):
         del input_data, options

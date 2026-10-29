@@ -378,6 +378,30 @@ def mask_string_literals(sql: str) -> str:
     return "".join(masked)
 
 
+_COMMENT_OR_QUOTED = re.compile(
+    r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|`(?:[^`]|``)*`|(\$(?:[A-Za-z_]\w*)?\$).*?\1"
+    r"|(--[^\n]*)|(/\*.*?\*/)",
+    re.DOTALL,
+)
+
+
+def strip_sql_comments(sql: str) -> str:
+    """Remove -- and /* */ comments, leaving the same characters inside quotes intact."""
+
+    def replace(match: re.Match[str]) -> str:
+        if match.group(2):
+            return ""
+        return " " if match.group(3) else match.group(0)
+
+    return _COMMENT_OR_QUOTED.sub(replace, sql)
+
+
+def blank_comments_and_quoted(sql: str) -> str:
+    """Blank comments, string literals and quoted names, preserving offsets. One pass over
+    every quote kind, so an apostrophe inside a quoted name never opens a string."""
+    return _COMMENT_OR_QUOTED.sub(lambda match: " " * len(match.group(0)), sql)
+
+
 def _dollar_slot_names(sql: str) -> Set[str]:
     """Parameter names for the `$N` slots that sit outside string literals."""
     return {f"p{index}" for index in _DOLLAR_SLOT.findall(mask_string_literals(sql))}

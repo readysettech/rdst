@@ -1209,7 +1209,9 @@ def validate_tables_against_schema(
         {
             table.name
             for table in tree.find_all(exp.Table)
-            if table.name.casefold() not in cte_names
+            # A table function (JSON_TABLE, generate_series) has no table name.
+            if table.name
+            and table.name.casefold() not in cte_names
             and table.name.casefold() not in schema_names
         },
         key=str.casefold,

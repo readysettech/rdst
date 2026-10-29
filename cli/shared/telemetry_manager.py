@@ -192,7 +192,10 @@ class CommandRun:
 
 
 FEEDBACK_NOT_SENT = "Couldn't send your feedback. Check your connection and try again."
-FEEDBACK_TELEMETRY_OFF = "Feedback isn't sent while telemetry is turned off."
+FEEDBACK_TELEMETRY_OFF = (
+    "Feedback isn't sent while telemetry is turned off. "
+    "To send it, start RDST without RDST_TELEMETRY=off."
+)
 
 
 # The production PostHog project (260434) and the preview project (640148). Only a released

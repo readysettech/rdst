@@ -60,6 +60,20 @@ def test_report_says_when_feedback_did_not_leave_the_machine():
     }
 
 
+def test_report_with_telemetry_off_says_how_to_send_it():
+    with patch("shared.telemetry.telemetry.is_enabled", return_value=False):
+        response = _client().post(
+            "/api/report", json={"reason": "Great tool", "email": "a@example.com"}
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": False,
+        "error": "Feedback isn't sent while telemetry is turned off. "
+        "To send it, start RDST without RDST_TELEMETRY=off.",
+    }
+
+
 def test_feature_request_is_labelled_and_carries_the_chat():
     with patch("shared.telemetry.telemetry.submit_feedback") as submit_feedback:
         response = _client().post(

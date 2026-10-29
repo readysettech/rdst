@@ -33,6 +33,7 @@ CANDIDATE_V4_FLAGS = {
     "month_component_enabled": True,
     "endpoint_component_enabled": True,
     "null_extremum_enabled": True,
+    "ranked_nulls_last_enabled": True,
     "projection_order_enabled": True,
     "output_completion_enabled": True,
     "occurrence_percentage_enabled": True,

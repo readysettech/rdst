@@ -13,6 +13,8 @@ from typing import Any
 
 import requests
 
+from features.qprouter.sqp_client import DIRECT
+
 # Cache names come back from SHOW CACHES / are built from a fingerprint and are
 # interpolated into DDL, so they are restricted to bare identifiers.
 _CACHE_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
@@ -103,7 +105,7 @@ class ReadysetClient:
             return {}
         try:
             r = requests.get(f"http://{self.host}:{self.metrics_port}/metrics",
-                            timeout=self.timeout)
+                            timeout=self.timeout, proxies=DIRECT)
             r.raise_for_status()
         except requests.RequestException:
             return {}

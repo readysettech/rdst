@@ -77,3 +77,15 @@ def test_haiku_prompts_past_100k_tokens_are_priced_at_the_long_prompt_rate():
         assert estimate(100_000, 10_000, "claude-haiku-5-5") == pytest.approx(0.015)
         assert estimate(120_000, 10_000, "claude-haiku-5-5") == pytest.approx(0.085)
         assert estimate(120_000, 10_000, "claude-haiku-4-5-20251001") == pytest.approx(0.17)
+
+
+def test_the_prompt_says_how_many_rows_the_filters_kept(monkeypatch):
+    manager = MagicMock()
+    manager.generate_response.return_value = {"response": json.dumps({})}
+    monkeypatch.setattr(llm_analysis, "LLMManager", lambda: manager)
+    llm_analysis.analyze_with_llm(
+        {"database_engine": "postgresql", "success": True, "rows_examined": 3_000_031,
+         "rows_returned": 1, "filter_rows": {"kept": 30, "read": 3_000_000}},
+        {}, "SELECT sum(length(payload)) FROM t WHERE customer_id = 31415", target="t")
+    prompt = json.dumps(manager.generate_response.call_args.kwargs)
+    assert "Rows Kept by Filters: 30 of the 3,000,000 the filters read" in prompt

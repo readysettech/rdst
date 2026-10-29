@@ -3,7 +3,10 @@
 import { Button } from '@rs/ui-new/button'
 import { DividedList, ListRow } from '@rs/ui-new/divided-list'
 import { Text } from '@rs/ui-new/text'
+import { useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 import { useReportRun } from '@/features/database/reports/useReportRun'
+import { agentActivityKeys } from '@/lib/agentActivity'
 import {
   type BackgroundRunKind,
   type BackgroundRunState,
@@ -14,6 +17,29 @@ import { useAnalyzeJobs, useCancelAnalyzeJob } from '@/lib/monitor/hooks'
 
 /** Runs this browser started that are still going. */
 export const ACTIVE_RUN = new Set(['running', 'reconnecting', 'stopping'])
+
+/** A run's entry is written as it wraps up, shortly after it stops showing as running. */
+const ENTRY_WRITTEN_MS = 3_000
+
+/** The activity list refetches when one of these runs ends, and again once its entry is
+ * written, so the finished entry replaces the running row. */
+function useRefreshActivityOnEnd(runIds: (string | null)[]) {
+  const client = useQueryClient()
+  const key = runIds.filter((id) => id !== null).join('\n')
+  const previous = useRef(key)
+  useEffect(() => {
+    const running = new Set(key.split('\n'))
+    const ended = previous.current
+      .split('\n')
+      .some((id) => id && !running.has(id))
+    previous.current = key
+    if (!ended) return
+    const refresh = () =>
+      void client.invalidateQueries({ queryKey: agentActivityKeys.all })
+    refresh()
+    window.setTimeout(refresh, ENTRY_WRITTEN_MS)
+  }, [client, key])
+}
 
 const RUN_TEXT: Record<BackgroundRunKind, string> = {
   bootstrap: 'Setting up',
@@ -70,6 +96,10 @@ function DatabaseRuns({ target }: { target: string }) {
   const running = useAnalyzeJobs(target).data?.queue?.running ?? null
   const cancelAnalysis = useCancelAnalyzeJob(target)
   const report = useReportRun(target)
+  useRefreshActivityOnEnd([
+    report.active ? 'report' : null,
+    running ? `analysis:${running.query_key}` : null,
+  ])
   return (
     <>
       {report.active && (
@@ -95,6 +125,7 @@ function DatabaseRuns({ target }: { target: string }) {
 /** Hidden while nothing runs. */
 export function RunningNow({ databases }: { databases: string[] }) {
   const runs = useBackgroundRuns().filter((run) => ACTIVE_RUN.has(run.status))
+  useRefreshActivityOnEnd(runs.map((run) => run.runId))
   return (
     <section
       aria-label="Running now"

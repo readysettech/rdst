@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestQueryClient, renderWithClient } from '@/test-utils'
+import { setAiProvider } from '../lib/api'
 import {
   invalidateTrialRelatedQueries,
   useTrialSource,
@@ -14,6 +15,11 @@ vi.mock('../lib/trialQueries', async () => {
     invalidateTrialRelatedQueries: vi.fn(),
     useTrialSource: vi.fn(),
   }
+})
+
+vi.mock('../lib/api', async () => {
+  const actual = await vi.importActual('../lib/api')
+  return { ...actual, setAiProvider: vi.fn() }
 })
 
 vi.mock('./TrialRegistrationDialog', () => ({
@@ -75,6 +81,41 @@ describe('AI provider startup gate', () => {
       screen.getByRole('button', { name: 'Use my own Anthropic key instead' })
     )
     expect(screen.getByText('Anthropic key setup')).toBeTruthy()
+  })
+
+  it('switches to a connected account instead of asking for a new sign-in', async () => {
+    vi.mocked(setAiProvider).mockResolvedValue({
+      success: true,
+      provider: 'readyset',
+    })
+    vi.mocked(useTrialSource).mockReturnValue({
+      ...vi.mocked(useTrialSource)(),
+      anthropicRequirement: {
+        kind: 'anthropic_api_key',
+        accepted_names: ['ANTHROPIC_API_KEY'],
+        target: null,
+        satisfied: false,
+        source: 'secure_store',
+        selected_provider: 'claude',
+        anthropic_key_configured: true,
+        readyset_account_connected: true,
+      },
+    })
+    renderWithClient(
+      <AiProviderGate gate={{ status: 'blocked', reason: 'invalid' }} />,
+      createTestQueryClient()
+    )
+
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use Hosted by Readyset' })
+    )
+
+    await waitFor(() =>
+      expect(invalidateTrialRelatedQueries).toHaveBeenCalled()
+    )
+    expect(vi.mocked(setAiProvider).mock.calls[0]?.[0]).toBe('readyset')
+    expect(screen.queryByText('Readyset account login')).toBeNull()
   })
 
   it('never pops sign-in up on its own', () => {

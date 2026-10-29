@@ -12,6 +12,7 @@ never stored, so sampled values and row data stay out of the log.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import re
@@ -286,8 +287,6 @@ def action(name: str, target: str | None, *, subject: str = "", run_ref: str | N
         yield activity
     except BaseException as exc:
         if activity.outcome is None:
-            import asyncio
-
             activity.outcome = ("cancelled" if isinstance(exc, asyncio.CancelledError)
                                 else "failed")
             if not activity.summary and not isinstance(exc, asyncio.CancelledError):
@@ -517,7 +516,15 @@ def recorded_snapshot(run_report: Callable[..., Any]) -> Callable[..., Any]:
         with action("daily_snapshot", target,
                     subject="Nightly" if trigger == "nightly" else "On request",
                     trigger=trigger) as activity:
-            result = await run_report(target, trigger, *args, **kwargs)
+            try:
+                result = await run_report(target, trigger, *args, **kwargs)
+            except asyncio.CancelledError:
+                # A cancel the user asked for returns; a cancelled run was cut off mid-way.
+                activity.describe(outcome="failed", summary="Interrupted before it finished")
+                raise
+            finally:
+                if activity.details.get("report_id") is not None:
+                    activity.run_ref = f"report_run:{activity.details['report_id']}"
             if isinstance(result, dict):
                 report = result.get("report_json") if isinstance(
                     result.get("report_json"), dict) else {}

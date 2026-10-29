@@ -118,9 +118,48 @@ describe('NotificationSettings', () => {
       screen.getByRole('button', { name: 'Send a test notification' })
     )
     expect(shown).toHaveBeenCalledWith('RDST test notification', {
-      body: undefined,
-      tag: undefined,
+      body: 'Notifications from RDST show up like this.',
     })
+    expect((await screen.findByRole('status')).textContent).toBe(
+      "Sent. If it didn't appear, check the system's notification settings."
+    )
+  })
+
+  it('says why the desktop app could not show the test, and what to do', async () => {
+    const problem =
+      'No notification service is running on this desktop. Start it, then send the test again.'
+    const sendTest = vi.fn(() => Promise.resolve(problem))
+    vi.stubGlobal('rdstDesktop', {
+      isDesktop: true,
+      platform: 'linux',
+      getNotificationsEnabled: () => Promise.resolve(true),
+      setNotificationsEnabled: (on: boolean) => Promise.resolve(on),
+      notifications: {
+        getHealth: () =>
+          Promise.resolve({
+            blocked: true,
+            reason: 'linux_no_daemon',
+            message: 'No notification service is running on this desktop.',
+            trayLabel: "Notifications can't be shown on this system",
+            settingsUrl: null,
+            checkedAt: 0,
+          }),
+        onHealthChange: () => () => undefined,
+        openSettings: () => undefined,
+        sendTest,
+      },
+    })
+    await openPopover()
+    expect(
+      await screen.findByText(
+        'No notification service is running on this desktop.'
+      )
+    ).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Send a test notification' })
+    )
+    expect((await screen.findByRole('status')).textContent).toBe(problem)
+    expect(sendTest).toHaveBeenCalledTimes(1)
   })
 
   it('says the switches come with a database when there is none', async () => {

@@ -144,7 +144,8 @@ function DayCard({
   const chart = dayChartModel(
     day.series,
     now,
-    Math.floor(midnight.getTime() / 1000)
+    Math.floor(midnight.getTime() / 1000),
+    day.first_reading_at
   )
   const latency = latencyWord(day.mean_ms_delta)
   const cacheOut = Boolean(day.cache_hit_reason)

@@ -2,7 +2,6 @@ import { ErrorState } from '@rs/ui-new/error-state'
 import { PageBar } from '@rs/ui-new/page-bar'
 import { PageContainer } from '@rs/ui-new/page-container'
 import { PageNotices, PageNoticesProvider } from '@rs/ui-new/page-notices'
-import { useQuery } from '@tanstack/react-query'
 import {
   createRootRoute,
   type ErrorComponentProps,
@@ -29,8 +28,8 @@ import { useGoShortcuts } from '../layout/goShortcuts'
 import { legacyTitle, Main } from '../layout/Main'
 import { type RouteLayout, useRouteLayout } from '../layout/routeLayout'
 import { Sidebar } from '../layout/Sidebar'
+import { useAccountStatusWatch } from '../lib/accountStatus'
 import { maskInReplays, setAnalyticsAccountId } from '../lib/analytics'
-import { fetchAccountStatus } from '../lib/api'
 import { reportAppError } from '../lib/appErrors'
 import { useDesktopMonitoringChanges } from '../lib/useDesktopMonitoringChanges'
 import { useQueryDiscoveryTransport } from '../lib/useQueryDiscovery'
@@ -115,10 +114,7 @@ function ReadyRoot() {
   const { target } = useTarget()
   useQueryDiscoveryTransport(target)
   useAgentTurnOnRequests()
-  const accountStatus = useQuery({
-    queryKey: ['account-status'],
-    queryFn: fetchAccountStatus,
-  })
+  const accountStatus = useAccountStatusWatch()
 
   useEffect(() => {
     setAnalyticsAccountId(accountStatus.data?.analytics_account_id)

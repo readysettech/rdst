@@ -3,7 +3,7 @@
 Pure logic — no live stack required.
 """
 
-from features.qprouter.sqp_client import to_decimal, to_hex
+from features.qprouter.sqp_client import DIRECT, SqpAdminClient, to_decimal, to_hex
 from features.qprouter import deploy as qdeploy
 from types import SimpleNamespace
 
@@ -274,3 +274,21 @@ def test_readyset_client_rejects_non_identifier_cache_name():
         client.drop_cache("q_abc; DROP TABLE users")
     with pytest.raises(ValueError):
         client.create_cache("SELECT 1", name="q_abc; DROP TABLE users")
+
+
+def test_admin_calls_bypass_a_configured_http_proxy(monkeypatch):
+    calls = []
+
+    def respond(method):
+        def call(url, **kwargs):
+            calls.append((method, kwargs.get("proxies")))
+            return SimpleNamespace(status_code=200, content=b"{}", json=lambda: {}, text="")
+        return call
+
+    for method in ("get", "post", "delete"):
+        monkeypatch.setattr(f"features.qprouter.sqp_client.requests.{method}", respond(method))
+    client = SqpAdminClient("qpdemo-sqp", 9091, api_key=None)
+    client._get("/health")
+    client._post("/rules")
+    client._delete("/rules/1")
+    assert calls == [("get", DIRECT), ("post", DIRECT), ("delete", DIRECT)]

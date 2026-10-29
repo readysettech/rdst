@@ -91,6 +91,12 @@ class TestNormalizeForRegistry:
 
         assert "get all columns" not in result["normalized_sql"]
 
+    def test_comment_markers_inside_quotes_are_kept(self):
+        sql = """SELECT id AS "--", '/* x */' AS note, RANDOM() FROM products -- why"""
+        result = normalize_for_registry(sql)
+
+        assert result["normalized_sql"] == """SELECT id AS "?", '?' AS note, RANDOM() FROM products"""
+
     def test_trailing_semicolon_removal(self):
         """Test that trailing semicolons are removed."""
         sql = "SELECT * FROM users WHERE id = 1;"

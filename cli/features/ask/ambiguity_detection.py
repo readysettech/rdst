@@ -74,6 +74,19 @@ _EARLIER_EXCHANGE_PATTERN = re.compile(
     r"|\bwe\s+were\s+discussing\b",
     re.IGNORECASE,
 )
+# Ask runs only read-only queries, so it never offers a choice that changes data or
+# structure: the question is answered or refused as asked.
+_DATA_CHANGE_PATTERN = re.compile(
+    r"\b(?:insert\s+into|delete\s+from|merge\s+into|update\s+\S+\s+set"
+    r"|(?:drop|alter|create|truncate)\s+(?:table|view|index|schema|database)"
+    r"|(?:delete|deletes|remove|removes|erase|erases|wipe|wipes|drop|drops)\s+"
+    r"(?:(?:all|every|the)\s+)+(?:rows|records|data|tables?|dataset|database|columns?)"
+    r"|permanently\s+(?:delete|remove|erase|wipe|purge|destroy|drop)"
+    r"|(?:delete|remove|erase|wipe|purge|destroy)s?\s+(?:everything|(?:all|every|each)\s+"
+    r"(?:[\w.]+\s+){0,3}?(?:rows?|records?|entries|data|from)))\b"
+    r"|(?:^|;)\s*truncate\s+[\w.\"`]+\s*(?:;|$)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -440,6 +453,12 @@ def _normalize_material_ambiguities(
 def _unusable_ambiguity_reason(ambiguity: Ambiguity) -> str | None:
     if ambiguity.category == "schema_insufficient":
         return "schema_insufficiency_is_not_user_intent"
+    if any(
+        _DATA_CHANGE_PATTERN.search(text)
+        for option in ambiguity.possible_interpretations
+        for text in (option.text, option.sql_effect)
+    ):
+        return "offers_a_data_change"
     if _IMPLEMENTATION_FACING_QUESTION_PATTERN.search(ambiguity.clarifying_question):
         return "implementation_facing_question"
     if any(

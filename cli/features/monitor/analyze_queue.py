@@ -20,7 +20,7 @@ from features.analyze.models import AnalyzeInput, AnalyzeOptions
 from features.analyze.service import AnalyzeService
 from features.monitor import database_limit
 from features.monitor import telemetry as monitor_telemetry
-from features.monitor.analysis_digest import digest_for_ref, summary_for_job
+from features.monitor.analysis_digest import digest_for_ref, library_analysis_jobs, summary_for_job
 from features.monitor.presentation import analysis_error_kind, analysis_reason, display_name
 from shared.monitor.write_lookup import lookup_for
 from shared.llm_manager.inference_attribution import (count_billable_calls, inference_workflow,
@@ -1093,17 +1093,21 @@ def analysis_outcome(job: dict[str, Any], statements: list[dict[str, Any]]) -> d
         state = "cancelled"
     timeouts = [row["timeout_ms"] for row in statements
                 if row["kind"] == "explain_analyze" and row.get("timeout_ms")]
-    if job.get("mode") == "analyze":
+    # A finished job ran its mode's EXPLAIN; one that ended early ran only what it recorded.
+    kinds = {row["kind"] for row in statements}
+    finished = state == "done"
+    if (job.get("mode") == "analyze") if finished else ("explain_analyze" in kinds):
         decision = "Ran EXPLAIN ANALYZE" + (
             f" with a {timeouts[0] / 1000:g} s timeout" if timeouts else "")
-    elif job.get("mode") == "explain":
+    elif (job.get("mode") == "explain") if finished else ("explain" in kinds):
         decision = "Ran EXPLAIN only, without executing the query"
-    else:
+    elif finished:
         decision = None
+    else:
+        decision = ("Stopped before the query ran" if statements
+                    else "Stopped before any statement ran")
     if state == "skipped":
         decision = "Not run: " + (job.get("error") or "not eligible")
-    elif state == "cancelled" and not statements:
-        decision = "Stopped before any statement ran"
     return {"outcome": state, "decision": decision,
             "summary": "Cancelled by you" if user_cancelled else
             (job.get("error") or "")[:300] if state == "failed" else "",
@@ -1327,13 +1331,23 @@ class AnalyzeQueue:
         weights = _weights(self.store, target, now)
         self.store.update_analysis_priorities(
             target, {key: float(row["total_ms"]) for key, row in weights.items()})
+        # Also any analyzed row stored before its efficient verdict was kept.
         jobs = self.store.read(
             "SELECT j.* FROM analyze_job j WHERE j.target=? AND j.state='done' "
-            "AND j.query_key IN (SELECT value FROM json_each(?)) AND j.id=("
-            "SELECT MAX(id) FROM analyze_job WHERE target=j.target AND query_key=j.query_key "
-            "AND state='done') AND NOT EXISTS (SELECT 1 FROM query_ui u "
-            "WHERE u.target=j.target AND u.query_key=j.query_key AND u.analyzed=1) "
+            "AND j.id=(SELECT MAX(id) FROM analyze_job WHERE target=j.target "
+            "AND query_key=j.query_key AND state='done') AND ("
+            "j.query_key IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM "
+            "query_ui u WHERE u.target=j.target AND u.query_key=j.query_key AND u.analyzed=1) "
+            "OR EXISTS (SELECT 1 FROM query_ui u WHERE u.target=j.target "
+            "AND u.query_key=j.query_key AND u.analyzed=1 AND u.efficient IS NULL)) "
             "ORDER BY j.id DESC LIMIT 50", (target, json.dumps(list(weights))))
+        # A query analyzed by hand, from Ask or Analyze a query, has its analysis saved but
+        # no job here.
+        analyzed = {row["query_key"] for row in self.store.read(
+            "SELECT query_key FROM query_ui WHERE target=? AND analyzed=1", (target,))}
+        found = {job["query_key"] for job in jobs}
+        jobs = [*jobs, *library_analysis_jobs(
+            target, [key for key in weights if key not in analyzed and key not in found]).values()]
         if jobs:
             summaries = {job["query_key"]: summary for job in jobs if (summary := summary_for_job(job))}
             self.store.sync_query_ui(target, summaries=summaries)

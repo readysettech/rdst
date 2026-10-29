@@ -14,6 +14,7 @@ import hashlib
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
 
+from shared.query_registry.sql_normalizer import strip_sql_comments
 from shared.sql_json_paths import mask_json_paths
 
 
@@ -114,8 +115,7 @@ def _normalize_sql_for_registry(sql: str) -> str:
     normalized = sql.strip()
 
     # Remove comments (but preserve structure)
-    normalized = re.sub(r'--.*$', '', normalized, flags=re.MULTILINE)
-    normalized = re.sub(r'/\*.*?\*/', '', normalized, flags=re.DOTALL)
+    normalized = strip_sql_comments(normalized)
 
     # JSON paths (`col->>'$.a'`) are structure, not values; keep them verbatim.
     normalized, restore_json_paths = mask_json_paths(normalized)
@@ -169,8 +169,7 @@ def _parameterize_for_llm_safety(sql: str) -> Tuple[str, List[Dict[str, str]]]:
 
     # Remove comments entirely (could contain sensitive info)
     original_parameterized = parameterized
-    parameterized = re.sub(r'--.*$', '', parameterized, flags=re.MULTILINE)
-    parameterized = re.sub(r'/\*.*?\*/', '', parameterized, flags=re.DOTALL)
+    parameterized = strip_sql_comments(parameterized)
     if original_parameterized != parameterized:
         replacements.append({"type": "comments", "action": "removed", "reason": "potential_pii"})
 

@@ -268,7 +268,7 @@ export function chartMarkers({
 
 export interface StatusChip {
   label: string
-  variant: 'neutral' | 'positive' | 'negative'
+  variant: 'neutral' | 'positive' | 'warning' | 'negative'
   modifier: 'solid' | 'outline' | 'ghost'
   /** running: a breathing dot while the analysis runs. queued: a hollow dot until it starts. */
   activity?: 'running' | 'queued'
@@ -281,6 +281,8 @@ export const STATUS_CHIP: Record<QueryStatus, StatusChip | null> = {
     modifier: 'solid',
   },
   healthy: { label: 'Healthy', variant: 'positive', modifier: 'ghost' },
+  // Analyzed and rated fair or worse, with no change to suggest.
+  no_fix: { label: 'No fix found', variant: 'warning', modifier: 'ghost' },
   analyzing: {
     label: 'Analyzing',
     variant: 'neutral',
@@ -295,6 +297,7 @@ export const STATUS_FILTERS: { value: ListStatus; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'fix', label: 'Fix suggested' },
   { value: 'healthy', label: 'Healthy' },
+  { value: 'no_fix', label: 'No fix found' },
   { value: 'analyzing', label: 'Analyzing' },
   { value: 'stuck', label: 'Stuck' },
 ]
@@ -303,6 +306,7 @@ const STATUS_OF: Record<Exclude<ListStatus, 'all'>, QueryStatus> = {
   fix: 'fix_suggested',
   analyzing: 'analyzing',
   healthy: 'healthy',
+  no_fix: 'no_fix',
   stuck: 'stuck',
 }
 

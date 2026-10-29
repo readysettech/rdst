@@ -127,6 +127,7 @@ function makeBase(): DemoState {
     setDiscoveryMode: vi.fn(),
     setCacheBudget: vi.fn(),
     tearDown: vi.fn(),
+    dismissFailure: vi.fn(),
     setIntensity: vi.fn(),
     refreshPatterns: vi.fn(() => Promise.resolve()),
     refreshStatus: vi.fn(() => Promise.resolve(undefined)),
@@ -362,7 +363,10 @@ describe('PlatformPage', () => {
 
   it('failed: says why the start failed, offers Start again and sends no traffic', async () => {
     const calls = stubApi()
-    mockDemo({ phase: 'failed', error: 'ReadySet did not snapshot in time.' })
+    const demo = mockDemo({
+      phase: 'failed',
+      error: 'ReadySet did not snapshot in time.',
+    })
     renderWithClient(<PlatformPage />)
 
     expect(screen.getByText("The demo didn't start")).toBeTruthy()
@@ -378,6 +382,8 @@ describe('PlatformPage', () => {
     expect(calls.some((call) => call.url === '/api/demo/load/start')).toBe(
       false
     )
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(demo.dismissFailure).toHaveBeenCalledTimes(1)
   })
 
   it('running: the proof in the verdict, the comparison, the queries and one solid QueryPilot button', async () => {

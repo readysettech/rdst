@@ -32,7 +32,8 @@ export interface DayChartModel {
 export function dayChartModel(
   series: HomeSparkPoint[],
   now: number,
-  midnight: number
+  midnight: number,
+  firstReading?: number | null
 ): DayChartModel {
   const points = series
     .filter((point) => point.qps != null)
@@ -77,7 +78,8 @@ export function dayChartModel(
   return {
     domain,
     short,
-    since: first,
+    // A bucket starts before the reading it holds.
+    since: first == null ? null : Math.max(first, firstReading ?? first),
     res,
     runs,
     pauses,

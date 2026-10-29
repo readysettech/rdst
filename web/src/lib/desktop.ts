@@ -37,6 +37,10 @@ export interface DesktopNotifications {
     callback: (health: DesktopNotificationHealth) => void
   ) => () => void
   openSettings: () => void
+  /** Resolves to why the test couldn't be shown and what to do, or null once it shows. */
+  sendTest?: () => Promise<string | null>
+  /** The tray's Notifications switch changed. */
+  onEnabledChange?: (callback: (enabled: boolean) => void) => () => void
 }
 
 /**

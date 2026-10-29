@@ -621,7 +621,8 @@ export interface ActivityLine {
   detail: string | null
   warn: boolean
   place: ActivityPlace
-  link: { to: string; search?: Record<string, unknown> }
+  /** Null when no page shows this entry. */
+  link: { to: string; search?: Record<string, unknown> } | null
 }
 
 /** "October 7" for a local day. */
@@ -778,11 +779,21 @@ function reportLine(item: AgentActivityItem): ActivityLine {
       : { to: '/database', search: { ...target(item), view: 'report' } }
   if (item.outcome === 'failed' || item.outcome === 'cancelled')
     return {
-      text: `Couldn't finish the daily report for ${longDay(start)}`,
-      detail: plainReason(item.summary) || null,
+      text: partial
+        ? "Couldn't finish the report you asked for"
+        : `Couldn't finish the daily report for ${longDay(start)}`,
+      // A run you cancel keeps its id; one without an id was cut off before it reported.
+      detail:
+        plainReason(item.summary) ||
+        (item.outcome !== 'cancelled'
+          ? null
+          : item.report_id != null
+            ? 'Cancelled'
+            : 'Interrupted before it finished'),
       warn: true,
       place: 'Report',
-      link,
+      // Without its id the row would open another day's report.
+      link: item.report_id != null ? link : null,
     }
   return partial
     ? {

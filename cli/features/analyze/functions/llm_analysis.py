@@ -289,6 +289,9 @@ def analyze_with_llm(
         execution_time_ms = explain_results.get("execution_time_ms", 0)
         rows_examined = explain_results.get("rows_examined", 0)
         rows_returned = explain_results.get("rows_returned", 0)
+        filter_rows = explain_results.get("filter_rows") or {}
+        filter_line = (f"\n  Rows Kept by Filters: {filter_rows['kept']:,} of the "
+                       f"{filter_rows['read']:,} the filters read" if filter_rows.get("read") else "")
 
         # Extract table size from schema_info if available
         row_estimate = 0
@@ -444,7 +447,7 @@ Database: {explain_results.get("database_engine", "unknown")}
 PERFORMANCE METRICS:
   Execution Time: {execution_time_ms}ms → {perf_class}
   Rows Examined: {rows_examined:,} {f"({scan_pct:.2f}% of table)" if row_estimate > 0 else ""}
-  Rows Returned: {rows_returned:,}
+  Rows Returned: {rows_returned:,}{filter_line}
   Cost Estimate: {explain_results.get("cost_estimate", 0)}
   Scan Efficiency: {scan_efficiency}
 

@@ -19,7 +19,9 @@ from features.monitor.analyze_queue import daily_cap, enqueue_for_report, starte
 from features.monitor.run_guard import ThreadWork
 from features.monitor.naming import target_names
 from shared import product_telemetry
-from shared.agent_activity.recorder import recorded_snapshot
+from shared.agent_activity.recorder import (
+    describe as describe_activity, record_entry, recorded_snapshot,
+)
 from shared.llm_manager.inference_attribution import (
     count_billable_calls, inference_workflow, monitoring_database,
 )
@@ -676,6 +678,31 @@ def _headline(job: dict[str, Any] | None) -> str | None:
     return digest["headline"] if digest else None
 
 
+def _close_unattended(store: MonitorStore, row: dict[str, Any], now: int, state: str,
+                      summary: str) -> None:
+    """End a run that no task is running: its report view stops, and Activity keeps it."""
+    events = store.report_events(row["id"])
+    if events and events[-1]["event"].get("type") == "run" and \
+            events[-1]["event"].get("state") != "running":
+        return
+    store.append_report_event(row["id"], {
+        "type": "run", "state": state, "started_at": row["ts"],
+        "elapsed_s": max(0, now - row["ts"])}, now)
+    record_entry({
+        "ts": row["ts"], "finished_at": now, "target": row["target"], "action": "daily_snapshot",
+        "subject": "Nightly" if row["trigger"] == "nightly" else "On request",
+        "outcome": state, "summary": summary, "run_ref": f"report_run:{row['id']}",
+        "details": {"trigger": row["trigger"], "report_id": row["id"],
+                    "period_start": row.get("period_start"),
+                    "period_end": row.get("period_end")}})
+
+
+def recover_reports(store: MonitorStore, now: int) -> None:
+    """Fail the runs a stopped process left running."""
+    for row in store.recover_reports(now):
+        _close_unattended(store, row, now, "failed", "Interrupted before it finished")
+
+
 def request_cancel(store: MonitorStore, report_id: int, now: int) -> dict[str, Any] | None:
     """Stop a running report. The run's own task records the cancellation when it is here."""
     task = _running.get(report_id)
@@ -685,12 +712,7 @@ def request_cancel(store: MonitorStore, report_id: int, now: int) -> dict[str, A
         task.get_loop().call_soon_threadsafe(task.cancel)
     row = store.cancel_report(report_id, now)
     if row is not None and task is None and row["state"] == "cancelled":
-        events = store.report_events(report_id)
-        if not events or events[-1]["event"].get("type") != "run" or \
-                events[-1]["event"].get("state") == "running":
-            store.append_report_event(report_id, {
-                "type": "run", "state": "cancelled", "started_at": row["ts"],
-                "elapsed_s": max(0, now - row["ts"])}, now)
+        _close_unattended(store, row, now, "cancelled", "")
     return row
 
 
@@ -724,6 +746,7 @@ async def run_report(target: str, trigger: Literal["nightly", "user"], *,
     run_id = run["id"]
     started_at = run["ts"]
     period_start, period_end, partial = snapshot.report_period(trigger, now)
+    describe_activity(report_id=run_id, period_start=period_start, period_end=period_end)
     await asyncio.to_thread(store.update_report, run_id, period=(period_start, period_end))
     emit = _Events(store, run_id, clock)
     task = asyncio.current_task()
@@ -1308,7 +1331,7 @@ class ReportScheduler:
 
     async def start(self) -> "ReportScheduler":
         if self._task is None:
-            await asyncio.to_thread(self.store.recover_reports, int(self.clock()))
+            await asyncio.to_thread(recover_reports, self.store, int(self.clock()))
             self._task = asyncio.create_task(self._run(), name="monitor-report-scheduler")
         return self
 
@@ -1342,7 +1365,7 @@ class ReportScheduler:
     def _plan(self, now: int) -> list[tuple[str, tuple]]:
         """What this minute starts: narrative retries and claimed nightly runs."""
         plan: list[tuple[str, tuple]] = []
-        self.store.recover_reports(now)
+        recover_reports(self.store, now)
         for row in self.store.read("SELECT * FROM report_run WHERE state='done' "
                                    "AND ts>=? AND report_json LIKE '%narrative_retry_at%'",
                                    (now - NARRATIVE_RETRY_WINDOW_SECONDS,)):

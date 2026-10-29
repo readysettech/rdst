@@ -221,6 +221,17 @@ def test_table_validation_rejects_unknown_physical_table() -> None:
     assert result["invalid_tables"] == ["invented_users"]
 
 
+@pytest.mark.parametrize("dialect,sql", [
+    ("mysql", "SELECT g.genre FROM title_basics b CROSS JOIN JSON_TABLE(CONCAT('[\"', "
+              "REPLACE(b.genres, ',', '\",\"'), '\"]'), '$[*]' COLUMNS (genre VARCHAR(64) "
+              "PATH '$')) AS g"),
+    ("postgresql", "SELECT n FROM generate_series(1, 3) AS n"),
+])
+def test_table_validation_accepts_table_functions(dialect, sql) -> None:
+    result = validate_tables_against_schema(sql, {"title_basics": ["genres"]}, dialect)
+    assert result == {"is_valid": True, "invalid_tables": [], "error_message": None}
+
+
 @pytest.mark.parametrize("dialect", ["mysql", "postgresql"])
 @pytest.mark.parametrize("validator", [
     validate_tables_against_schema,

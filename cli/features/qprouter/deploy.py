@@ -125,6 +125,24 @@ def _publish_bind() -> str:
     return "" if DockerTopology.from_environment().remote else "127.0.0.1:"
 
 
+def _network_flags() -> list[str]:
+    """Join the Docker network RDST shares with its containers, when one is configured."""
+    network = DockerTopology.from_environment().docker_network
+    return ["--network", network] if network else []
+
+
+def client_address(name: str, published_port: int, container_port: int) -> tuple[str, int]:
+    """Where RDST connects to container `name`.
+
+    On a shared Docker network (RDST itself runs in a container there) that is the
+    container's own name and port; otherwise it is the port published on the daemon host.
+    """
+    topology = DockerTopology.from_environment()
+    if topology.docker_network:
+        return name, container_port
+    return topology.published_host, published_port
+
+
 def _port_free(port: int) -> bool:
     """Whether Docker could publish `port` on the daemon host.
 
@@ -315,6 +333,7 @@ def deploy_postgres_baked(name: str, port: int) -> subprocess.CompletedProcess:
             name,
             "--restart=unless-stopped",
             "--shm-size=1g",
+            *_network_flags(),
             *_limit_flags("pg"),
             "-p",
             f"{_publish_bind()}{port}:5432",
@@ -341,6 +360,7 @@ def deploy_readyset(
             "--restart=unless-stopped",
             "--link",
             f"{PROJECT}-pg:qpdemo-pg",
+            *_network_flags(),
             *_limit_flags("readyset"),
             "-e",
             f"UPSTREAM_DB_URL={db}",
@@ -386,6 +406,7 @@ def deploy_sqp(
             f"{PROJECT}-pg:qpdemo-pg",
             "--link",
             f"{PROJECT}-readyset:qpdemo-readyset",
+            *_network_flags(),
             *_limit_flags("sqp"),
             "-p",
             f"{_publish_bind()}{ports.sqp}:{ports.sqp}",
@@ -423,6 +444,7 @@ def deploy_qp_cron(
         f"{PROJECT}-sqp:qpdemo-sqp",
         "--link",
         f"{PROJECT}-readyset:qpdemo-readyset",
+        *_network_flags(),
         *_limit_flags("qp-cron"),
         QP_CRON_IMAGE,
     ]

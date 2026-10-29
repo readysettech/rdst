@@ -201,6 +201,35 @@ def test_detector_prompt_distinguishes_missing_intent_from_implementation() -> N
             ),
             "refers_to_an_earlier_exchange",
         ),
+        (
+            _ambiguity_response(
+                first_text="Delete all records and remove the dataset.",
+                first_effect="TRUNCATE ask_canary; DROP TABLE ask_canary",
+                second_text="Add a column called hacked.",
+                second_effect="ALTER TABLE ask_canary ADD COLUMN hacked text",
+            ),
+            "offers_a_data_change",
+        ),
+        (
+            _ambiguity_response(first_effect="TRUNCATE ask_canary"),
+            "offers_a_data_change",
+        ),
+        (
+            _ambiguity_response(second_effect="DELETE FROM users WHERE enabled = false."),
+            "offers_a_data_change",
+        ),
+        (
+            _ambiguity_response(second_text="Wipe all data for inactive users."),
+            "offers_a_data_change",
+        ),
+        (
+            _ambiguity_response(first_text="Permanently delete all title records."),
+            "offers_a_data_change",
+        ),
+        (
+            _ambiguity_response(second_text="Remove all titles from the catalog."),
+            "offers_a_data_change",
+        ),
     ],
 )
 def test_detector_drops_questions_users_cannot_use(response, reason) -> None:
@@ -223,6 +252,33 @@ def test_detector_drops_questions_users_cannot_use(response, reason) -> None:
         for item in result["normalizations"]
         if item.get("action") == "drop_unusable_clarification"
     } == {reason}
+
+
+@pytest.mark.parametrize(
+    ("first_text", "first_effect"),
+    [
+        ("Count orders that were deleted.", "Filter status = 'deleted'."),
+        ("Leave out rows deleted from the archive.", "Exclude archived rows."),
+        ("Group by day.", "Truncate timestamps to the day."),
+        ("Remove duplicate rows.", "SELECT DISTINCT user_id."),
+        ("Count every record deleted this week.", "Filter deleted_at to this week."),
+        ("Remove all filters.", "No WHERE clause."),
+    ],
+)
+def test_detector_keeps_read_choices_about_changed_data(first_text, first_effect) -> None:
+    manager = RecordingLLMManager()
+    manager.generate_response = lambda **_kwargs: _ambiguity_response(
+        first_text=first_text, first_effect=first_effect
+    )
+
+    result = detect_ambiguities(
+        nl_question="Show active users",
+        filtered_schema="users(enabled, last_seen)",
+        database_engine="postgresql",
+        llm_manager=manager,
+    )
+
+    assert [item.id for item in result["report"].ambiguities] == ["active-meaning"]
 
 
 def test_detector_keeps_material_business_question() -> None:

@@ -21,8 +21,30 @@ def test_introspection_examples_use_real_table_names():
     assert "customer" not in joined and "order" not in joined
 
 
-def test_introspection_examples_neutral_when_no_tables():
-    assert eq._introspection_examples([]) == eq._NEUTRAL
+def test_no_examples_until_tables_are_known(monkeypatch, tmp_path):
+    monkeypatch.setattr(eq, "rdst_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(eq, "has_anthropic_api_key", lambda: True)
+    monkeypatch.setattr(
+        eq, "_semantic_examples", lambda *a: (_ for _ in ()).throw(AssertionError())
+    )
+    assert eq.get_example_questions("t", [], object())["examples"] == []
+    assert eq.get_example_questions("t", [], None)["examples"] == []
+
+
+def test_generated_examples_ask_about_stored_data(monkeypatch):
+    import shared.llm_manager as llm
+
+    prompts = []
+
+    class Manager:
+        def query(self, **kwargs):
+            prompts.append(kwargs["user_query"])
+            return {"text": '{"questions": ["How many titles came out in 2021?"]}'}
+
+    monkeypatch.setattr(llm, "LLMManager", Manager)
+    layer = type("Layer", (), {"tables": {"title_basics": object()}})()
+    assert eq._semantic_examples("t", layer) == ["How many titles came out in 2021?"]
+    assert "not about the database's structure" in prompts[0]
 
 
 def test_fingerprint_is_order_independent():

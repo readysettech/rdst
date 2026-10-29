@@ -200,6 +200,32 @@ describe('AccountLoginDialog', () => {
     expect(screen.getByText(/Readyset account connected/)).toBeTruthy()
   })
 
+  it('shows a desktop sign-in RDST finished from the link as signed in', async () => {
+    window.rdstDesktop = {
+      isDesktop: true,
+      platform: 'linux',
+    }
+    vi.mocked(fetchAccountBrowserCallback).mockResolvedValue({
+      state: 'success',
+      code: null,
+      error: null,
+      error_description: null,
+    })
+    const onSuccess = vi.fn()
+    renderWithClient(
+      <AccountLoginDialog isOpen onClose={vi.fn()} onSuccess={onSuccess} />,
+      createTestQueryClient()
+    )
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with Google' })
+    )
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1))
+    expect(completeAccountRedirect).not.toHaveBeenCalled()
+    expect(screen.getByText(/Readyset account connected/)).toBeTruthy()
+  })
+
   it('answers an invalid address under the field and holds the request', async () => {
     renderWithClient(
       <AccountLoginDialog isOpen onClose={vi.fn()} />,

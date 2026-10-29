@@ -518,3 +518,33 @@ def test_a_relative_setting_comes_with_sql_to_size_and_numbered_steps():
     steps = db_actions.setting_steps("shared_buffers", "25% of RAM", "postgresql", True).splitlines()
     assert steps[0] == "Pick a value near 25% of the server's RAM."
     assert "parameter group" in steps[1] and steps[2].startswith("Restart PostgreSQL")
+
+
+def test_a_reloadable_setting_says_to_run_each_statement_on_its_own():
+    """PostgreSQL runs statements sent as one command in a transaction, which ALTER SYSTEM
+    refuses; MySQL's SET PERSIST is one statement."""
+    assert db_actions.setting_sql("work_mem", "16 MB", "postgresql").splitlines() == [
+        "ALTER SYSTEM SET work_mem = '16MB';", "SELECT pg_reload_conf();"]
+    steps = db_actions.setting_steps("work_mem", "16 MB", "postgresql", False).splitlines()
+    assert "each statement on its own" in steps[1]
+    mysql = db_actions.setting_steps("sort_buffer_size", "2 MB", "mysql", False).splitlines()
+    assert "each statement" not in mysql[1]
+
+
+def test_an_analyzed_query_without_a_fix_is_healthy_only_when_rated_so():
+    assert snapshot._status("q", {}, {"fix_ready": False, "efficient": True}) == ("healthy", None)
+    assert snapshot._status("q", {}, {"fix_ready": False, "efficient": False}) == ("no_fix", None)
+    assert snapshot._status("q", {}, {"fix_ready": True, "efficient": False}) == ("fix_ready", None)
+
+
+def test_query_ui_gains_the_efficient_verdict_on_upgrade(tmp_path):
+    path = tmp_path / "monitor.db"
+    MonitorStore(path).update_query_ui("db", "q", summary={"efficiency_score": 40})
+    with sqlite3.connect(path) as conn:
+        conn.execute("ALTER TABLE query_ui DROP COLUMN efficient")
+        conn.execute("PRAGMA user_version=32")
+    migrated = MonitorStore(path)
+    assert migrated.read("SELECT analyzed,efficient FROM query_ui") == [
+        {"analyzed": 1, "efficient": None}]
+    migrated.update_query_ui("db", "q", summary={"efficiency_score": 40, "efficient": False})
+    assert migrated.read("SELECT efficient FROM query_ui") == [{"efficient": 0}]

@@ -1,3 +1,5 @@
+import pytest
+
 from features.monitor import plan_inputs
 from features.monitor.index_plan import build_plan
 from shared.monitor.monitor_store import MonitorStore
@@ -60,12 +62,40 @@ def test_gather_measures_the_window_and_feeds_the_plan(tmp_path, monkeypatch):
         ("sessions_seen", "unused", "high")]
 
 
-def test_a_short_observation_falls_back_to_lifetime_write_rates(tmp_path, monkeypatch):
+def test_a_short_observation_measures_writes_between_readings(tmp_path, monkeypatch):
     store = _seed(tmp_path, monkeypatch, observed_s=60)
     inputs = plan_inputs.gather(store, "db", NOW, "postgresql")
     assert inputs["observed_s"] == 60
-    lifetime = (1000 + 120 * 30) * 2 / (30 * 86400 + 60)
-    assert abs(inputs["tables"]["sessions"]["writes_per_s"] - round(lifetime, 3)) < 0.01
+    assert inputs["tables"]["sessions"]["writes_per_s"] == 120.0
+
+
+@pytest.mark.parametrize("engine", ["postgresql", "mysql"])
+def test_writes_from_before_rdst_watched_never_count_as_a_rate(tmp_path, engine):
+    """A bulk load lifts the engine's totals, but the rate is what changes between readings."""
+    store = MonitorStore(tmp_path / "monitor.db")
+    store.sync_indexes("db", [{"schema": "public", "table": "orders", "index_name": "orders_idx",
+                               "definition": "CREATE INDEX orders_idx ON orders (customer_id)"}],
+                       NOW - 600)
+
+    def reading(ts, orders, products):
+        def table(name, ins, upd):
+            return {"schema": "public", "table": name, "ins": ins, "upd": upd, "del": 0,
+                    "hot_upd": 0, "seq_scan": 0, "idx_scan": 0, "scan_rows": 0,
+                    "live_rows": ins, "dead_rows": 0, "size_bytes": 8192}
+        return {"engine": engine, "version": 160000, "counter_since": NOW - 900, "taken_at": ts,
+                "tables": [table("orders", *orders), table("products", *products)],
+                "indexes": [], "settings": {}}
+
+    # Loaded right after the server started: 250,000 orders and 10,000 products.
+    store.record_stats("db", reading(NOW - 300, (250_000, 0), (10_000, 0)))
+    store.record_stats("db", reading(NOW - 150, (250_020, 10), (10_000, 0)))
+    store.record_stats("db", reading(NOW, (250_040, 20), (10_000, 0)))
+    tables = plan_inputs.gather(store, "db", NOW, engine)["tables"]
+    assert tables["orders"]["writes_per_s"] == 0.2
+    assert tables["products"]["writes_per_s"] == 0.0
+    cost = plan_inputs.write_cost(store, "db", "INSERT INTO orders (customer_id) VALUES (1)",
+                                  engine, NOW)
+    assert cost["table_writes_per_s"] == tables["orders"]["writes_per_s"]
 
 
 def test_write_cost_reads_the_table_a_write_changes(tmp_path, monkeypatch):

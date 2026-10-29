@@ -736,6 +736,39 @@ def test_stale_report_recovery_preserves_live_run(tmp_path):
     assert claimed and second["id"] != first["id"]
 
 
+def test_a_report_whose_process_died_fails_on_restart_and_stays_in_activity(tmp_path,
+                                                                            monkeypatch):
+    store = _store(tmp_path)
+    entries = []
+    monkeypatch.setattr(reports, "record_entry", entries.append)
+    run, _ = store.claim_report("db", "user", NOW)
+    reports.recover_reports(store, NOW + 10)
+    assert store.report(run["id"])["state"] == "running"
+
+    # The process that claimed it has gone: its pid now belongs to a later process.
+    store._write(lambda conn: conn.execute("UPDATE report_run SET owner_start=0 WHERE id=?",
+                                           (run["id"],)))
+    reports.recover_reports(store, NOW + 20)
+
+    row = store.report(run["id"])
+    assert row["state"] == "failed" and row["finished_at"] == NOW + 20
+    assert json.loads(row["progress_json"])["message"] == "Report interrupted"
+    assert store.report_events(run["id"])[-1]["event"]["state"] == "failed"
+    assert [(entry["action"], entry["outcome"], entry["run_ref"]) for entry in entries] == [
+        ("daily_snapshot", "failed", f"report_run:{run['id']}")]
+    reports.recover_reports(store, NOW + 30)
+    assert len(entries) == 1
+
+
+def test_cancelling_a_run_no_task_holds_records_it_in_activity(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    entries = []
+    monkeypatch.setattr(reports, "record_entry", entries.append)
+    run, _ = store.claim_report("db", "user", NOW)
+    assert reports.request_cancel(store, run["id"], NOW + 5)["state"] == "cancelled"
+    assert [(entry["outcome"], entry["ts"]) for entry in entries] == [("cancelled", NOW)]
+
+
 def test_existing_index_is_a_fact_not_a_verdict(tmp_path):
     store = _store(tmp_path)
     store.sync_indexes("db", [], NOW - 100)

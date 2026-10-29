@@ -6,9 +6,9 @@ import { PageContainer } from '@rs/ui-new/page-container'
 import { Spinner } from '@rs/ui-new/spinner'
 import { HStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
-import { useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useMemo, useState } from 'react'
-import type { EnvRequirement } from '../lib/api'
+import { type EnvRequirement, setAiProvider } from '../lib/api'
 import {
   invalidateTrialRelatedQueries,
   useTrialSource,
@@ -55,6 +55,16 @@ export function AiProviderGate({
     useTrialSource()
   const [accountOpen, setAccountOpen] = useState(false)
   const [keyOpen, setKeyOpen] = useState(false)
+  const accountConnected = Boolean(
+    anthropicRequirement?.readyset_account_connected
+  )
+  const useAccount = useMutation({
+    mutationFn: () => setAiProvider('readyset'),
+    onSuccess: () => void invalidateTrialRelatedQueries(queryClient),
+  })
+  // A connected account needs no new sign-in, only switching AI to it.
+  const signIn = () =>
+    accountConnected ? useAccount.mutate() : setAccountOpen(true)
 
   const keyRequirements = useMemo<EnvRequirement[]>(() => {
     if (anthropicRequirement) {
@@ -107,11 +117,15 @@ export function AiProviderGate({
   }
 
   const gateError =
-    gate.reason === 'invalid'
-      ? 'Anthropic rejected the saved key. Add a valid key or sign in to Readyset.'
-      : gate.reason === 'exhausted'
-        ? 'Your AI access has ended. Sign in to Readyset or add an Anthropic key.'
-        : null
+    useAccount.error instanceof Error
+      ? useAccount.error.message
+      : gate.reason === 'invalid'
+        ? accountConnected
+          ? 'Anthropic rejected the saved key. Add a valid key or use Hosted by Readyset.'
+          : 'Anthropic rejected the saved key. Add a valid key or sign in to Readyset.'
+        : gate.reason === 'exhausted'
+          ? 'Your AI access has ended. Sign in to Readyset or add an Anthropic key.'
+          : null
 
   const refresh = () => void invalidateTrialRelatedQueries(queryClient)
 
@@ -131,16 +145,19 @@ export function AiProviderGate({
           Set up AI
         </Text>
         <Text as="p" level="body-medium" className="mt-3 text-content-layout-3">
-          Sign in to Readyset for the included AI, or add your own Anthropic
-          key. Charts, alerts and the Inbox keep running either way.
+          {accountConnected
+            ? 'Use the AI included with your Readyset account, or add your own Anthropic key.'
+            : 'Sign in to Readyset for the included AI, or add your own Anthropic key.'}{' '}
+          Charts, alerts and the Inbox keep running either way.
         </Text>
         <div className="mt-8 flex flex-wrap items-center gap-3">
           <Button
             variant="rising"
             modifier="solid"
             size="large"
-            label="Sign in"
-            onClick={() => setAccountOpen(true)}
+            label={accountConnected ? 'Use Hosted by Readyset' : 'Sign in'}
+            loading={useAccount.isPending}
+            onClick={signIn}
           />
           <Button
             variant="primary"
@@ -168,9 +185,13 @@ export function AiProviderGate({
         keyringAvailable={Boolean(envRequirements?.keyring_available)}
         onTrialRegister={() => {
           setKeyOpen(false)
-          setAccountOpen(true)
+          signIn()
         }}
-        trialActionLabel="Sign in to Readyset instead"
+        trialActionLabel={
+          accountConnected
+            ? 'Use Hosted by Readyset instead'
+            : 'Sign in to Readyset instead'
+        }
         onSuccess={refresh}
       />
     </GateFrame>

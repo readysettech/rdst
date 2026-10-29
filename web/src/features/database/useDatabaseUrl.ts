@@ -24,12 +24,19 @@ const VIEWS: Record<string, DatabaseView> = {
   report: 'report',
 }
 /** The Status menu: every query, or one status. */
-export type ListStatus = 'all' | 'fix' | 'analyzing' | 'healthy' | 'stuck'
+export type ListStatus =
+  | 'all'
+  | 'fix'
+  | 'analyzing'
+  | 'healthy'
+  | 'no_fix'
+  | 'stuck'
 export const LIST_STATUSES: readonly ListStatus[] = [
   'all',
   'fix',
   'analyzing',
   'healthy',
+  'no_fix',
   'stuck',
 ]
 

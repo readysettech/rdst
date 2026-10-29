@@ -14,12 +14,11 @@ import {
   sendAccountMagicLink,
   startAccountGoogleOAuth,
 } from '../lib/accountAuth'
-import { isSignedInAccount } from '../lib/accountStatus'
+import { isSignedInAccount, useAccountStatus } from '../lib/accountStatus'
 import { trackEvent } from '../lib/analytics'
 import {
   type AccountLoginResponse,
   fetchAccountBrowserCallback,
-  fetchAccountStatus,
   startAccountLogin,
 } from '../lib/api'
 import { isDesktopRuntime } from '../lib/desktop'
@@ -67,9 +66,12 @@ function GoogleMark() {
 function useDesktopCallback(
   loginId: string | null,
   complete: (loginId: string, callbackUrl: string) => void,
+  onSignedIn: () => void,
   onError: (message: string) => void
 ) {
   const started = useRef(false)
+  const signedIn = useRef(onSignedIn)
+  signedIn.current = onSignedIn
   useEffect(() => {
     if (!loginId || started.current) return
     let cancelled = false
@@ -78,8 +80,14 @@ function useDesktopCallback(
       try {
         const result = await fetchAccountBrowserCallback(loginId)
         if (cancelled || started.current) return
-        if (result.state === 'pending') {
+        if (result.state === 'pending' || result.state === 'completing') {
           timer = window.setTimeout(poll, 500)
+          return
+        }
+        // RDST's local server finished the sign-in from the link.
+        if (result.state === 'success') {
+          started.current = true
+          signedIn.current()
           return
         }
         const url = new URL(localCallbackUrl())
@@ -105,31 +113,24 @@ function useDesktopCallback(
 }
 
 /**
- * In a browser the emailed link signs in from another tab; this one notices and
- * carries on.
+ * The emailed link can sign in outside this page: from another browser tab, or through
+ * RDST's local server after this window reloaded. Once the account turns signed in, this
+ * page notices and carries on.
  */
-function useEmailSignIn(waiting: boolean, onSignedIn: () => void) {
+function useSignedInElsewhere(onSignedIn: () => void) {
   const signedIn = useRef(onSignedIn)
   signedIn.current = onSignedIn
+  const { data } = useAccountStatus()
+  const wasSignedOut = useRef(false)
   useEffect(() => {
-    if (!waiting || isDesktopRuntime()) return
-    let cancelled = false
-    const id = window.setInterval(async () => {
-      try {
-        const status = await fetchAccountStatus()
-        if (!cancelled && isSignedInAccount(status)) {
-          window.clearInterval(id)
-          signedIn.current()
-        }
-      } catch {
-        /* keep waiting for the link */
-      }
-    }, 2_000)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
+    if (!data) return
+    if (!isSignedInAccount(data)) {
+      wasSignedOut.current = true
+    } else if (wasSignedOut.current) {
+      wasSignedOut.current = false
+      signedIn.current()
     }
-  }, [waiting])
+  }, [data])
 }
 
 /**
@@ -154,7 +155,10 @@ export function SignInPage({
   const [abandonedCallback, setAbandonedCallback] = useState(false)
   const [focusEmail, setFocusEmail] = useState(false)
 
+  const finished = useRef(false)
   const finish = async () => {
+    if (finished.current) return
+    finished.current = true
     trackEvent('signin_completed', { source: 'sign_in_page' })
     await invalidateTrialRelatedQueries(queryClient)
     void navigate({ href: takeLoginReturn() })
@@ -179,7 +183,7 @@ export function SignInPage({
     },
   })
   const linkSent = magicLink.isSuccess
-  useEmailSignIn(linkSent, () => void finish())
+  useSignedInElsewhere(() => void finish())
   const validateEmail = () => {
     const valid = isValidEmail(normalizeEmail(email))
     setEmailError(valid ? null : 'Enter a valid email address.')
@@ -193,7 +197,12 @@ export function SignInPage({
   const completeRef = useRef((loginId: string, url?: string) =>
     callback.mutate({ loginId, url })
   )
-  useDesktopCallback(desktopLoginId, completeRef.current, setPollError)
+  useDesktopCallback(
+    desktopLoginId,
+    completeRef.current,
+    () => void finish(),
+    setPollError
+  )
 
   const redirectStarted = useRef(false)
   useEffect(() => {

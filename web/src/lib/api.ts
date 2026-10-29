@@ -831,6 +831,21 @@ export async function fetchAccountLoginContext(
   return data
 }
 
+export async function setAccountLoginVerifier(
+  loginId: string,
+  state: string,
+  codeVerifier: string
+): Promise<void> {
+  const { response } = await typedClient.POST(
+    '/api/account/login/{login_id}/verifier',
+    {
+      params: { path: { login_id: loginId } },
+      body: { state, code_verifier: codeVerifier },
+    }
+  )
+  await throwIfNotOk(response, 'Failed to start Readyset sign-in')
+}
+
 export async function completeAccountLogin(
   loginId: string,
   state: string,

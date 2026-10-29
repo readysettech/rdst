@@ -511,6 +511,8 @@ export const setDemoSettings = (cacheBudget: number) =>
   }).then((r) => json<any>(r))
 export const teardown = () =>
   fetch('/api/demo/teardown', { method: 'POST' }).then((r) => json<any>(r))
+export const dismissDemoError = () =>
+  fetch('/api/demo/dismiss-error', { method: 'POST' }).then((r) => json<any>(r))
 
 // ---- module-level provision engine -----------------------------------------
 // The provision lifecycle — the phase plus the live container/percent progress —
@@ -548,6 +550,8 @@ let demoProvisionController: AbortController | null = null
 // once by whichever hook instance is mounted when the deploy settles.
 let demoPendingNotice: string | null = null
 let demoPendingError: string | null = null
+// The failure the user dismissed, held back while the backend forgets it.
+let demoDismissedError: string | null = null
 
 function demoProvisionGetSnapshot(): ProvisionSnapshot {
   return demoProvisionSnapshot
@@ -645,6 +649,7 @@ async function runProvision(attach = false): Promise<void> {
   if (demoProvisionController) return // a deploy is already in flight
   demoPendingNotice = null
   demoPendingError = null
+  demoDismissedError = null
   demoProvisionEmit({
     phase: 'provisioning',
     provisionPct: 0,
@@ -748,6 +753,7 @@ export function __resetDemoProvisionForTests(): void {
   abortProvision()
   demoPendingNotice = null
   demoPendingError = null
+  demoDismissedError = null
   demoProvisionSnapshot = {
     phase: 'idle',
     containers: CONTAINERS,
@@ -827,7 +833,10 @@ export function useDemo() {
         demoProvisionSnapshot.phase === 'provisioning'
       )
         settleProvisionPhase(s)
-      if (s.last_error) setError(s.last_error)
+      const failure =
+        s.last_error && s.last_error !== demoDismissedError
+          ? s.last_error
+          : null
       // Server-initiated toast, delivered exactly once (the backend clears it
       // after the first status read), e.g. the one-hour auto-teardown notice.
       if (s.notice) setNotice(s.notice)
@@ -840,8 +849,12 @@ export function useDemo() {
           current === 'failed'
         )
           return current
-        return s.provisioned ? 'ready' : 'idle'
+        // A start that ended without a demo, including one RDST restarted in the middle
+        // of, keeps saying why until the next start or until it is dismissed.
+        if (s.provisioned) return 'ready'
+        return failure && !s.provisioning ? 'failed' : 'idle'
       })
+      if (failure) setError(failure)
       return s
     } catch (e: any) {
       setError(`Status unavailable: ${e?.message ?? String(e)}`)
@@ -1116,6 +1129,13 @@ export function useDemo() {
     }
   }, [])
 
+  const dismissFailure = useCallback(() => {
+    demoDismissedError = error
+    void dismissDemoError().catch(() => {})
+    setError(null)
+    setProvisionPhase((current) => (current === 'failed' ? 'idle' : current))
+  }, [error])
+
   // A provision that settles WHILE this page is mounted: drain the backend's
   // completion/failure message once and reconcile the dashboard data. When the
   // deploy instead settles while the user is away, the module engine still flips
@@ -1225,6 +1245,7 @@ export function useDemo() {
     setDiscoveryMode,
     setCacheBudget,
     tearDown,
+    dismissFailure,
     setIntensity,
     refreshPatterns,
     refreshStatus,

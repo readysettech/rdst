@@ -141,14 +141,93 @@ class AccountService:
             login = self._logins.get(login_id)
             if login is None:
                 raise KeyError(login_id)
-            callback = {
-                "state": "ready" if code else "failed",
-                "code": code or None,
-                "error": error or None,
-                "error_description": error_description or None,
-            }
+            if code and login.get("code_verifier"):
+                # RDST finishes this sign-in itself; the code stays here, out of the app's reach.
+                login["code"] = code
+                callback: dict[str, Any] = {"state": "completing"}
+            else:
+                callback = {
+                    "state": "ready" if code else "failed",
+                    "code": code or None,
+                    "error": error or None,
+                    "error_description": error_description or None,
+                }
             login["browser_callback"] = callback
-            return callback
+            return dict(callback)
+
+    def set_code_verifier(self, login_id: str, state: str, code_verifier: str) -> None:
+        """Keep the PKCE verifier so the browser callback can finish sign-in without the app."""
+        with self._lock:
+            self._prune()
+            login = self._logins.get(login_id)
+            if login is None:
+                raise KeyError(login_id)
+            if not hmac.compare_digest(str(login["state"]), state):
+                raise AccountServiceError("Readyset sign-in state does not match")
+            login["code_verifier"] = code_verifier
+
+    def _exchange_code(self, login: dict[str, Any], code: str) -> dict[str, Any]:
+        key = str(login["publishable_key"])
+        try:
+            response = requests.post(
+                f"{str(login['auth_url']).rstrip('/')}/token",
+                params={"grant_type": "pkce"},
+                json={"auth_code": code, "code_verifier": login["code_verifier"]},
+                headers={"apikey": key, "Authorization": f"Bearer {key}",
+                         "Accept": "application/json"},
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+        except requests.RequestException as exc:
+            raise AccountServiceError(
+                "Couldn't reach Readyset sign-in. Check your connection and try again."
+            ) from exc
+        try:
+            session = response.json()
+        except ValueError:
+            session = None
+        if (response.status_code != 200 or not isinstance(session, dict)
+                or not session.get("access_token") or not session.get("refresh_token")):
+            raise AccountServiceError(
+                "This sign-in link has expired or was already used. Send a new link from RDST."
+            )
+        return session
+
+    def finish_browser_login(self, login_id: str) -> dict[str, str] | None:
+        """Finish a sign-in whose browser callback arrived, or None when the app finishes it.
+
+        Exchanges the authorization code with the stored verifier and saves the session, so
+        the sign-in completes whatever state the app is in.
+        """
+        with self._lock:
+            login = self._logins.get(login_id)
+            if login is None:
+                raise KeyError(login_id)
+            code = login.pop("code", None)
+            if not code:
+                return None
+            login_state = str(login["state"])
+        try:
+            session = self._exchange_code(login, code)
+            result = self.complete_login(
+                login_id, login_state, str(session["access_token"]),
+                str(session["refresh_token"]), int(session.get("expires_in") or 3600),
+            )
+            for delay in (0.5, 1.0, 2.0, 4.0):
+                if result["state"] != "running":
+                    break
+                time.sleep(delay)
+                result = self.login_status(login_id)
+        except KeyError:
+            result = {"state": "failed", "detail": "This sign-in expired. Start again."}
+        except AccountServiceError as exc:
+            result = {"state": "failed", "detail": str(exc)}
+        if result["state"] == "running":
+            result = {"state": "failed", "detail": "Readyset sign-in didn't finish. Try again."}
+        with self._lock:
+            login["browser_callback"] = (
+                {"state": "success"} if result["state"] == "success" else
+                {"state": "failed", "error": result["detail"]})
+        return {"state": result["state"], "detail": result["detail"]}
 
     def browser_callback_status(self, login_id: str) -> dict[str, Any]:
         with self._lock:

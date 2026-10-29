@@ -772,7 +772,7 @@ def test_failed_provision_leaves_no_running_demo(tmp_path, monkeypatch):
     calls: list[str] = []
 
     def _never_snapshots(*_a, **_k):
-        return False
+        raise RuntimeError("Readyset didn't finish starting within 5 minutes.")
         yield  # pragma: no cover - generator shape
 
     svc._wait_readyset_events = _never_snapshots
@@ -782,15 +782,73 @@ def test_failed_provision_leaves_no_running_demo(tmp_path, monkeypatch):
 
     out = list(svc.provision())
 
-    assert out[-1] == {"type": "error", "message": "ReadySet did not snapshot in time."}
+    assert out[-1] == {"type": "error",
+                       "message": "Readyset didn't finish starting within 5 minutes."}
     assert not any(ev.get("type") == "complete" for ev in out)
     # The half-built stack is gone, so nothing reports it provisioned or sends it traffic.
     assert svc._ports is None
     assert calls[-2:] == ["clean", "delete_state"]
-    assert svc._last_error == "ReadySet did not snapshot in time."
+    assert svc._last_error == "Readyset didn't finish starting within 5 minutes."
     assert set(svc._health.values()) == {"absent"}
     svc.start_load()
     assert svc._running is False
+
+
+class _Readyset:
+    host, port = "rdst-readyset-sandbox", 5433
+
+    def __init__(self, status=None):
+        self._status = status
+
+    def status(self):
+        if self._status is None:
+            raise RuntimeError('could not translate host name "rdst-readyset-sandbox"\n')
+        return self._status
+
+
+def _readyset_wait(svc, monkeypatch, readyset, state, logs=""):
+    import subprocess as sp
+    import types
+
+    svc._qp = types.SimpleNamespace(readyset=readyset)
+    svc._container_state = lambda name: state.split()[0]
+    svc._docker = lambda args, timeout=30: sp.CompletedProcess(
+        args, 0, stdout=state if args[0] == "inspect" else logs, stderr="")
+    clock = [0.0]
+
+    def _sleep(seconds):
+        clock[0] += seconds
+
+    monkeypatch.setattr(service_mod, "time",
+                        types.SimpleNamespace(monotonic=lambda: clock[0], sleep=_sleep))
+    with pytest.raises(RuntimeError) as failed:
+        list(svc._wait_readyset_events(300))
+    return str(failed.value)
+
+
+def test_readyset_wait_names_the_address_rdst_cannot_reach(tmp_path, monkeypatch):
+    svc = _bare_service(tmp_path, monkeypatch)
+    message = _readyset_wait(svc, monkeypatch, _Readyset(), "running 0 false")
+    assert message.startswith(
+        "Readyset is running, but RDST couldn't connect to it at rdst-readyset-sandbox:5433")
+    assert 'could not translate host name "rdst-readyset-sandbox"' in message
+    assert "then start the demo again" in message
+
+
+def test_readyset_wait_reports_a_container_that_stopped(tmp_path, monkeypatch):
+    svc = _bare_service(tmp_path, monkeypatch)
+    logs = ("\x1b[2m2026-10-27T19:10:34Z\x1b[0m \x1b[31mERROR\x1b[0m readyset: upstream refused\n"
+            "2026-10-27T19:10:35Z  INFO readyset: shutting down\n")
+    message = _readyset_wait(svc, monkeypatch, _Readyset(), "exited 137 true", logs)
+    assert message.startswith("Readyset stopped while starting (it ran out of memory).")
+    assert "Its last log line: 2026-10-27T19:10:34Z ERROR readyset: upstream refused" in message
+
+
+def test_readyset_wait_reports_the_last_status_it_saw(tmp_path, monkeypatch):
+    svc = _bare_service(tmp_path, monkeypatch)
+    readyset = _Readyset({"Status": "Snapshot In Progress", "Last completed snapshot": ""})
+    message = _readyset_wait(svc, monkeypatch, readyset, "running 0 false")
+    assert "(status Snapshot In Progress, snapshot not finished)" in message
 
 
 def _teardownable_service(tmp_path, monkeypatch):
@@ -1034,6 +1092,46 @@ def test_a_provision_interrupted_by_a_restart_is_not_resumed(tmp_path, monkeypat
 
     assert abandoned == [True]
     assert svc._last_error == "Setup stopped when RDST restarted. Start the demo again."
+
+
+class _DemoConfig:
+    def __init__(self):
+        self.state = {}
+
+    def get_demo_state(self):
+        return self.state
+
+    def set_demo_state(self, state):
+        self.state = state
+
+    def clear_demo_state(self):
+        cleared, self.state = bool(self.state), {}
+        return cleared
+
+    def save(self):
+        pass
+
+
+def test_an_interrupted_setup_says_so_across_restarts_until_dismissed(tmp_path, monkeypatch):
+    config = _DemoConfig()
+    svc = _bare_service(tmp_path, monkeypatch)
+    svc._demo_config = lambda: config
+    svc._abandon_provision = lambda: setattr(svc, "_ports", None)
+    ports = {"pg": 1, "readyset": 2, "sqp": 3, "metrics": 4}
+    svc._ports = svc._apply_state({"ports": ports, "complete": False})
+    svc._discard_interrupted_provision()
+
+    restarted = _bare_service(tmp_path, monkeypatch)
+    restarted._demo_config = lambda: config
+    restarted._ports = restarted._apply_state(config.get_demo_state())
+    restarted._discard_interrupted_provision()
+    assert restarted._ports is None
+    assert restarted._last_error == "Setup stopped when RDST restarted. Start the demo again."
+
+    restarted.dismiss_error()
+    again = _bare_service(tmp_path, monkeypatch)
+    assert again._apply_state(config.get_demo_state()) is None
+    assert again._last_error is None
 
 
 @pytest.mark.parametrize("state,complete", [

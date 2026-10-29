@@ -226,6 +226,28 @@ def test_sql_paging_sorts_scores_and_filters_classification_globally(tmp_path, m
     assert filtered["total"] == 1 and filtered["queries"][0]["key"] == last
 
 
+def test_healthy_and_no_fix_filters_follow_the_analysis_verdict(tmp_path, monkeypatch):
+    store = MonitorStore(tmp_path / "monitor.db", clock=lambda: NOW)
+    good, fair, older = "000000000001", "000000000002", "000000000003"
+    store._write(lambda conn: conn.executemany(
+        "INSERT INTO query_text VALUES (?,?,?,?,?)",
+        (("db", key, f"SELECT * FROM t{key}", NOW - 60, NOW) for key in (good, fair, older))))
+    store.update_query_ui("db", good, summary={"efficiency_score": 90, "efficient": True})
+    store.update_query_ui("db", fair, summary={"efficiency_score": 35, "efficient": False})
+    # Analyzed before the verdict was kept: neither until the analyze queue reads it.
+    store.update_query_ui("db", older, summary={"efficiency_score": 50})
+    monkeypatch.setattr(views, "registry_entries", lambda keys=None: {})
+    monkeypatch.setattr(views, "assessments", lambda target, keys=None: {})
+
+    def keys(filter):
+        page = views.queries(store, "db", "1h", NOW, sort="db_time_share", filter=filter, q="",
+                             limit=10, offset=0)
+        return [row["key"] for row in page["queries"]]
+
+    assert keys("healthy") == [good]
+    assert keys("no_fix") == [fair]
+
+
 def test_observation_cache_batches_middle_tier_and_skips_tail(tmp_path, monkeypatch):
     from features.query_registry.discovery import QueryDiscoveryCollector
     from shared.query_registry.delta_processor import COMPLETE, DeltaResult

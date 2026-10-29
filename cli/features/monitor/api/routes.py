@@ -239,7 +239,7 @@ def queries(
     if sort not in {"qps", "mean_ms", "db_time_share", "change", "score_low", "score_high"}:
         raise HTTPException(422, "Unsupported sort")
     if filter not in {"", "all", "changed", "attention", "new", "fixed", "watch", "fix_ready", "healthy",
-                      "not_analyzed", "index_coverage", "join_growth", "broad_work", "repeated_work",
+                      "no_fix", "not_analyzed", "index_coverage", "join_growth", "broad_work", "repeated_work",
                       "access_expression_risk", "none", "unassessed"}:
         raise HTTPException(422, "Unsupported filter")
     if not 1 <= limit <= 500 or offset < 0:

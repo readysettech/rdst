@@ -536,6 +536,59 @@ def test_stuck_query_on_a_schedule_stays_one_open_item(monkeypatch, tmp_path):
     assert (running["status"], running["band"]) == ("ongoing", "act_now")
 
 
+def test_stuck_statement_keeps_its_start_and_opens_by_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
+    now = [0]
+    store = MonitorStore(clock=lambda: now[0])
+    collector = QueryDiscoveryCollector("db", two_phase=True)
+    collector._monitor = store
+    collector._engine = "postgresql"
+    collector._alias_map = {}
+    collector._monitor_db_sample = None
+    # Touches no table, so the query list leaves it out; its Inbox link still opens it.
+    sql = "SET application_name='sleeper'; SELECT pg_sleep(600);"
+    key = hash_sql(sql)
+    registry = SimpleNamespace(get_query=lambda _key: None)
+    starts = []
+    # Started at 1000; each sample reads it a little after the cycle's timestamp.
+    for ts, lag in ((1100, 0.4), (1160, 1.7), (1220, 0.2), (1400, 2.9)):
+        now[0] = ts
+        collector._record_monitor_cycle(ts, [], registry, [
+            {"query": sql, "pid": 1521, "state": "active", "duration_s": ts + lag - 1000}
+        ], activity_sampled=True)
+        item = inbox_items(store, store.inbox(target="db"), incidents=True)[0]
+        starts.append((item["status_at"], item["incident"]["start"], item["running_s"] > 0))
+    assert starts == [(1000, 1000, True)] * 4
+    monkeypatch.setattr(routes, "_now", lambda: 1400)
+    assert all(row["key"] != key for row in routes.queries("db")["queries"])
+    row = routes.query("db", key)
+    assert (row["key"], row["text"], "stuck" in row["state"]) == (key, sql, True)
+
+
+def test_a_bare_sleep_recorded_as_a_system_statement_still_opens_from_inbox(monkeypatch,
+                                                                            tmp_path):
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
+    now = [1100]
+    store = MonitorStore(clock=lambda: now[0])
+    collector = QueryDiscoveryCollector("db", two_phase=True)
+    collector._monitor = store
+    collector._engine = "postgresql"
+    collector._alias_map = {}
+    collector._monitor_db_sample = None
+    sql = "SELECT pg_sleep(185)"
+    key = hash_sql(sql)
+    registry = SimpleNamespace(get_query=lambda _key: None)
+    collector._record_monitor_cycle(1100, [], registry, [
+        {"query": sql, "pid": 12250, "state": "active", "duration_s": 100.0}
+    ], activity_sampled=True)
+    # Once it finishes, statement stats name it relation-free, so it is no workload.
+    now[0] = 1200
+    store.record("db", 1200, [], {}, [], system_keys={key})
+    monkeypatch.setattr(routes, "_now", lambda: 1200)
+    assert all(row["key"] != key for row in routes.queries("db")["queries"])
+    assert routes.query("db", key)["key"] == key
+
+
 def test_monitored_cadence_without_subscriber():
     class Coordinator:
         def has_subscribers(self, target):

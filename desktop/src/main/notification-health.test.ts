@@ -6,6 +6,7 @@ import {
   healthFor,
   parseNameHasOwner,
   parseRegDword,
+  testNotificationProblem,
   watchNotificationHealth,
 } from './notification-health.js'
 
@@ -96,6 +97,20 @@ describe('healthFor', () => {
     expect(healthFor('win32', null, 0)).toMatchObject({ blocked: false, message: null, trayLabel: null })
     for (const reason of ['windows_global', 'windows_app', 'macos_blocked', 'linux_no_daemon'] as const)
       expect(healthFor('win32', reason, 0).message).not.toMatch(/[–—]/)
+  })
+})
+
+describe('testNotificationProblem', () => {
+  it('says why a test cannot show and what to do, and nothing when it can', () => {
+    expect(testNotificationProblem(null)).toBeNull()
+    expect(testNotificationProblem(healthFor('linux', null, 1))).toBeNull()
+    expect(testNotificationProblem(healthFor('linux', 'linux_no_daemon', 1))).toBe(
+      "No notification service is running on this desktop. Start your desktop's notification " +
+        'service (such as dunst or mako), then send the test again.'
+    )
+    expect(testNotificationProblem(healthFor('win32', 'windows_app', 1))).toMatch(
+      /^Windows notifications are off for RDST\. .*Windows Settings, then send the test again\.$/
+    )
   })
 })
 

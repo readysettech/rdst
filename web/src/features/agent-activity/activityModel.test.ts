@@ -446,6 +446,32 @@ describe('activity lines', () => {
     ).toMatchObject({ text: 'Report ran', detail: 'on request' })
     expect(
       activityLine(
+        item({
+          action: 'daily_snapshot',
+          subject: 'On request',
+          outcome: 'failed',
+          summary: 'Interrupted before it finished',
+          report_id: 12,
+        })
+      )
+    ).toMatchObject({
+      text: "Couldn't finish the report you asked for",
+      detail: 'Interrupted before it finished',
+      warn: true,
+      link: { to: '/database', search: { view: 'report', report: '12' } },
+    })
+    // Recorded without its report: it says why it stopped and opens no other report.
+    expect(
+      activityLine(
+        item({
+          action: 'daily_snapshot',
+          subject: 'On request',
+          outcome: 'cancelled',
+        })
+      )
+    ).toMatchObject({ detail: 'Interrupted before it finished', link: null })
+    expect(
+      activityLine(
         item({ action: 'explain_actions', subject: '2 index changes' })
       )
     ).toMatchObject({

@@ -117,6 +117,20 @@ def test_drop_actions_rank_write_heavy_unused_indexes_above_duplicates(tmp_path)
         "Not read in the time RDST can see, and events takes 300 writes/s; frees 1.0 MB")
 
 
+def test_a_drop_never_saves_more_than_the_writes_it_slows_spend(tmp_path):
+    store = MonitorStore(tmp_path / "monitor.db")
+    existing = [{"schema": "public", "table": "order_items", "index_name": "order_items_order_idx",
+                 "columns": ["order_id"], "scans": 0, "window_scans": 0, "size_bytes": 64 << 20}]
+    insert = {"key": "ins", "name": "INSERT on order_items", "verb": "insert",
+              "share": 0.000008, "calls_per_s": 0.14, "set_columns": []}
+    plan = _plan(existing=existing, tables={"order_items": {"writes_per_s": 0.152}},
+                 writers={"order_items": [insert]})
+    [drop] = actions.candidates(store, "db", plan, [], [])
+    minute_ms = 53_720.0
+    assert actions.saves_ms_per_min(drop["score"], minute_ms) <= insert["share"] * minute_ms
+    assert drop["score"] > 0
+
+
 class _Jev:
     def __init__(self, answers):
         self.answers, self.requests = answers, []

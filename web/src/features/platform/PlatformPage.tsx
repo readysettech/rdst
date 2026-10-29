@@ -631,6 +631,7 @@ export function PlatformPage() {
             accent="negative"
             title=""
             message={d.error ?? 'Start it again to retry.'}
+            action={{ label: 'Dismiss', onClick: d.dismissFailure }}
             className="mb-7"
           />
         )}

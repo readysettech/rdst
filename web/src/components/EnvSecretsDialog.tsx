@@ -93,10 +93,12 @@ export function EnvSecretsDialog({
   const dialogTitle = isAnthropicOnly
     ? 'Update Anthropic API key'
     : 'Set required secrets'
-  const anthropicProcessEnvShadow =
+  const anthropicStartupKey =
     isAnthropicOnly &&
     requirements.some(
-      (r) => r.kind === 'anthropic_api_key' && r.source === 'process_env'
+      (r) =>
+        r.kind === 'anthropic_api_key' &&
+        r.anthropic_key_in_startup_env === true
     )
   const [values, setValues] = useState<Record<string, string>>({})
   const [persist, setPersist] = useState(true)
@@ -209,12 +211,12 @@ export function EnvSecretsDialog({
       }
     >
       <div className="space-y-4">
-        {anthropicProcessEnvShadow && (
+        {anthropicStartupKey && (
           <Alert
             tone="quiet"
             variant="warning"
             icon="alert"
-            label="A key supplied when RDST started will override this until the app restarts."
+            label="RDST was started with an ANTHROPIC_API_KEY environment variable. A key saved here is used until RDST restarts, then the environment variable's key is used again."
           />
         )}
         {!keyringAvailable && (

@@ -95,6 +95,11 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
     validated_sql = validation_result.get("validated_sql")
     if validated_sql and validated_sql != ctx.sql:
         ctx.sql = validated_sql
+    if ctx.ranked_nulls_last_enabled:
+        from features.ask.null_ordering import mentions_missing_values, place_nulls_last
+
+        if not mentions_missing_values(ctx.refined_question or ctx.question):
+            ctx.sql = place_nulls_last(ctx.sql, ctx.db_type, ctx.schema_info) or ctx.sql
     ctx.limit_sql = ctx.sql
 
     # Step 2: Column validation against schema

@@ -96,6 +96,9 @@ PULL_PERMANENT_ERRORS = (
     "manifest unknown", "not found", "denied", "unauthorized",
     "no matching manifest", "invalid reference",
 )
+# Readyset in the demo answers within seconds; a slow host gets a generous margin.
+READYSET_READY_TIMEOUT_S = 300
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 # Container starts that lose a port race re-allocate and retry this many
 # times before surfacing a ports-exhausted error.
 PORT_RETRY_ATTEMPTS = 3
@@ -388,6 +391,8 @@ class DemoService:
         # State saved before this flag existed was a finished provision or one still running.
         self._provision_complete = bool(data.get("complete", True))
         self._provision_pid = data.get("provision_pid")
+        if data.get("interrupted"):
+            self._last_error = data["interrupted"]
         ports = data.get("ports") or {}
         if not ports:
             return None
@@ -474,10 +479,11 @@ class DemoService:
 
     def _make_qprouter(self) -> QPRouter:
         p = self._ports
-        host = DockerTopology.from_environment().published_host
-        rs = ReadysetClient(host, p.readyset,
+        rs_host, _ = qdeploy.client_address(NAMES["readyset"], p.readyset, p.readyset)
+        sqp_host, _ = qdeploy.client_address(NAMES["sqp"], p.sqp, p.sqp)
+        rs = ReadysetClient(rs_host, p.readyset,
                             metrics_port=p.readyset_metrics, **CREDS)
-        return QPRouter(host, p.sqp, p.admin, api_key=API_KEY,
+        return QPRouter(sqp_host, p.sqp, p.admin, api_key=API_KEY,
                         readyset=rs, metrics_port=p.metrics, name="demo-qpr")
 
     # ---- docker helpers ------------------------------------------------------
@@ -980,7 +986,7 @@ class DemoService:
             yield {"type": "error", "message": "Docker isn't running. Start Docker and retry."}
             return
         try:
-            self._last_error = None
+            self.dismiss_error()
             self._pending_notice = None
             self._stop_supervisor()
             self._force_clean()  # idempotent
@@ -1042,8 +1048,7 @@ class DemoService:
                     )
                     if r.returncode != 0:
                         raise RuntimeError(f"ReadySet failed: {r.stderr[:300]}")
-                    if not (yield from self._wait_readyset_events(300)):
-                        raise RuntimeError("ReadySet did not snapshot in time.")
+                    yield from self._wait_readyset_events(READYSET_READY_TIMEOUT_S)
                     yield {"type": "container", "name": "readyset", "label": "Readyset cache engine",
                            "state": "ready", "percent": 60}
 
@@ -1110,6 +1115,16 @@ class DemoService:
             self._qp_enabled = False
             self._qp_paused = True
             self._last_error = "Setup stopped when RDST restarted. Start the demo again."
+            # Kept across restarts until the next start or until it is dismissed.
+            cfg = self._demo_config()
+            cfg.set_demo_state({"interrupted": self._last_error})
+            cfg.save()
+
+    def dismiss_error(self) -> None:
+        """Forget the last failure the user has read."""
+        self._last_error = None
+        if not self._ports:
+            self._delete_state()
 
     def _abandon_provision(self) -> None:
         """Remove a half-built stack after a failed provision.
@@ -1144,25 +1159,72 @@ class DemoService:
         return False
 
     def _wait_readyset_events(self, timeout: int) -> Iterator[dict]:
+        """Wait until Readyset is online with its snapshot done; raise why it isn't."""
         deadline = time.monotonic() + timeout
         start = time.monotonic()
         next_event = start + 3
+        last_check = "no answer yet"
+        connected = False
         while time.monotonic() < deadline:
             try:
                 st = self._qp.readyset.status()
                 if st.get("Status") == "Online" and st.get("Last completed snapshot"):
                     return True
-            except Exception:
-                pass
+                connected = True
+                last_check = (f"status {st.get('Status') or 'unknown'}, snapshot "
+                              f"{st.get('Last completed snapshot') or 'not finished'}")
+            except Exception as e:
+                connected = False
+                last_check = (str(e).strip().splitlines() or [type(e).__name__])[0]
             now = time.monotonic()
             if now >= next_event:
+                if self._container_state(NAMES["readyset"]) not in ("running", "restarting"):
+                    break
                 elapsed = int(now - start)
                 pct = min(59, 32 + int(27 * elapsed / 45))
                 yield {"type": "progress", "stage": "readyset", "percent": pct,
                        "message": f"Waiting for Readyset to connect and snapshot the dataset ({elapsed}s)..."}
                 next_event = now + 3
             time.sleep(1)
-        return False
+        raise RuntimeError(self._readyset_not_ready(timeout, connected, last_check))
+
+    def _readyset_not_ready(self, timeout: int, connected: bool, last_check: str) -> str:
+        """Why Readyset isn't ready and what to try, from its container and its log."""
+        name = NAMES["readyset"]
+
+        def docker_output(*args: str) -> str:
+            try:
+                r = self._docker(list(args))
+            except (OSError, subprocess.SubprocessError):
+                return ""
+            return f"{r.stdout}\n{r.stderr}" if r.returncode == 0 else ""
+
+        fields = docker_output("inspect", "--format",
+                               "{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}}",
+                               name).split()
+        state = fields[0] if fields else "absent"
+        exit_code = fields[1] if len(fields) > 1 else "unknown"
+        lines = [_ANSI.sub("", line).strip()
+                 for line in docker_output("logs", "--tail", "40", name).splitlines()
+                 if line.strip()]
+        logger.warning("Readyset not ready (%s, %s). Log tail:\n%s",
+                       state, last_check, "\n".join(lines))
+        problems = [line for line in lines if " ERROR " in line or " WARN " in line]
+        log_line = (problems or lines or [""])[-1][-300:]
+        log_note = f" Its last log line: {log_line}" if log_line else ""
+        if state not in ("running", "restarting"):
+            cause = "it ran out of memory" if fields[2:3] == ["true"] else f"exit code {exit_code}"
+            return (f"Readyset stopped while starting ({cause}).{log_note} Make sure Docker can "
+                    "give it 2 CPUs and 2 GB of memory, then start the demo again.")
+        minutes = max(1, round(timeout / 60))
+        if not connected:
+            host, port = self._qp.readyset.host, self._qp.readyset.port
+            return (f"Readyset is running, but RDST couldn't connect to it at {host}:{port} "
+                    f"for {minutes} minutes: {last_check}. Check that a firewall, VPN or Docker "
+                    "network setting isn't blocking that address, then start the demo again.")
+        return (f"Readyset didn't finish starting within {minutes} minutes ({last_check})."
+                f"{log_note} Give Docker more CPU and memory (Readyset needs 2 CPUs and 2 GB), "
+                "then start the demo again.")
 
     def _wait_sqp_events(self, timeout: int) -> Iterator[dict]:
         deadline = time.monotonic() + timeout
@@ -1184,6 +1246,12 @@ class DemoService:
             time.sleep(1)
         return False
 
+    def _path_addresses(self) -> dict[str, tuple[str, int]]:
+        """The (host, port) of each load path: Postgres directly, and through the router."""
+        p = self._ports
+        return {"direct": qdeploy.client_address(NAMES["pg"], p.pg, 5432),
+                "router": qdeploy.client_address(NAMES["sqp"], p.sqp, p.sqp)}
+
     def _warmup_paths(self, passes: int = 3, workers: int = 6) -> dict[str, int]:
         """Warm Postgres buffers on both paths before any measurement, so the
         baseline comparison starts honest. Queries run concurrently: the pass
@@ -1197,12 +1265,12 @@ class DemoService:
             q.sql for q in WORKLOAD
             if q.weight > 0 and q.category in {"heavy", "moderate"}
         ]
-        ports = {"direct": self._ports.pg, "router": self._ports.sqp}
+        paths = self._path_addresses()
 
-        def _warm_one(job: tuple[int, str]) -> int:
-            port, sql = job
+        def _warm_one(job: tuple[tuple[str, int], str]) -> int:
+            (host, port), sql = job
             conn = psycopg2.connect(
-                host=DockerTopology.from_environment().published_host,
+                host=host,
                 port=port,
                 dbname=CREDS["database"],
                 user=CREDS["user"], password=CREDS["password"], connect_timeout=5,
@@ -1219,7 +1287,7 @@ class DemoService:
                 conn.close()
             return done
 
-        jobs = [(port, sql) for port in ports.values() for sql in warm_queries]
+        jobs = [(address, sql) for address in paths.values() for sql in warm_queries]
         with ThreadPoolExecutor(max_workers=workers) as pool:
             executions = sum(pool.map(_warm_one, jobs))
         return {"queries": len(warm_queries), "executions": executions}
@@ -1349,11 +1417,11 @@ class DemoService:
             return
         self._workers = workers or self._workers
         self._latest = None
-        host = DockerTopology.from_environment().published_host
-        direct = dict(host=host, port=self._ports.pg, dbname=CREDS["database"],
-                      user=CREDS["user"], password=CREDS["password"])
-        sqp = dict(host=host, port=self._ports.sqp, dbname=CREDS["database"],
-                   user=CREDS["user"], password=CREDS["password"])
+        paths = self._path_addresses()
+        direct = dict(host=paths["direct"][0], port=paths["direct"][1],
+                      dbname=CREDS["database"], user=CREDS["user"], password=CREDS["password"])
+        sqp = dict(host=paths["router"][0], port=paths["router"][1],
+                   dbname=CREDS["database"], user=CREDS["user"], password=CREDS["password"])
         self._driver = DualPathLoadDriver(direct, sqp, load_sqls())
         self._reset_comparison_window()
         self._driver.direct.start(self._workers)

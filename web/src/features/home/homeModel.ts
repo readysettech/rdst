@@ -138,6 +138,7 @@ export function relativeDay(ts: number, now: number): string {
 
 export const OUTCOME_WORD: Record<AnalysisOutcome, string> = {
   fix_suggested: 'fix suggested',
+  no_fix: 'no fix found',
   healthy: 'healthy',
   failed: 'failed',
 }

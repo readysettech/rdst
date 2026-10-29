@@ -272,18 +272,21 @@ flowchart TD
   gate_block["Gate, blocked: Set up AI: Sign in to Readyset for the included AI, or add your own Anthropic key..."] -->|"reason invalid"| a_inv["Anthropic rejected the saved key. Add a valid key or sign in to Readyset."]
   gate_block -->|"reason exhausted"| a_exh["Your AI access has ended. Sign in to Readyset or add an Anthropic key."]
   gate_block -->|"Sign in"| dlg["Sign in to Readyset"]
+  gate_block -->|"account connected: Use Hosted by Readyset"| hosted
   gate_block -->|"Use my own Anthropic key instead"| key["Update Anthropic API key"]
-  key -->|"Sign in to Readyset instead"| dlg
+  key -->|"Sign in to Readyset instead (signed out)"| dlg
+  key -->|"Use Hosted by Readyset instead (account connected)"| hosted["POST /api/env/ai-provider readyset"]
   key -->|"empty"| k_empty["Enter at least one secret value before saving."]
-  key -->|"key came from process env"| k_shadow["A key supplied when RDST started will override this until the app restarts."]
+  key -->|"RDST started with ANTHROPIC_API_KEY set"| k_shadow["RDST was started with an ANTHROPIC_API_KEY environment variable. A key saved here is used until RDST restarts, then the environment variable's key is used again."]
   key -->|"no keychain"| k_nokr["No OS keychain found. Re-enter this value after RDST restarts."]
-  key -->|"Save secrets: POST /api/env/set, Save securely on or off"| revalidate["Gate re-checks: POST /api/env/anthropic/validate"]
+  key -->|"Save secrets: POST /api/env/set checks the key with Anthropic before saving it"| revalidate["Gate re-checks: POST /api/env/anthropic/validate"]
+  key -->|"Anthropic rejects it, or can't be reached while a working key exists"| k_kept["Not saved; the dialog says why and the current key stays in use"]
 
   dlg -->|"Email address, Send sign-in link"| link["Check your email: Open the sign-in link sent to X..."]
   dlg -->|"bad email"| e_err["Enter a valid email address."]
   dlg -->|"Continue with Google"| oauth{"Mode"}
   oauth -->|"web: full-page redirect"| cb["/account-login?login_id"]
-  oauth -->|"desktop: system browser"| poll["Polls browser-callback every 500 ms"]
+  oauth -->|"desktop: system browser"| poll["Polls browser-callback every 500 ms; the local callback finishes sign-in itself"]
   link -->|"web: dialog polls account status every 2 s"| done
   link -->|"desktop"| poll
   poll --> done["Signed in to Readyset: Readyset account connected. Your free AI is ready to use.: Done"]
@@ -608,11 +611,13 @@ flowchart TD
 ```
 
 Monitoring runs on the backend schedule. Signed out, it charts and raises
-connection and stuck-query alerts; deep analysis and Actions need a Readyset
-sign-in, even with an Anthropic key. Signed out, the enable dialog adds
+connection and stuck-query alerts, and Actions lists server settings,
+maintenance and indexes to drop; deep analysis, new indexes and query rewrites
+need a Readyset sign-in, even with an Anthropic key. Signed out, the enable dialog adds
 "Turning on monitoring needs AI, which is free with a Readyset account." and
-"Without AI, RDST only charts query stats and alerts on connection problems.
-Deep analysis, Actions and nightly reports don't run."; "Sign up or sign in"
+"Without AI, RDST still charts query stats, alerts on connection problems,
+and lists server settings, maintenance and indexes to drop on Actions. Deep
+analysis, new indexes, query rewrites and nightly reports need AI."; "Sign up or sign in"
 opens the sign-in dialog and turns monitoring on, with the dialog's choices,
 once the sign-in finishes; "Turn on without AI" is the small ghost button.
 Both wait for the prerequisites check. When a coding agent asks for the

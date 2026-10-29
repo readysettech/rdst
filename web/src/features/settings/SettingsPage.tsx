@@ -48,7 +48,7 @@ import {
   setAiProvider,
 } from '../../lib/api'
 import { clearAllBackgroundRuns } from '../../lib/backgroundRuns'
-import { thisComputer } from '../../lib/desktop'
+import { isDesktopRuntime, thisComputer } from '../../lib/desktop'
 import { classifyError } from '../../lib/errorContract'
 import { invalidateTargetQueries } from '../../lib/targetQueries'
 import {
@@ -629,7 +629,11 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
         <SettingsGroup id="notifications" title="Notifications">
           <SettingsRow
             title={`Push to ${thisComputer()}`}
-            line="Act now items and the daily report."
+            line={
+              isDesktopRuntime()
+                ? 'Act now items and the daily report. The same switch as Notifications in the tray menu.'
+                : 'Act now items and the daily report.'
+            }
           >
             <BaseInputSwitch
               name="push"
@@ -885,8 +889,16 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
         requirements={anthropicDialogRequirements}
         showManualAnthropicInput
         keyringAvailable={Boolean(envRequirements?.keyring_available)}
-        onTrialRegister={() => setShowTrialDialog(true)}
-        trialActionLabel="Don't have a key? Sign in to Readyset"
+        onTrialRegister={
+          usingReadyset && readysetAccountAvailable
+            ? undefined
+            : handleUseReadyset
+        }
+        trialActionLabel={
+          readysetAccountAvailable
+            ? 'Use Hosted by Readyset instead'
+            : "Don't have a key? Sign in to Readyset"
+        }
         onSuccess={() => {
           void invalidateTrialRelatedQueries(queryClient)
           // Re-check right away so the status line reflects the new key even

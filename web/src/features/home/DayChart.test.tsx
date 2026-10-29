@@ -38,6 +38,11 @@ describe('dayChartModel', () => {
       expect(tick.x).toBeGreaterThanOrEqual(since)
       expect(tick.x).toBeLessThanOrEqual(NOW)
     }
+    // Readings that began mid-bucket say when they began, not when the bucket did.
+    const started = since + 4 * 60
+    const later = dayChartModel(readings(since, NOW), NOW, MIDNIGHT, started)
+    expect(later.since).toBe(started)
+    expect(later.domain).toEqual([since, NOW])
   })
 
   it('draws a pause between fragments and breaks the line there', () => {

@@ -65,6 +65,85 @@ describe('FeedbackChat', () => {
       email: 'me@example.com',
       transcript: 'User: I want CSV export\n\nRDST: Got it.',
     })
+    expect(
+      (await screen.findByRole('status')).textContent?.includes(
+        "Sent to the team. Thanks, we'll reply to me@example.com."
+      )
+    ).toBe(true)
+    expect(screen.getByRole('button', { name: 'Done' })).toBeTruthy()
+  })
+
+  it('says in the dialog why the note was not sent and keeps the draft', async () => {
+    vi.mocked(chatReport).mockResolvedValue({
+      reply: 'Noted.',
+      suggestion: { kind: 'bug', summary: 'The sidebar flickers.' },
+      ai: true,
+    })
+    vi.mocked(submitReport).mockResolvedValue({
+      success: false,
+      error: 'Something went wrong upstream.',
+    })
+    renderWithClient(<FeedbackChat isOpen onClose={() => {}} />)
+
+    type('The sidebar flickers')
+    await screen.findByText('Noted.')
+    await waitFor(() =>
+      expect((screen.getByLabelText('Email') as HTMLInputElement).value).toBe(
+        'me@example.com'
+      )
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Send to the team' }))
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Something went wrong upstream.'
+    )
+    expect(
+      (screen.getByLabelText('Note to the team') as HTMLTextAreaElement).value
+    ).toBe('The sidebar flickers.')
+  })
+
+  it('explains before anything is typed that telemetry off means nothing is sent', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: RequestInfo | URL) =>
+        Promise.resolve(
+          jsonResponse(
+            String(url).includes('/api/env/requirements')
+              ? {
+                  telemetry_enabled: false,
+                  keyring_available: true,
+                  requirements: [],
+                }
+              : { email: 'me@example.com', verified: true }
+          )
+        )
+      )
+    )
+    vi.mocked(chatReport).mockResolvedValue({
+      reply: 'Noted.',
+      suggestion: { kind: 'feedback', summary: 'Nice app.' },
+      ai: true,
+    })
+    renderWithClient(<FeedbackChat isOpen onClose={() => {}} />)
+
+    expect(
+      await screen.findByText(
+        /Telemetry is turned off, so nothing you write here reaches the team/
+      )
+    ).toBeTruthy()
+    expect(
+      screen.getByText(/start RDST without RDST_TELEMETRY=off/)
+    ).toBeTruthy()
+
+    type('Nice app')
+    await screen.findByText('Noted.')
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Send to the team',
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true)
   })
 
   it('offers to send the message as typed when AI is unavailable', async () => {

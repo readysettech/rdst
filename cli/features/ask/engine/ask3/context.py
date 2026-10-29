@@ -48,6 +48,7 @@ class Ask3Context:
     enforce_result_limit: bool = True
     resolved_column_validation_enabled: bool = False
     enum_overlap_advisory: bool = False
+    ranked_nulls_last_enabled: bool = False
     validation_resolution: Dict[str, Any] = field(default_factory=dict)
     allow_agent_escalation: bool = True
 
@@ -211,6 +212,7 @@ class Ask3Context:
             "enforce_result_limit": self.enforce_result_limit,
             "resolved_column_validation_enabled": self.resolved_column_validation_enabled,
             "enum_overlap_advisory": self.enum_overlap_advisory,
+            "ranked_nulls_last_enabled": self.ranked_nulls_last_enabled,
             "validation_resolution": self.validation_resolution,
             "allow_agent_escalation": self.allow_agent_escalation,
             # Schema
@@ -363,6 +365,7 @@ class Ask3Context:
         ctx.no_interactive = data.get("no_interactive", False)
         ctx.enforce_result_limit = data.get("enforce_result_limit", True)
         ctx.enum_overlap_advisory = data.get("enum_overlap_advisory", False)
+        ctx.ranked_nulls_last_enabled = data.get("ranked_nulls_last_enabled", False)
         ctx.resolved_column_validation_enabled = data.get(
             "resolved_column_validation_enabled", False
         )

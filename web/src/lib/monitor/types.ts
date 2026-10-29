@@ -1085,6 +1085,7 @@ export type SnapshotStatus =
   | 'needs_attention'
   | 'watch'
   | 'fix_ready'
+  | 'no_fix'
   | 'healthy'
   | 'not_analyzed'
 
@@ -1701,9 +1702,11 @@ export interface HomeDayCard {
   /** The latest report for the "Daily report, <date>" link. */
   report_id: number | null
   report_day: string | null
+  /** Today's first minute of readings, inside the series' first 5-minute point. */
+  first_reading_at?: number | null
 }
 
-export type AnalysisOutcome = 'fix_suggested' | 'healthy' | 'failed'
+export type AnalysisOutcome = 'fix_suggested' | 'no_fix' | 'healthy' | 'failed'
 
 export interface HomeAnalyzed {
   target: string
@@ -1944,6 +1947,7 @@ export type QueryStatus =
   | 'fix_suggested'
   | 'analyzing'
   | 'healthy'
+  | 'no_fix'
   | 'stuck'
   | 'not_analyzed'
 

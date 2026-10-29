@@ -14,7 +14,7 @@ import re
 from datetime import datetime
 from typing import Any, Iterable
 
-from features.monitor.analysis_digest import digest_for_ref
+from features.monitor.analysis_digest import analyzed_status, digest_for_ref
 from features.monitor.db_actions import database_actions, health_overview
 from features.monitor.naming import target_names
 from features.monitor.presentation import display_name, format_ms, format_pct, format_size, plain
@@ -28,11 +28,11 @@ ALL_QUERIES_LIMIT = 300
 EVENT_LIMIT = 60
 OPEN_STATES = ("new", "seen", "snoozed")
 # The first status that applies wins (DESIGN_V5 section 1).
-STATUS_RANK = {"needs_attention": 0, "watch": 1, "fix_ready": 2, "healthy": 3,
-               "not_analyzed": 4}
+STATUS_RANK = {"needs_attention": 0, "watch": 1, "fix_ready": 2, "no_fix": 3, "healthy": 4,
+               "not_analyzed": 5}
 LOOK_AT = ("needs_attention", "watch", "fix_ready")
 STATUS_WORDS = {"needs_attention": "Needs attention", "watch": "Watch",
-                "fix_ready": "Fix suggested", "healthy": "Healthy",
+                "fix_ready": "Fix suggested", "no_fix": "No fix found", "healthy": "Healthy",
                 "not_analyzed": "Not analyzed yet"}
 TIMELINE_KINDS = ("created", "worse", "reopened")
 EVENT_WORDS = {
@@ -508,7 +508,7 @@ def _status(key: str, open_items: dict[str, dict[str, Any]],
     if digest is not None and digest.get("fix_ready"):
         return "fix_ready", None
     if digest is not None:
-        return "healthy", None
+        return analyzed_status(digest), None
     return "not_analyzed", None
 
 
@@ -1250,7 +1250,7 @@ def legacy(report: dict[str, Any], row: dict[str, Any]) -> dict[str, Any] | None
                 digest = None
         fix = (digest or {}).get("fix")
         status = "fix_ready" if digest and digest.get("fix_ready") else \
-            "healthy" if digest else "not_analyzed"
+            analyzed_status(digest) if digest else "not_analyzed"
         queries.append({"query_key": key, "display_name": item.get("display_name") or
                         display_name(item.get("text") or ""),
                         "calls": None, "qps": None, "total_ms": item.get("total_ms") or 0.0,

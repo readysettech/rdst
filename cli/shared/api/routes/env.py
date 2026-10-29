@@ -11,6 +11,9 @@ from pydantic import BaseModel, SecretStr
 from shared.anthropic_env import (
     ANTHROPIC_API_KEY_NAMES,
     MALFORMED_ANTHROPIC_KEY_MESSAGE,
+    anthropic_key_rejected,
+    check_anthropic_key,
+    has_anthropic_api_key,
     is_well_formed_anthropic_key,
 )
 from shared.api.guards import require_local_request
@@ -31,6 +34,24 @@ EnvRequirementSource = Literal[
 
 router = APIRouter()
 
+KEY_REJECTED_MESSAGE = (
+    "Anthropic didn't accept this key, so it wasn't saved. "
+    "Copy the key from the Anthropic Console and try again."
+)
+KEY_UNCHECKED_MESSAGE = (
+    "RDST couldn't check this key with Anthropic, so it wasn't saved. "
+    "Check your connection and try again."
+)
+KEY_SAVED_UNCHECKED_MESSAGE = (
+    "Key saved, but RDST couldn't check it with Anthropic. "
+    "Settings shows whether it works once Anthropic can be reached."
+)
+
+
+def _has_working_anthropic_key(service: EnvRequirementsService) -> bool:
+    store = service.secret_store
+    return has_anthropic_api_key(secret_store=store) and not anthropic_key_rejected(store)
+
 
 class EnvRequirement(BaseModel):
     kind: EnvRequirementKind
@@ -41,6 +62,8 @@ class EnvRequirement(BaseModel):
     selected_provider: Optional[Literal["claude", "readyset"]] = None
     anthropic_key_configured: Optional[bool] = None
     readyset_account_connected: Optional[bool] = None
+    # RDST was started with ANTHROPIC_API_KEY set; that key takes over again on restart.
+    anthropic_key_in_startup_env: Optional[bool] = None
 
 
 class EnvRequirementsResponse(BaseModel):
@@ -118,6 +141,21 @@ async def set_env_secret(request: Request, body: EnvSetRequest) -> EnvSetRespons
             message=MALFORMED_ANTHROPIC_KEY_MESSAGE,
         )
 
+    unchecked = False
+    if body.name in ANTHROPIC_API_KEY_NAMES:
+        # A key replaces the current one only once Anthropic accepts it. A key Anthropic can't
+        # be asked about is saved only when there is no working key to lose.
+        verdict = await asyncio.to_thread(check_anthropic_key, value)
+        if not verdict["valid"]:
+            keeps_current = await asyncio.to_thread(_has_working_anthropic_key, service)
+            if verdict["reason"] == "rejected" or keeps_current:
+                message = (KEY_REJECTED_MESSAGE if verdict["reason"] == "rejected"
+                           else KEY_UNCHECKED_MESSAGE)
+                if keeps_current:
+                    message += " Your current key is still in use."
+                return EnvSetResponse(success=False, name=body.name, message=message)
+            unchecked = True
+
     service.bind_missing_target_password(body.name)
     result = service.secret_store.set_secret(
         name=body.name,
@@ -133,7 +171,7 @@ async def set_env_secret(request: Request, body: EnvSetRequest) -> EnvSetRespons
         name=body.name,
         persisted=bool(result.get("persisted", False)),
         session_only=bool(result.get("session_only", True)),
-        message=result.get("message"),
+        message=KEY_SAVED_UNCHECKED_MESSAGE if unchecked else result.get("message"),
     )
 
 

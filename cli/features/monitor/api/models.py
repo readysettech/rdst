@@ -450,8 +450,8 @@ class MonitorQuery(BaseModel):
     latency_delta_24h: float | None = None
     trend_24h: list[TrendMean] = []
     suggested_fix: SuggestedFix | None = None
-    status: Literal["fix_suggested", "analyzing", "healthy", "stuck", "not_analyzed"] = \
-        "not_analyzed"
+    status: Literal["fix_suggested", "analyzing", "healthy", "no_fix", "stuck",
+                    "not_analyzed"] = "not_analyzed"
 
 
 class QueryCounts(BaseModel):
@@ -1222,7 +1222,8 @@ class SnapshotQuery(BaseModel):
     prior_calls: float | None
     prior_mean_ms: float | None
     latency_change: float | None
-    status: Literal["needs_attention", "watch", "fix_ready", "healthy", "not_analyzed"]
+    status: Literal["needs_attention", "watch", "fix_ready", "no_fix", "healthy",
+                    "not_analyzed"]
     status_reason: str | None
     score: float | None
     grade: Literal["A", "B", "C", "D", "F"] | None
@@ -1885,6 +1886,8 @@ class HomeDayCard(BaseModel):
     series: list[HomeSparkPoint]
     report_id: int | None
     report_day: str | None
+    # Today's first minute of readings; the series' first point is the start of its bucket.
+    first_reading_at: int | None = None
 
 
 class HomeAnalyzed(BaseModel):
@@ -1893,7 +1896,7 @@ class HomeAnalyzed(BaseModel):
     display_name: str
     analyzed_at: int
     analysis_ref: str | None
-    outcome: Literal["fix_suggested", "healthy", "failed"]
+    outcome: Literal["fix_suggested", "no_fix", "healthy", "failed"]
 
 
 class HomeSinceYesterday(BaseModel):

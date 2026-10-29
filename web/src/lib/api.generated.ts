@@ -89,6 +89,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/account/login/{login_id}/verifier": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Account Login Verifier
+         * @description Hand RDST the sign-in's PKCE verifier, so the emailed link finishes sign-in by itself.
+         */
+        post: operations["set_account_login_verifier_api_account_login__login_id__verifier_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/account/logout": {
         parameters: {
             query?: never;
@@ -925,6 +945,26 @@ export interface paths {
         head?: never;
         /** Discovery Mode */
         patch: operations["discovery_mode_api_demo_discovery_mode_patch"];
+        trace?: never;
+    };
+    "/api/demo/dismiss-error": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss Error
+         * @description Forget the last failure: status stops reporting it, across restarts too.
+         */
+        post: operations["dismiss_error_api_demo_dismiss_error_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/demo/facts": {
@@ -4548,6 +4588,13 @@ export interface components {
             /** State */
             state: string;
         };
+        /** AccountLoginVerifierRequest */
+        AccountLoginVerifierRequest: {
+            /** Code Verifier */
+            code_verifier: string;
+            /** State */
+            state: string;
+        };
         /** AccountLogoutResponse */
         AccountLogoutResponse: {
             /** Success */
@@ -7696,6 +7743,8 @@ export interface components {
             accepted_names: string[];
             /** Anthropic Key Configured */
             anthropic_key_configured?: boolean | null;
+            /** Anthropic Key In Startup Env */
+            anthropic_key_in_startup_env?: boolean | null;
             /**
              * Kind
              * @enum {string}
@@ -8775,7 +8824,7 @@ export interface components {
              * Outcome
              * @enum {string}
              */
-            outcome: "fix_suggested" | "healthy" | "failed";
+            outcome: "fix_suggested" | "no_fix" | "healthy" | "failed";
             /** Query Key */
             query_key: string;
             /** Target */
@@ -8821,6 +8870,8 @@ export interface components {
             cache_hit_ratio: number | null;
             /** Cache Hit Reason */
             cache_hit_reason: string | null;
+            /** First Reading At */
+            first_reading_at?: number | null;
             /** Fixes Item Id */
             fixes_item_id: number | null;
             /** Fixes Ready */
@@ -10424,7 +10475,7 @@ export interface components {
              * @default not_analyzed
              * @enum {string}
              */
-            status?: "fix_suggested" | "analyzing" | "healthy" | "stuck" | "not_analyzed";
+            status?: "fix_suggested" | "analyzing" | "healthy" | "no_fix" | "stuck" | "not_analyzed";
             suggested_fix?: components["schemas"]["SuggestedFix"] | null;
             /** Tables */
             tables: string[];
@@ -13648,7 +13699,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "needs_attention" | "watch" | "fix_ready" | "healthy" | "not_analyzed";
+            status: "needs_attention" | "watch" | "fix_ready" | "no_fix" | "healthy" | "not_analyzed";
             /** Status Reason */
             status_reason: string | null;
             /** Text */
@@ -14990,6 +15041,39 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AccountLoginResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_account_login_verifier_api_account_login__login_id__verifier_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                login_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountLoginVerifierRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -16387,6 +16471,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_error_api_demo_dismiss_error_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

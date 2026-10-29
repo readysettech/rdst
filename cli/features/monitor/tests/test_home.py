@@ -133,12 +133,42 @@ def test_home_log_lists_reports_fixes_and_analyses(store, monkeypatch):
     assert home["status"]["to_watch"] == 1
 
 
+def test_home_says_no_fix_found_for_an_analysis_that_did_not_rate_the_query_healthy(
+        store, monkeypatch):
+    _watching(store, monkeypatch)
+    store._write(lambda conn: conn.executemany(
+        "INSERT INTO analyze_job (target,query_key,reason,state,priority,enqueued_at,finished_at,"
+        "analysis_ref) VALUES ('db',?,?,'done',1.0,?,?,?)",
+        [(KEYS[0], "new", NOW - 1000, NOW - 960, "/a/1"),
+         (KEYS[1], "new", NOW - 1000, NOW - 950, "/a/2"),
+         (KEYS[2], "user", NOW - 200, NOW - 150, "/a/3")]))
+    store.sync_query_ui("db", summaries={
+        KEYS[0]: {"efficiency_score": 90, "fix_ready": False, "efficient": True},
+        KEYS[1]: {"efficiency_score": 35, "fix_ready": False, "efficient": False},
+        KEYS[2]: {"efficiency_score": 45, "fix_ready": False, "efficient": False}})
+    home = views.home(store, NOW, configured=CONFIGURED[:1])
+    assert ("2 new queries analyzed", "1 with no fix found") in [
+        (entry["text"], entry["detail"]) for entry in home["today"]]
+    assert [row["outcome"] for row in home["recently_analyzed"]] == ["no_fix"]
+
+
 def test_home_route_serves_the_model_and_bounds_its_limit(client, store, monkeypatch):
     _watching(store, monkeypatch)
     monkeypatch.setattr(routes, "_configured_targets", lambda: CONFIGURED)
     page = client.get("/api/monitor/home").json()
     assert page["status"]["state"] == "quiet" and len(page["databases"]) == 2
     assert client.get("/api/monitor/home?limit=0").status_code == 422
+
+
+def test_day_card_starts_at_the_first_reading_not_its_bucket(store, monkeypatch):
+    # Monitoring turned on at 9:22:43; the five-minute series starts at 9:20.
+    start = int(datetime(2026, 10, 8, 9, 22, 43).timestamp())
+    seed(store, minutes=30, start=start)
+    store.set_settings("db", {"enabled": True})
+    monkeypatch.setattr(database_limit, "paused", lambda store, target, now: False)
+    day = views.home(store, NOW, configured=CONFIGURED)["day"]
+    assert day["series"][0]["ts"] == int(datetime(2026, 10, 8, 9, 20).timestamp())
+    assert day["first_reading_at"] == int(datetime(2026, 10, 8, 9, 22).timestamp())
 
 
 def test_strip_rows_say_what_monitoring_is_doing_on_each_database(store, monkeypatch):

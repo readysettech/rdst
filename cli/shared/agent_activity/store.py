@@ -69,6 +69,18 @@ CREATE INDEX activity_ai_call_entry ON activity_ai_call(entry_id, seq);
 CREATE TABLE activity_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
+# Applied once: a deep analysis that failed or stopped before any EXPLAIN says what ran, not
+# its mode's EXPLAIN.
+_UNRUN_ANALYSIS_DECISIONS = """
+UPDATE activity_entry SET decision = CASE WHEN statement_count = 0
+ THEN 'Stopped before any statement ran' ELSE 'Stopped before the query ran' END
+WHERE action = 'deep_analysis' AND source = 'live' AND outcome IN ('failed', 'cancelled')
+ AND decision LIKE 'Ran EXPLAIN%'
+ AND json_extract(details_json, '$.statements_not_listed') IS NULL
+ AND NOT EXISTS (SELECT 1 FROM activity_statement s WHERE s.entry_id = activity_entry.id
+                 AND s.kind IN ('explain', 'explain_analyze'))
+"""
+
 _LOCKS: dict[Path, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
 _OPENED: set[Path] = set()
@@ -149,6 +161,18 @@ class AgentActivityStore:
             self._opened = True
             _OPENED.add(self.path)
         self._backfill_once(backfill_before)
+        self._correct_once()
+
+    def _correct_once(self) -> None:
+        if self.meta("unrun_analyses_corrected"):
+            return
+
+        def write(conn: sqlite3.Connection) -> None:
+            conn.execute(_UNRUN_ANALYSIS_DECISIONS)
+            conn.execute("INSERT OR IGNORE INTO activity_meta (key,value) "
+                         "VALUES ('unrun_analyses_corrected',?)", (str(int(self.clock())),))
+
+        self._write(write)
 
     def _backfill_once(self, before: int | None) -> None:
         if self.meta("backfilled"):

@@ -24,6 +24,21 @@ def _isolate_anthropic_env(monkeypatch):
     is deterministic. Tests that want them set should re-add explicitly."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
+    monkeypatch.setattr("shared.anthropic_env._STARTUP_ANTHROPIC_KEY", None)
+
+
+@pytest.fixture(autouse=True)
+def anthropic_verdicts(monkeypatch):
+    """Anthropic's answer per key; keys not listed are accepted. Tests add entries."""
+    verdicts: dict[str, str] = {}
+
+    def check(key):
+        reason = verdicts.get(key, "ok")
+        return {"valid": reason == "ok", "reason": reason, "model": "haiku"}
+
+    monkeypatch.setattr(env_routes, "check_anthropic_key", check)
+    monkeypatch.setattr("shared.anthropic_env.check_anthropic_key", check)
+    return verdicts
 
 
 def _seed_target_with_password_env(env_name: str, target: str = "prod") -> None:
@@ -230,6 +245,86 @@ async def test_set_anthropic_secret_rejects_characters_outside_key_alphabet(
     assert "isn't a valid Anthropic API key" in body["message"]
     assert SecretStoreService().get_secret("ANTHROPIC_API_KEY") is None
     assert "ANTHROPIC_API_KEY" not in os.environ
+
+
+def _anthropic_requirement(payload):
+    return next(item for item in payload["requirements"] if item["kind"] == "anthropic_api_key")
+
+
+async def test_rejected_anthropic_key_keeps_the_current_one(
+    client, tmp_rdst_home, inmemory_keyring, anthropic_verdicts
+):
+    saved = await client.post(
+        "/api/env/set",
+        json={"name": "ANTHROPIC_API_KEY", "value": "sk-ant-good", "persist": True},
+    )
+    assert saved.json()["success"] is True
+    anthropic_verdicts["sk-ant-not-a-real-key"] = "rejected"
+
+    response = await client.post(
+        "/api/env/set",
+        json={"name": "ANTHROPIC_API_KEY", "value": "sk-ant-not-a-real-key", "persist": True},
+    )
+
+    body = response.json()
+    assert body["success"] is False
+    assert body["message"].startswith("Anthropic didn't accept this key, so it wasn't saved.")
+    assert body["message"].endswith("Your current key is still in use.")
+    assert SecretStoreService().get_secret("ANTHROPIC_API_KEY") == "sk-ant-good"
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-good"
+    requirements = await client.get("/api/env/requirements")
+    assert _anthropic_requirement(requirements.json())["satisfied"] is True
+
+
+async def test_unchecked_anthropic_key_never_replaces_a_working_one(
+    client, tmp_rdst_home, inmemory_keyring, anthropic_verdicts
+):
+    await client.post(
+        "/api/env/set",
+        json={"name": "ANTHROPIC_API_KEY", "value": "sk-ant-good", "persist": True},
+    )
+    anthropic_verdicts["sk-ant-other"] = "provider_error"
+
+    response = await client.post(
+        "/api/env/set",
+        json={"name": "ANTHROPIC_API_KEY", "value": "sk-ant-other", "persist": True},
+    )
+
+    body = response.json()
+    assert body["success"] is False
+    assert "couldn't check this key with Anthropic" in body["message"]
+    assert SecretStoreService().get_secret("ANTHROPIC_API_KEY") == "sk-ant-good"
+
+
+async def test_unchecked_anthropic_key_is_saved_when_there_is_none(
+    client, tmp_rdst_home, inmemory_keyring, anthropic_verdicts
+):
+    anthropic_verdicts["sk-ant-offline"] = "provider_error"
+
+    response = await client.post(
+        "/api/env/set",
+        json={"name": "ANTHROPIC_API_KEY", "value": "sk-ant-offline", "persist": True},
+    )
+
+    body = response.json()
+    assert body["success"] is True
+    assert body["message"].startswith("Key saved, but RDST couldn't check it with Anthropic.")
+    assert SecretStoreService().get_secret("ANTHROPIC_API_KEY") == "sk-ant-offline"
+
+
+async def test_requirements_report_a_startup_key_only_when_rdst_started_with_one(
+    client, tmp_rdst_home, inmemory_keyring, monkeypatch
+):
+    await client.post(
+        "/api/env/set",
+        json={"name": "ANTHROPIC_API_KEY", "value": "sk-ant-ui", "persist": True},
+    )
+    requirements = await client.get("/api/env/requirements")
+    assert _anthropic_requirement(requirements.json())["anthropic_key_in_startup_env"] is False
+
+    monkeypatch.setattr("shared.anthropic_env._STARTUP_ANTHROPIC_KEY", "sk-ant-env")
+    requirements = await client.get("/api/env/requirements")
+    assert _anthropic_requirement(requirements.json())["anthropic_key_in_startup_env"] is True
 
 
 async def test_switch_ai_provider_persists_and_updates_requirements(

@@ -904,6 +904,74 @@ describe('ActionsPage against the backend', () => {
       ])
     )
   })
+
+  it('keeps a reason within the limit and says when a dismissal fails', async () => {
+    setFixtureOverride(null)
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/dismiss')) {
+        return new Response(JSON.stringify({ detail: 'Action not found' }), {
+          status: 404,
+        })
+      }
+      const body = url.startsWith('/api/monitor/actions/applied')
+        ? appliedFixture('ca-database', null, new Map(), new Map())
+        : url.startsWith('/api/monitor/actions')
+          ? globalActionsFixture('ca-database', null, new Map(), new Map())
+          : init?.method === 'POST'
+            ? { target: 'demo', closed: false }
+            : {}
+      return new Response(JSON.stringify(body))
+    })
+    vi.stubGlobal('fetch', fetch)
+    renderWithClient(<ActionsPage />)
+    await screen.findAllByTestId('plan-row')
+    fireEvent.click(rows()[0].querySelector('[id$="-open"]') as HTMLElement)
+    const verbs = await screen.findByTestId('plan-verbs')
+    fireEvent.click(within(verbs).getByRole('button', { name: 'Dismiss' }))
+    const popover = await screen.findByRole('dialog', { name: 'Dismiss' })
+    const reason = within(popover).getByLabelText('Reason')
+    expect(reason.getAttribute('maxLength')).toBe('500')
+    fireEvent.change(reason, { target: { value: 'x'.repeat(500) } })
+    expect(within(popover).getByText('500 characters at most')).toBeTruthy()
+    fireEvent.click(within(popover).getByRole('button', { name: 'Dismiss' }))
+    expect((await within(popover).findByRole('alert')).textContent).toBe(
+      "Couldn't dismiss this change: Action not found"
+    )
+    expect(screen.getByRole('dialog', { name: 'Dismiss' })).toBeTruthy()
+    expect(
+      (within(popover).getByLabelText('Reason') as HTMLInputElement).value
+    ).toHaveLength(500)
+  })
+
+  it('holds a past Set aside date in the form', async () => {
+    setFixtureOverride(null)
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const body = url.startsWith('/api/monitor/actions/applied')
+        ? appliedFixture('ca-database', null, new Map(), new Map())
+        : url.startsWith('/api/monitor/actions')
+          ? globalActionsFixture('ca-database', null, new Map(), new Map())
+          : init?.method === 'POST'
+            ? { target: 'demo', closed: false }
+            : {}
+      return new Response(JSON.stringify(body))
+    })
+    vi.stubGlobal('fetch', fetch)
+    renderWithClient(<ActionsPage />)
+    await screen.findAllByTestId('plan-row')
+    fireEvent.click(rows()[0].querySelector('[id$="-open"]') as HTMLElement)
+    const verbs = await screen.findByTestId('plan-verbs')
+    fireEvent.click(within(verbs).getByRole('button', { name: 'Set aside' }))
+    const popover = await screen.findByRole('dialog', { name: 'Set aside' })
+    fireEvent.change(within(popover).getByLabelText('Until'), {
+      target: { value: '2000-01-01' },
+    })
+    expect(within(popover).getByText('Pick a date after today')).toBeTruthy()
+    const submit = within(popover).getByRole('button', { name: 'Set aside' })
+    expect((submit as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      fetch.mock.calls.some(([url]) => String(url).endsWith('/set_aside'))
+    ).toBe(false)
+  })
 })
 
 describe('ActionsPage with nothing to change, against the backend', () => {

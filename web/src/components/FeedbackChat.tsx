@@ -1,3 +1,4 @@
+import { Alert } from '@rs/ui-new/alert'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { BaseInputTextarea } from '@rs/ui-new/base-input-textarea'
 import { Button } from '@rs/ui-new/button'
@@ -18,6 +19,7 @@ import {
   submitReport,
 } from '../lib/api'
 import { snoozeNudge } from '../lib/feedbackNudge'
+import { useEnvRequirements } from '../lib/useEnvRequirements'
 import { DialogShell } from './DialogShell'
 import { isValidEmail, normalizeEmail } from './emailValidation'
 
@@ -28,6 +30,10 @@ interface FeedbackChatProps {
 
 const FEEDBACK_NOT_SENT =
   "Couldn't send your feedback. Check your connection and try again."
+
+// Feedback reaches the team through telemetry, so turning telemetry off stops it too.
+const TELEMETRY_OFF =
+  'Telemetry is turned off, so nothing you write here reaches the team. You can still ask how to do things. To send feedback, start RDST without RDST_TELEMETRY=off.'
 
 const KINDS: Array<{ value: ReportKind; label: string }> = [
   { value: 'feature_request', label: 'Feature request' },
@@ -61,6 +67,7 @@ export function FeedbackChat({ isOpen, onClose }: FeedbackChatProps) {
   const [input, setInput] = useState('')
   const [draft, setDraft] = useState<Draft | null>(null)
   const [email, setEmail] = useState('')
+  const [sentTo, setSentTo] = useState<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
 
@@ -69,12 +76,16 @@ export function FeedbackChat({ isOpen, onClose }: FeedbackChatProps) {
       setMessages([])
       setInput('')
       setDraft(null)
+      setSentTo(null)
     }
   }, [isOpen])
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'end' })
   }, [messages, draft])
+
+  const { data: env } = useEnvRequirements()
+  const canSend = env?.telemetry_enabled !== false
 
   const { data: identity } = useQuery<{ email: string | null } | null>({
     queryKey: ['settings', 'email'],
@@ -137,15 +148,8 @@ export function FeedbackChat({ isOpen, onClose }: FeedbackChatProps) {
         drafted: note.drafted,
       })
       snoozeNudge('sent')
-      toast({
-        title: 'Sent to the team',
-        description: "Thanks. We'll follow up by email.",
-        variant: 'positive',
-      })
-      onClose()
-    },
-    onError: (error) => {
-      toast({ title: error.message, variant: 'negative' })
+      setDraft(null)
+      setSentTo(normalizeEmail(email))
     },
   })
 
@@ -167,11 +171,22 @@ export function FeedbackChat({ isOpen, onClose }: FeedbackChatProps) {
       onClose={onClose}
       title="Ask or give feedback"
       description="Ask how to do something in RDST, report a problem or request a feature."
-      note="Goes straight to the team."
+      note={
+        canSend
+          ? 'Goes straight to the team.'
+          : 'Nothing is sent to the team while telemetry is off.'
+      }
       busy={send.isPending}
       testId="feedback-chat"
       action={
-        draft ? (
+        sentTo ? (
+          <Button
+            variant="primary"
+            modifier="solid"
+            label="Done"
+            onClick={onClose}
+          />
+        ) : draft ? (
           <>
             <Button
               variant="primary"
@@ -186,12 +201,14 @@ export function FeedbackChat({ isOpen, onClose }: FeedbackChatProps) {
               label="Send to the team"
               onClick={() => send.mutate(draft)}
               loading={send.isPending}
-              disabled={send.isPending || !draft.summary.trim() || !emailOk}
+              disabled={
+                !canSend || send.isPending || !draft.summary.trim() || !emailOk
+              }
             />
           </>
         ) : (
           <>
-            {lastUserMessage && (
+            {lastUserMessage && canSend && (
               <Button
                 variant="primary"
                 modifier="ghost"
@@ -218,6 +235,14 @@ export function FeedbackChat({ isOpen, onClose }: FeedbackChatProps) {
       }
     >
       <VStack className="items-stretch gap-4">
+        {!canSend && (
+          <Alert
+            tone="quiet"
+            variant="warning"
+            icon="alert"
+            label={TELEMETRY_OFF}
+          />
+        )}
         {messages.length === 0 ? (
           <VStack className="items-start gap-2.5">
             <Text level="body-small" className="text-content-layout-2">
@@ -276,7 +301,16 @@ export function FeedbackChat({ isOpen, onClose }: FeedbackChatProps) {
           </VStack>
         )}
 
-        {draft ? (
+        {sentTo ? (
+          <div role="status">
+            <Alert
+              tone="quiet"
+              variant="positive"
+              icon="tick"
+              label={`Sent to the team. Thanks, we'll reply to ${sentTo}.`}
+            />
+          </div>
+        ) : draft ? (
           <VStack className="items-stretch gap-2.5 rounded-lg border border-border-layout-2 p-3">
             <Text as="p" level="caption" className="text-content-layout-3">
               Send this to the team?
@@ -307,6 +341,16 @@ export function FeedbackChat({ isOpen, onClose }: FeedbackChatProps) {
             <Text as="p" level="caption" className="text-content-layout-3">
               We'll reply by email. The conversation above is attached.
             </Text>
+            {send.error && (
+              <div role="alert">
+                <Alert
+                  tone="quiet"
+                  variant="negative"
+                  icon="alert"
+                  label={send.error.message}
+                />
+              </div>
+            )}
           </VStack>
         ) : (
           <BaseInputTextarea

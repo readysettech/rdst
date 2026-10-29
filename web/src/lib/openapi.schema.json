@@ -149,6 +149,24 @@
         "title": "AccountLoginStatusResponse",
         "type": "object"
       },
+      "AccountLoginVerifierRequest": {
+        "properties": {
+          "code_verifier": {
+            "title": "Code Verifier",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "code_verifier"
+        ],
+        "title": "AccountLoginVerifierRequest",
+        "type": "object"
+      },
       "AccountLogoutResponse": {
         "properties": {
           "success": {
@@ -9082,6 +9100,17 @@
             ],
             "title": "Anthropic Key Configured"
           },
+          "anthropic_key_in_startup_env": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anthropic Key In Startup Env"
+          },
           "kind": {
             "enum": [
               "target_password",
@@ -11988,6 +12017,7 @@
           "outcome": {
             "enum": [
               "fix_suggested",
+              "no_fix",
               "healthy",
               "failed"
             ],
@@ -12127,6 +12157,17 @@
               }
             ],
             "title": "Cache Hit Reason"
+          },
+          "first_reading_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Reading At"
           },
           "fixes_item_id": {
             "anyOf": [
@@ -16977,6 +17018,7 @@
               "fix_suggested",
               "analyzing",
               "healthy",
+              "no_fix",
               "stuck",
               "not_analyzed"
             ],
@@ -26014,6 +26056,7 @@
               "needs_attention",
               "watch",
               "fix_ready",
+              "no_fix",
               "healthy",
               "not_analyzed"
             ],
@@ -29521,6 +29564,52 @@
         ]
       }
     },
+    "/api/account/login/{login_id}/verifier": {
+      "post": {
+        "description": "Hand RDST the sign-in's PKCE verifier, so the emailed link finishes sign-in by itself.",
+        "operationId": "set_account_login_verifier_api_account_login__login_id__verifier_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "login_id",
+            "required": true,
+            "schema": {
+              "title": "Login Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountLoginVerifierRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Account Login Verifier",
+        "tags": [
+          "account"
+        ]
+      }
+    },
     "/api/account/logout": {
       "post": {
         "operationId": "account_logout_api_account_logout_post",
@@ -31741,6 +31830,27 @@
           }
         },
         "summary": "Discovery Mode",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/dismiss-error": {
+      "post": {
+        "description": "Forget the last failure: status stops reporting it, across restarts too.",
+        "operationId": "dismiss_error_api_demo_dismiss_error_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Dismiss Error",
         "tags": [
           "demo",
           "demo"

@@ -86,6 +86,14 @@ def status(request: Request):
     return _svc().status()
 
 
+@router.post("/dismiss-error")
+def dismiss_error(request: Request):
+    """Forget the last failure: status stops reporting it, across restarts too."""
+    require_local_request(request)
+    _svc().dismiss_error()
+    return {"dismissed": True}
+
+
 @router.get("/tour")
 def tour(request: Request):
     require_local_request(request)

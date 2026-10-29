@@ -128,3 +128,28 @@ def test_key_outside_alphabet_is_rejected_without_a_request(monkeypatch):
     out = ae.validate_anthropic_key()
     assert out["valid"] is False
     assert out["reason"] == "rejected"
+
+
+def test_a_candidate_key_is_checked_without_touching_the_saved_one(monkeypatch):
+    ae.clear_anthropic_validity_cache()
+
+    def _unexpected(**kw):
+        raise AssertionError("checking a candidate must not resolve the saved key")
+
+    monkeypatch.setattr(ae, "get_anthropic_api_key", _unexpected)
+    captured = {}
+
+    import shared.llm_manager as llm
+
+    class _Fake:
+        def query(self, **kwargs):
+            captured.update(kwargs)
+            raise LLMError("no", code="ANTHROPIC_AUTH_INVALID", status=401)
+
+    monkeypatch.setattr(llm, "LLMManager", lambda *args, **kwargs: _Fake())
+
+    out = ae.check_anthropic_key("sk-ant-candidate")
+
+    assert captured["api_key"] == "sk-ant-candidate"
+    assert out["reason"] == "rejected"
+    assert "source" not in out

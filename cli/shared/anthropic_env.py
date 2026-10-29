@@ -25,6 +25,16 @@ def is_well_formed_anthropic_key(key: str) -> bool:
     return _ANTHROPIC_KEY_ALPHABET.fullmatch(key) is not None
 
 
+# RDST copies a key saved in Settings into its own environment, so the key the environment
+# supplied at startup is only known from this snapshot, taken before any stored key is restored.
+# It takes precedence over the stored key again after every restart.
+_STARTUP_ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY") or None
+
+
+def startup_anthropic_key() -> str | None:
+    return _STARTUP_ANTHROPIC_KEY
+
+
 def get_anthropic_source(
     secret_store: Any | None = None,
     cfg: Any | None = None,
@@ -118,43 +128,25 @@ def anthropic_key_rejected(
     return not is_well_formed_anthropic_key(key) or _fingerprint(key) in _rejected_keys
 
 
-def validate_anthropic_key(
-    secret_store: Any | None = None,
-    cfg: Any | None = None,
-) -> dict[str, Any]:
-    """Report whether the resolved Anthropic key actually authenticates.
+def check_anthropic_key(key: str) -> dict[str, Any]:
+    """Ask Anthropic whether ``key`` authenticates, with one minimal request.
 
-    Presence (`has_anthropic_api_key`) only proves a key is set; a stale,
-    revoked, or mistyped key still looks "configured" while every AI feature
-    fails at use. This makes a minimal authenticated request (cheapest model,
-    one output token) to tell "configured" from "working".
-
-    The ping goes through ``LLMManager``, which resolves the key via
-    ``resolve_api_key()`` — so the probe reports on the *same* key the AI
-    features will use.
-
-    Returns ``{"valid": bool, "reason": str, "model": str | None}`` where
-    reason is ``ok`` | ``rejected`` | ``no_key`` | ``provider_error``. A key with
-    characters outside the key alphabet is ``rejected`` without a request. Blocking
-    (network I/O) — callers on the event loop must offload via ``to_thread``.
+    Returns ``{"valid": bool, "reason": "ok" | "rejected" | "provider_error", "model": ...}``.
+    A key with characters outside the key alphabet is ``rejected`` without a request. Results
+    are cached per key. Blocking (network I/O): callers on the event loop must offload it.
     """
-    key = get_anthropic_api_key(secret_store=secret_store, cfg=cfg)
-    if key is None:
-        return {"valid": False, "reason": "no_key", "model": None}
     if not is_well_formed_anthropic_key(key):
-        source = get_anthropic_source(secret_store=secret_store, cfg=cfg)
-        return {"valid": False, "reason": "rejected", "model": None, "source": source}
+        return {"valid": False, "reason": "rejected", "model": None}
 
     fingerprint = _fingerprint(key)
     cached = _validity_cache.get(fingerprint)
     now = time.monotonic()
     if cached is not None and cached[1] > now:
-        return cached[0]
+        return dict(cached[0])
 
     from shared.llm_manager import LLMError, LLMManager
     from shared.llm_manager.claude_provider import AnthropicModel
 
-    source = get_anthropic_source(secret_store=secret_store, cfg=cfg)
     model = AnthropicModel.HAIKU_4_5.value
     try:
         LLMManager().query(
@@ -167,40 +159,53 @@ def validate_anthropic_key(
             temperature=0,
             purpose="anthropic_key_validation",
         )
-        result: dict[str, Any] = {
-            "valid": True,
-            "reason": "ok",
-            "model": model,
-            "source": source,
-        }
+        result: dict[str, Any] = {"valid": True, "reason": "ok", "model": model}
     except LLMError as exc:
         rejected = exc.code == "ANTHROPIC_AUTH_INVALID"
         result = {
             "valid": False,
             "reason": "rejected" if rejected else "provider_error",
             "model": model,
-            "source": source,
         }
     except Exception:
-        result = {
-            "valid": False,
-            "reason": "provider_error",
-            "model": model,
-            "source": source,
-        }
+        result = {"valid": False, "reason": "provider_error", "model": model}
 
     _validity_cache[fingerprint] = (result, now + _VALIDITY_TTL_SECONDS)
     if result["reason"] == "rejected":
         _rejected_keys.add(fingerprint)
+    return dict(result)
+
+
+def validate_anthropic_key(
+    secret_store: Any | None = None,
+    cfg: Any | None = None,
+) -> dict[str, Any]:
+    """Report whether the resolved Anthropic key actually authenticates.
+
+    Presence (`has_anthropic_api_key`) only proves a key is set; a stale,
+    revoked, or mistyped key still looks "configured" while every AI feature
+    fails at use. This checks the same key the AI features will use.
+
+    Returns ``{"valid": bool, "reason": str, "model": str | None, "source": str}`` where
+    reason is ``ok`` | ``rejected`` | ``no_key`` | ``provider_error``. Blocking
+    (network I/O): callers on the event loop must offload via ``to_thread``.
+    """
+    key = get_anthropic_api_key(secret_store=secret_store, cfg=cfg)
+    if key is None:
+        return {"valid": False, "reason": "no_key", "model": None}
+    result = check_anthropic_key(key)
+    result["source"] = get_anthropic_source(secret_store=secret_store, cfg=cfg)
     return result
 
 
 __all__ = [
     "anthropic_key_rejected",
+    "check_anthropic_key",
     "clear_anthropic_validity_cache",
     "get_anthropic_api_key",
     "get_anthropic_source",
     "has_anthropic_api_key",
     "is_well_formed_anthropic_key",
+    "startup_anthropic_key",
     "validate_anthropic_key",
 ]

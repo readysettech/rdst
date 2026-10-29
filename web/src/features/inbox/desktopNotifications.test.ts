@@ -50,3 +50,55 @@ describe('Push to this computer', () => {
     ])
   })
 })
+
+describe('Push to this computer in the desktop app', () => {
+  function desktop(enabled: boolean) {
+    const state = { enabled, listener: (_on: boolean) => undefined as void }
+    vi.stubGlobal('rdstDesktop', {
+      isDesktop: true,
+      platform: 'linux',
+      getNotificationsEnabled: () => Promise.resolve(state.enabled),
+      setNotificationsEnabled: (on: boolean) => {
+        state.enabled = on
+        return Promise.resolve(on)
+      },
+      notifications: {
+        onEnabledChange: (listener: (on: boolean) => void) => {
+          state.listener = listener
+          return () => undefined
+        },
+      },
+    })
+    return state
+  }
+
+  it("follows the app's switch, which the tray also turns", async () => {
+    const app = desktop(false)
+    push.hydrateDesktopNotifications(true)
+    await vi.waitFor(() =>
+      expect(saved()).toEqual([{ push_notifications: false }])
+    )
+    expect(push.desktopNotificationsEnabled()).toBe(false)
+    app.listener(true)
+    expect(push.desktopNotificationsEnabled()).toBe(true)
+    expect(await push.setDesktopNotifications(false)).toBe(false)
+    expect(app.enabled).toBe(false)
+    expect(saved()).toEqual([
+      { push_notifications: false },
+      { push_notifications: true },
+      { push_notifications: false },
+    ])
+  })
+
+  it('leaves showing pushes to the app', () => {
+    desktop(true)
+    localStorage.setItem('rdst_inbox_desktop_notifications', '1')
+    const shown = vi.fn()
+    vi.stubGlobal(
+      'Notification',
+      Object.assign(shown, { permission: 'granted' })
+    )
+    push.showDesktopNotification({ title: 'Stuck query', item_id: 2 })
+    expect(shown).not.toHaveBeenCalled()
+  })
+})

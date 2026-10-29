@@ -479,7 +479,7 @@ export const ENGINE_NOTE = {
 } as const
 
 const MYSQL_SQL =
-  /`|\badd\s+(unique\s+)?index\b|\boptimize\s+table\b|\balgorithm\s*=/i
+  /`|\badd\s+(unique\s+)?index\b|\boptimize\s+table\b|\balgorithm\s*=|\bset\s+persist/i
 
 const commented = (text: string) =>
   text
@@ -496,24 +496,32 @@ export function stepList(steps: string | null | undefined): string[] {
 }
 
 /**
- * One script for the index and maintenance changes in view, each under its title: the
- * engine's note on top, then the changes, then the commented-out lines that undo them.
+ * One script for the index, setting and maintenance changes in view, each under its title:
+ * the engine's note on its index changes on top, then the changes, then the commented-out
+ * lines that undo them.
  */
 export function allSql(cards: PlanCard[]): string {
   const picked = cards.filter(
-    (card) => card.sql && (card.kind === 'index' || card.kind === 'maintenance')
+    (card) =>
+      card.sql &&
+      (card.kind === 'index' ||
+        card.kind === 'setting' ||
+        card.kind === 'maintenance')
   )
   if (!picked.length) return ''
   const label = (card: PlanCard) => `-- ${card.rank ?? ''}. ${card.title}`
   const engines = new Set(
-    picked.map((card) =>
-      MYSQL_SQL.test(card.sql ?? '') ? 'mysql' : 'postgresql'
-    )
+    picked
+      .filter((card) => card.kind !== 'setting')
+      .map((card) => (MYSQL_SQL.test(card.sql ?? '') ? 'mysql' : 'postgresql'))
   )
   const notes = (['postgresql', 'mysql'] as const)
     .filter((engine) => engines.has(engine))
     .map((engine) => commented(ENGINE_NOTE[engine]))
-  const changes = picked.map((card) => `${label(card)}\n${card.sql}`)
+  const changes = picked.map(
+    (card) =>
+      `${label(card)}\n${card.sql}${card.kind === 'setting' && card.restart ? '\n-- Takes effect after a restart.' : ''}`
+  )
   const undo = picked
     .filter((card) => card.rollback_sql)
     .map((card) => `${label(card)}\n${commented(card.rollback_sql ?? '')}`)
@@ -574,6 +582,9 @@ export function speedup(today: number, after: number): string {
   return `${(today / after).toFixed(1)}x faster`
 }
 
+/** The longest reason for a set aside, a dismissal or an undo that the backend keeps. */
+export const REASON_MAX = 500
+
 // Migrations
 
 export type MigrationFormat = 'alembic' | 'prisma' | 'rails' | 'flyway'
@@ -624,6 +635,35 @@ const indent = (text: string, by: string) =>
     .map((line) => (line ? `${by}${line}` : line))
     .join('\n')
 
+/**
+ * A script's statements, one per line ending in a semicolon, each with the comments above it.
+ * PostgreSQL runs several statements sent as one command in a single transaction, so a
+ * migration runs each on its own.
+ */
+export function statements(sql: string): string[] {
+  const found: string[] = []
+  let current: string[] = []
+  for (const line of sql.split('\n')) {
+    current.push(line)
+    const text = line.trim()
+    if (text.endsWith(';') && !text.startsWith('--')) {
+      found.push(current.join('\n').trim())
+      current = []
+    }
+  }
+  const rest = current.join('\n').trim()
+  if (
+    rest &&
+    found.length &&
+    rest.split('\n').every((line) => line.trim().startsWith('--'))
+  ) {
+    found[found.length - 1] += `\n${rest}`
+  } else if (rest) {
+    found.push(rest)
+  }
+  return found
+}
+
 /** A migration file for one change, in a tool's own shape, from its SQL and rollback SQL. */
 export function migration(
   format: MigrationFormat,
@@ -636,12 +676,14 @@ export function migration(
   const name = slug(title)
   const version = stamp(now)
   if (format === 'alembic') {
+    const execute = (by: string) => (statement: string) =>
+      `${by}op.execute(\n${by}    """\n${indent(statement, `${by}    `)}\n${by}    """\n${by})`
     const body = (statement: string | null) =>
       statement === null
         ? '    raise NotImplementedError("RDST has no rollback for this change")'
         : outside
-          ? `    with op.get_context().autocommit_block():\n        op.execute(\n            """\n${indent(statement, '            ')}\n            """\n        )`
-          : `    op.execute(\n        """\n${indent(statement, '        ')}\n        """\n    )`
+          ? `    with op.get_context().autocommit_block():\n${statements(statement).map(execute('        ')).join('\n')}`
+          : statements(statement).map(execute('    ')).join('\n')
     return `"""${title}
 
 Revision ID: ${version}
@@ -666,7 +708,11 @@ ${body(rollback)}
     const body = (statement: string | null) =>
       statement === null
         ? '    raise ActiveRecord::IrreversibleMigration'
-        : `    execute <<~SQL\n${indent(statement, '      ')}\n    SQL`
+        : statements(statement)
+            .map(
+              (one) => `    execute <<~SQL\n${indent(one, '      ')}\n    SQL`
+            )
+            .join('\n')
     return `# db/migrate/${version}_${name}.rb
 class ${camel(title)} < ActiveRecord::Migration[7.1]
 ${outside ? '  disable_ddl_transaction!\n\n' : ''}  def up
@@ -681,12 +727,13 @@ end
   }
   if (format === 'prisma') {
     const down = rollback
-      ? `\n-- To roll back, run:\n${indent(rollback, '-- ')}\n`
+      ? `\n-- To roll back, run${outside && statements(rollback).length > 1 ? ' each statement on its own' : ''}:\n${indent(rollback, '-- ')}\n`
       : ''
-    return `-- prisma/migrations/${version}_${name}/migration.sql
--- ${title}
-${sql}
-${down}`
+    // Prisma sends a migration file as one command: each statement that can't run in a
+    // transaction gets a file of its own, a second apart so they apply in order.
+    const file = (part: string, step: number) =>
+      `-- prisma/migrations/${stamp(new Date(now.getTime() + step * 1000))}_${name}/migration.sql\n-- ${title}\n${part}\n`
+    return `${(outside ? statements(sql) : [sql]).map(file).join('\n')}${down}`
   }
   const undo = rollback ? `\n-- U${version}__${name}.sql\n${rollback}\n` : ''
   return `-- V${version}__${name}.sql

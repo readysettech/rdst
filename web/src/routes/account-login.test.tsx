@@ -6,7 +6,11 @@ import {
   sendAccountMagicLink,
   startAccountGoogleOAuth,
 } from '../lib/accountAuth'
-import { fetchAccountStatus, startAccountLogin } from '../lib/api'
+import {
+  fetchAccountBrowserCallback,
+  fetchAccountStatus,
+  startAccountLogin,
+} from '../lib/api'
 import { SignInPage } from './-sign-in-page'
 
 const router = vi.hoisted(() => ({
@@ -117,11 +121,55 @@ describe('SignInPage', () => {
     vi.mocked(fetchAccountStatus).mockResolvedValue({
       signed_in: true,
     } as Awaited<ReturnType<typeof fetchAccountStatus>>)
-    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.advanceTimersByTimeAsync(3_000)
     await waitFor(() =>
       expect(router.navigate).toHaveBeenCalledWith({ href: '/inbox' })
     )
     vi.useRealTimers()
+  })
+
+  it('carries on when a link from before a reload signs in', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    localStorage.setItem('rdst_login_return_to', '/configure')
+    vi.mocked(fetchAccountStatus).mockResolvedValue({
+      signed_in: false,
+    } as Awaited<ReturnType<typeof fetchAccountStatus>>)
+    renderWithClient(<SignInPage />)
+    await screen.findByLabelText('Email address')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(router.navigate).not.toHaveBeenCalled()
+
+    vi.mocked(fetchAccountStatus).mockResolvedValue({
+      signed_in: true,
+    } as Awaited<ReturnType<typeof fetchAccountStatus>>)
+    await vi.advanceTimersByTimeAsync(3_000)
+    await waitFor(() =>
+      expect(router.navigate).toHaveBeenCalledWith({ href: '/configure' })
+    )
+    expect(router.navigate).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('finishes a desktop sign-in RDST completed from the link', async () => {
+    window.rdstDesktop = { isDesktop: true, platform: 'linux' }
+    localStorage.setItem('rdst_login_return_to', '/configure')
+    const callback = { code: null, error: null, error_description: null }
+    vi.mocked(fetchAccountBrowserCallback)
+      .mockResolvedValueOnce({ state: 'completing', ...callback })
+      .mockResolvedValue({ state: 'success', ...callback })
+    renderWithClient(<SignInPage />)
+
+    fireEvent.change(screen.getByLabelText('Email address'), {
+      target: { value: 'qa@readyset.io' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send sign-in link' }))
+
+    await waitFor(() =>
+      expect(router.navigate).toHaveBeenCalledWith({ href: '/configure' })
+    )
+    expect(vi.mocked(fetchAccountBrowserCallback)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(completeAccountRedirect)).not.toHaveBeenCalled()
+    delete window.rdstDesktop
   })
 
   it('finishes a provider redirect inside the sign-in column', async () => {

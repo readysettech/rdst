@@ -42,7 +42,7 @@ OWNER_HOST = socket.gethostname()
 
 # Allow five seconds of scheduling jitter around the normal one-minute cadence.
 COLLECTION_GAP_SECONDS = 65
-SCHEMA_VERSION = 32
+SCHEMA_VERSION = 34
 SAMPLES_PER_QUERY = 5
 RESOLUTIONS = (60, 300, 3600, 86400)
 # Full detail follows the same retention for every query in the first tier.
@@ -65,6 +65,9 @@ PULSE_RETENTION_SECONDS = 48 * 3600
 # A stuck query stays one open item until it has gone this long without running long again,
 # so a job that runs past a minute on a schedule doesn't resolve and reopen with every run.
 STUCK_CLEAR_SECONDS = 3600
+# Sample time minus running time drifts by the sampling delay; a start within this many
+# seconds of the recorded one, on the same pid, is the same statement.
+STUCK_START_SLACK_SECONDS = 5
 # In the rollback journal a commit waits for every reader, and new readers wait for that
 # commit. A writer that cannot start or commit within WRITE_BUSY_MS rolls back, so readers
 # go ahead, and runs its transaction again until its retry window closes.
@@ -129,7 +132,7 @@ def _process_start(pid: int) -> float | None:
         return None
 
 
-def _dead_analysis_owner(row: Any) -> bool:
+def _dead_owner(row: Any) -> bool:
     if row["owner_host"] != OWNER_HOST or row["owner_pid"] is None or row["owner_start"] is None:
         return False
     try:
@@ -882,6 +885,11 @@ class DatabaseBusyError(RuntimeError):
     """An analysis or a report is running for the database."""
 
 
+def _verdict(value: Any) -> int | None:
+    """A stored yes/no; null when the summary does not say."""
+    return None if value is None else int(bool(value))
+
+
 class MonitorStore:
     def __init__(
         self,
@@ -1194,6 +1202,20 @@ class MonitorStore:
                             conn.execute("ALTER TABLE analyze_job_estimated RENAME TO analyze_job")
                             for index in indexes:
                                 conn.execute(index[0])
+                        if version < 33:
+                            # The analysis rated the query good or better. Null until the
+                            # analyze queue reads it from the stored analysis.
+                            columns = {row[1] for row in conn.execute("PRAGMA table_info(query_ui)")}
+                            if columns and "efficient" not in columns:
+                                conn.execute("ALTER TABLE query_ui ADD COLUMN efficient INTEGER")
+                        if version < 34:
+                            # The process running a report, so a restart can tell a run it cut
+                            # off from one another process still runs.
+                            columns = {row[1] for row in conn.execute("PRAGMA table_info(report_run)")}
+                            for name, kind in (("owner_host", "TEXT"), ("owner_pid", "INTEGER"),
+                                               ("owner_start", "REAL")):
+                                if name not in columns:
+                                    conn.execute(f"ALTER TABLE report_run ADD COLUMN {name} {kind}")
                         broken = conn.execute("PRAGMA foreign_key_check").fetchall()
                         if broken:
                             raise StorageError(f"monitor.db migration left {len(broken)} rows "
@@ -1520,10 +1542,12 @@ class MonitorStore:
             if row:
                 return dict(row), False
             cursor = conn.execute("INSERT INTO report_run (target,ts,trigger,state,progress_json,heartbeat_at,"
-                                  "billable_calls,period_start) VALUES (?,?,?,?,?,?,0,?)",
+                                  "billable_calls,period_start,owner_host,owner_pid,owner_start) "
+                                  "VALUES (?,?,?,?,?,?,0,?,?,?,?)",
                                   (target, now, trigger, "running",
                                    json.dumps({"message": "Selecting top queries", "done": 0,
-                                               "total": 0}), now, period_start))
+                                               "total": 0}), now, period_start,
+                                   OWNER_HOST, os.getpid(), _process_start(os.getpid())))
             return dict(conn.execute("SELECT * FROM report_run WHERE id=?",
                                      (cursor.lastrowid,)).fetchone()), True
         return self._write(write)
@@ -1581,10 +1605,19 @@ class MonitorStore:
             "UPDATE report_run SET heartbeat_at=? WHERE id=? AND state='running'",
             (now, report_id)).rowcount) > 0
 
-    def recover_reports(self, now: int, stale_seconds: int = 900) -> None:
-        self._write(lambda conn: conn.execute(
-            "UPDATE report_run SET state='failed' WHERE state='running' "
-            "AND COALESCE(heartbeat_at,ts)<?", (now - stale_seconds,)))
+    def recover_reports(self, now: int, stale_seconds: int = 900) -> list[dict[str, Any]]:
+        """Fail the runs whose process is gone or that stopped reporting; return them."""
+        def write(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+            rows = [dict(row) for row in conn.execute(
+                "SELECT * FROM report_run WHERE state='running'").fetchall()]
+            gone = [row for row in rows if _dead_owner(row) or
+                    (row["heartbeat_at"] or row["ts"]) < now - stale_seconds]
+            for row in gone:
+                conn.execute("UPDATE report_run SET state='failed',finished_at=?,progress_json=? "
+                             "WHERE id=?", (now, json.dumps({"message": "Report interrupted",
+                                                             "done": 0, "total": 0}), row["id"]))
+            return gone
+        return self._write(write)
 
     def previous_health_collectors(self, target: str, ts: int) -> dict[str, Any]:
         """The previous night's completed report retains the cumulative health counters."""
@@ -1722,7 +1755,7 @@ class MonitorStore:
         def write(conn: sqlite3.Connection) -> dict[str, Any] | None:
             for running in conn.execute("SELECT * FROM analyze_job WHERE target=? AND state='running'",
                                         (target,)).fetchall():
-                if _dead_analysis_owner(running):
+                if _dead_owner(running):
                     conn.execute("UPDATE analyze_job SET state='queued',started_at=NULL,owner=NULL,"
                                  "attempt=attempt+1 WHERE id=?", (running["id"],))
             setting = conn.execute("SELECT value FROM monitor_setting WHERE target=? AND key='execute'",
@@ -1876,7 +1909,7 @@ class MonitorStore:
             failed = []
             rows = conn.execute("SELECT * FROM analyze_job WHERE state='running'").fetchall()
             for row in rows:
-                if not _dead_analysis_owner(row) and row["started_at"] > now - timeout_s:
+                if not _dead_owner(row) and row["started_at"] > now - timeout_s:
                     continue
                 if row["error"] in {"recovered_once", "retrying_after_recovery"}:
                     conn.execute("UPDATE analyze_job SET state='failed',finished_at=?,"
@@ -2473,24 +2506,32 @@ class MonitorStore:
     def sync_stuck_items(self, target: str, ts: int, stuck: list[dict[str, Any]]) -> None:
         """Reconcile the code-only stuck rule after a successful activity sample.
 
-        The item carries the statement's backend pid and how long it has run, so the
-        Inbox shows the real pid in its steps."""
+        The item carries the statement's backend pid, how long it has run and when it
+        started, so the Inbox shows the real pid in its steps and a start that holds still."""
         active: dict[str, dict[str, Any]] = {}
         for row in stuck:
             key = row.get("query_key")
             if key and (key not in active or float(row.get("duration_s") or 0) >
                         float(active[key].get("duration_s") or 0)):
                 active[key] = row
+        open_items = [item for item in self.inbox(target=target)
+                      if item["type"] == "stuck_query" and item["state"] != "resolved"]
+        prior = {item["subject"]: json.loads(item["body_json"]) for item in open_items}
         for key, row in active.items():
             body: dict[str, Any] = {"query_key": key}
             if row.get("pid") is not None:
                 body["pid"] = int(row["pid"])
             if row.get("duration_s") is not None:
                 body["duration_s"] = float(row["duration_s"])
+                started = round(ts - body["duration_s"])
+                last = prior.get(key) or {}
+                if (last.get("pid") == body.get("pid") and last.get("started_at") is not None
+                        and abs(last["started_at"] - started) <= STUCK_START_SLACK_SECONDS):
+                    started = last["started_at"]
+                body["started_at"] = started
             self.upsert_item(target, "stuck_query", key, 0.9, "Stuck query", body, ts)
-        for item in self.inbox(target=target):
-            if (item["type"] == "stuck_query" and item["state"] != "resolved"
-                    and item["subject"] not in active):
+        for item in open_items:
+            if item["subject"] not in active:
                 last = self.read("SELECT MAX(ts) ts FROM stuck_sample WHERE target=? AND query_key=?",
                                  (target, item["subject"]))[0]["ts"]
                 if last is not None and ts - last < STUCK_CLEAR_SECONDS:
@@ -3127,9 +3168,10 @@ class MonitorStore:
         def write(conn: sqlite3.Connection) -> None:
             conn.execute("INSERT OR IGNORE INTO query_ui(target,query_key) VALUES (?,?)", (target, key))
             if summary is not None:
-                conn.execute("UPDATE query_ui SET efficiency_score=?,fix_ready=?,analyzed=1 "
+                conn.execute("UPDATE query_ui SET efficiency_score=?,fix_ready=?,efficient=?,analyzed=1 "
                              "WHERE target=? AND query_key=?",
-                             (summary.get("efficiency_score"), int(bool(summary.get("fix_ready"))), target, key))
+                             (summary.get("efficiency_score"), int(bool(summary.get("fix_ready"))),
+                              _verdict(summary.get("efficient")), target, key))
             if findings is not None:
                 conn.execute("UPDATE query_ui SET assessed=1,findings=? WHERE target=? AND query_key=?",
                              (findings, target, key))
@@ -3144,10 +3186,12 @@ class MonitorStore:
         """Batch existing analysis and classification projections for SQL list selection."""
         def write(conn: sqlite3.Connection) -> None:
             conn.executemany(
-                "INSERT INTO query_ui(target,query_key,efficiency_score,fix_ready,analyzed) "
-                "VALUES (?,?,?,?,1) ON CONFLICT(target,query_key) DO UPDATE SET "
-                "efficiency_score=excluded.efficiency_score,fix_ready=excluded.fix_ready,analyzed=1",
-                ((target, key, summary.get("efficiency_score"), int(bool(summary.get("fix_ready"))))
+                "INSERT INTO query_ui(target,query_key,efficiency_score,fix_ready,efficient,analyzed) "
+                "VALUES (?,?,?,?,?,1) ON CONFLICT(target,query_key) DO UPDATE SET "
+                "efficiency_score=excluded.efficiency_score,fix_ready=excluded.fix_ready,"
+                "efficient=excluded.efficient,analyzed=1",
+                ((target, key, summary.get("efficiency_score"), int(bool(summary.get("fix_ready"))),
+                  _verdict(summary.get("efficient")))
                  for key, summary in (summaries or {}).items()))
             conn.executemany(
                 "INSERT INTO query_ui(target,query_key,assessed,findings) VALUES (?,?,1,?) "

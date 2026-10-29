@@ -248,6 +248,12 @@ export function Sidebar() {
   const currentPath = useRouterState({
     select: (state) => state.location.pathname,
   })
+  const searchTarget = useRouterState({
+    select: (state) => {
+      const { target } = state.location.search as { target?: unknown }
+      return typeof target === 'string' ? target : null
+    },
+  })
   // The Database page's selection: kept on a configured database, and its readings
   // stream held open here so arriving on the page never restarts them.
   const selected = useDefaultTarget()
@@ -288,6 +294,12 @@ export function Sidebar() {
     (item.to !== '/' && currentPath.startsWith(`${item.to}/`))
   const onDatabasePage =
     currentPath === '/database' || currentPath.startsWith('/database/')
+  // A full analysis sits under its database's queries.
+  const activeDatabase = onDatabasePage
+    ? selected
+    : currentPath === '/results'
+      ? (searchTarget ?? selected)
+      : null
 
   return (
     <aside
@@ -337,10 +349,7 @@ export function Sidebar() {
         />
       </div>
       <Scrollable rootClassName="min-h-0 flex-1">
-        <DatabaseList
-          databases={databases}
-          activeName={onDatabasePage ? selected : null}
-        />
+        <DatabaseList databases={databases} activeName={activeDatabase} />
       </Scrollable>
 
       <PlatformCard className="mt-auto mb-3" />

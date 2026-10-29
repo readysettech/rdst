@@ -41,6 +41,16 @@ contextBridge.exposeInMainWorld('rdstDesktop', {
         ipcRenderer.removeListener('desktop:notification-health', listener)
     },
     openSettings: () => ipcRenderer.send('desktop:open-notification-settings'),
+    /** Resolves to why the test couldn't be shown, or null once it shows. */
+    sendTest: (): Promise<string | null> =>
+      ipcRenderer.invoke('desktop:send-test-notification'),
+    /** The tray's Notifications switch changed. */
+    onEnabledChange: (callback: (enabled: boolean) => void) => {
+      const listener = (_event: unknown, enabled: boolean) => callback(enabled)
+      ipcRenderer.on('desktop:notifications-enabled', listener)
+      return () =>
+        ipcRenderer.removeListener('desktop:notifications-enabled', listener)
+    },
   },
   monitoring: {
     onChange: (callback: () => void) => {

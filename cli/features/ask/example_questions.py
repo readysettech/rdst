@@ -19,13 +19,6 @@ from shared.constants import rdst_data_dir
 
 logger = logging.getLogger(__name__)
 
-# Schema-neutral last resort — only when no tables are known at all.
-_NEUTRAL = [
-    "How many rows are in each table?",
-    "Show me a sample of 10 rows from the largest table",
-    "Which tables have the most columns?",
-]
-
 
 def _cache_path(target: str):
     d = rdst_data_dir() / "cache" / "ask_examples"
@@ -39,9 +32,13 @@ def _fingerprint(table_names: list[str]) -> str:
 
 
 def _introspection_examples(table_names: list[str]) -> list[str]:
-    """Deterministic, no-LLM questions from table names alone."""
+    """Deterministic, no-LLM questions from table names alone.
+
+    Ask answers from the rows in a database's tables, not from its catalog, so a target
+    whose tables are not known yet gets no examples.
+    """
     if not table_names:
-        return list(_NEUTRAL)
+        return []
     first = table_names[0]
     out = [f"Show me 10 rows from {first}", f"How many rows are in {first}?"]
     if len(table_names) > 1:
@@ -67,7 +64,9 @@ def _semantic_examples(target: str, layer: Any) -> list[str] | None:
         "Write exactly 3 natural-language questions a user would realistically "
         "ask this specific database, answerable with a single SQL query. Make "
         "them concrete to this schema — reference real tables/concepts, not "
-        "generic 'customers/orders'. Return JSON: "
+        "generic 'customers/orders'. Ask about the data stored in the tables, "
+        "not about the database's structure (its tables, columns or sizes). "
+        "Return JSON: "
         '{"questions": ["...", "...", "..."]}'
     )
     try:
@@ -109,7 +108,7 @@ def get_example_questions(
         except Exception:
             logger.debug("Bad ask-examples cache for %s", target, exc_info=True)
 
-    if semantic_layer is not None and has_anthropic_api_key():
+    if table_names and semantic_layer is not None and has_anthropic_api_key():
         examples = _semantic_examples(target, semantic_layer)
         if examples:
             try:

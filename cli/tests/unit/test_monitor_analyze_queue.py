@@ -682,6 +682,27 @@ def test_a_rewrite_without_sql_lists_without_a_fix_ahead_of_one_with_sql():
     assert digest["fix_ready"]
 
 
+@pytest.mark.parametrize("rating,concerns,expected", [
+    ("good", ["Reads the whole table"], ("Already efficient", "healthy")),
+    ("fair", ["YEAR(created_at) is not sargable, so the query scans every row"],
+     ("No fix found", "no_fix")),
+    ("poor", [], ("No fix found", "no_fix")),
+    (None, [], ("Already efficient", "healthy")),
+])
+def test_only_a_good_rating_without_a_fix_reads_healthy(rating, concerns, expected):
+    from features.monitor.analysis_digest import digest_from_analysis
+    from features.monitor.api.views import query_status
+    from shared.query_registry import create_analysis_result
+
+    analysis = create_analysis_result(
+        query_hash="hash-1", target="db", performance_metrics={}, explain_plan={},
+        query_metrics={}, llm_analysis={"performance_assessment": {
+            "overall_rating": rating, "efficiency_score": 35, "primary_concerns": concerns}})
+    digest = digest_from_analysis("one", {"analysis_ref": None, "finished_at": NOW}, analysis)
+    assert not digest["fix_ready"]
+    assert (digest["headline"], query_status(False, None, digest, None)) == expected
+
+
 def test_only_rewrite_fields_take_a_mapped_rewrite():
     from shared.query_registry.analysis_results import _replace_rewrites
 
@@ -781,6 +802,27 @@ def test_the_analysis_view_times_only_a_rewrite_that_ran(store, monkeypatch, per
                                NOW)
     rewrite = view["rewrites"][0]
     assert (rewrite["before_ms"], rewrite["after_ms"], rewrite["outcome"]) == expected
+
+
+@pytest.mark.parametrize("cacheability,expected", [
+    ({"checked": True, "cacheable": False, "method": "static_analysis",
+      "issues": ["Uses non-deterministic NOW() function"]},
+     {"blockers": ["Uses non-deterministic NOW() function"], "verified": False}),
+    ({"checked": True, "cacheable": True, "method": "readyset_explain_cache", "issues": []},
+     {"blockers": [], "verified": True}),
+    ({"checked": False, "cacheable": None, "method": "readyset_unavailable", "issues": []},
+     {"blockers": [], "verified": False}),
+    (None, {"blockers": [], "verified": False}),
+])
+def test_the_analysis_view_shows_the_stored_cacheability_verdict(
+        store, monkeypatch, cacheability, expected):
+    from features.monitor.api import views
+
+    analysis = SimpleNamespace(display_payload={"readyset_cacheability": cacheability})
+    monkeypatch.setattr("features.monitor.analysis_digest.load_analysis", lambda job: analysis)
+    monkeypatch.setattr(views, "_engine", lambda target: "postgresql")
+    view = views.analysis_view(store, "db", "one", {"analysis_ref": "ref-1"}, NOW)
+    assert view["readyset"] == expected
 
 
 def test_the_analysis_view_keeps_each_suggestion_whole(store, monkeypatch):
@@ -1810,3 +1852,39 @@ def test_a_first_pass_tests_rewrites_for_its_busiest_few(store):
     jobs = sorted(store.analyze_jobs("db"), key=lambda job: -job["priority"])
     assert [_tests_rewrites(store, job) for job in jobs] == \
         [True] * FIRST_PASS_REWRITE_TESTS + [False] * (5 - FIRST_PASS_REWRITE_TESTS)
+
+
+def test_refresh_reads_the_efficient_verdict_of_rows_analyzed_before_it_was_kept(
+        store, monkeypatch):
+    from features.monitor import analyze_queue
+
+    store._write(lambda conn: conn.execute(
+        "INSERT INTO analyze_job (target,query_key,reason,state,priority,enqueued_at,finished_at,"
+        "analysis_ref) VALUES ('db','idle','new','done',1.0,?,?,'/a/1')", (NOW - 100, NOW - 50)))
+    store.update_query_ui("db", "idle", summary={"efficiency_score": 35})
+    monkeypatch.setattr(analyze_queue, "summary_for_job", lambda job: {
+        "efficiency_score": 35, "fix_ready": False, "efficient": False})
+    AnalyzeQueue(store, clock=lambda: NOW)._refresh_priorities("db", NOW)
+    assert store.read("SELECT efficient FROM query_ui WHERE query_key='idle'") == [
+        {"efficient": 0}]
+
+
+def test_refresh_reads_the_verdict_of_a_query_analyzed_by_hand(store, monkeypatch):
+    from features.monitor import analyze_queue
+
+    monkeypatch.setattr(analyze_queue, "_weights", lambda *args: {
+        "manual": {"total_ms": 5.0}, "listed": {"total_ms": 1.0}})
+    store.update_query_ui("db", "listed", summary={"efficiency_score": 90, "efficient": True})
+    asked = []
+
+    def saved(target, keys):
+        asked.append(keys)
+        return {"manual": {"target": target, "query_key": "manual", "analysis_ref": "/a/2"}}
+
+    monkeypatch.setattr(analyze_queue, "library_analysis_jobs", saved)
+    monkeypatch.setattr(analyze_queue, "summary_for_job", lambda job: {
+        "efficiency_score": 30, "fix_ready": False, "efficient": False})
+    AnalyzeQueue(store, clock=lambda: NOW)._refresh_priorities("db", NOW)
+    assert asked == [["manual"]]
+    assert store.read("SELECT analyzed,efficient FROM query_ui WHERE query_key='manual'") == [
+        {"analyzed": 1, "efficient": 0}]

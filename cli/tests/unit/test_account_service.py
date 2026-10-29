@@ -204,12 +204,107 @@ def test_browser_callback_rejects_an_empty_result(monkeypatch):
 
 
 def test_browser_callback_page_is_branded_and_actionable():
-    page = _browser_callback_page(True)
+    page = _browser_callback_page("signed_in")
 
     assert "Readyset" in page
     assert "You're signed in" in page
     assert "Return to the app and close this tab" in page
     assert "radial-gradient" in page
+
+
+def test_browser_callback_page_claims_sign_in_only_once_signed_in():
+    in_app = _browser_callback_page("in_app")
+    failed = _browser_callback_page("failed", "Link <expired>")
+
+    assert "You're signed in" not in in_app
+    assert "Return to RDST to finish signing in" in in_app
+    assert "You're signed in" not in failed
+    assert "Link &lt;expired&gt;. Return to RDST to try again." in failed
+
+
+def _pending_login(service: AccountService, monkeypatch) -> None:
+    service._logins["login-1"] = {
+        **CONTEXT,
+        "pickup_key": "pickup",
+        "created_at": 0.0,
+        "status_state": "running",
+        "detail": "Waiting",
+        "browser_callback": {"state": "pending"},
+    }
+    monkeypatch.setattr("features.account.service.time.monotonic", lambda: 1.0)
+
+
+def test_browser_callback_finishes_sign_in_without_the_app(monkeypatch):
+    service = AccountService()
+    _pending_login(service, monkeypatch)
+    service.set_code_verifier("login-1", "state-1", "verifier-1")
+    exchanged: list[tuple[str, dict[str, object], dict[str, str]]] = []
+
+    def fake_token(url, *, params, json, headers, timeout):
+        exchanged.append((url, {**params, **json}, headers))
+        response = MagicMock(status_code=200)
+        response.json.return_value = {
+            "access_token": "access", "refresh_token": "refresh", "expires_in": 1800}
+        return response
+
+    completed: list[tuple[object, ...]] = []
+
+    def fake_complete(*args):
+        completed.append(args)
+        return {"state": "success", "detail": "Signed in to Readyset"}
+
+    monkeypatch.setattr("features.account.service.requests.post", fake_token)
+    monkeypatch.setattr(service, "complete_login", fake_complete)
+
+    # The code stays with RDST, so the app can't race it to a second exchange.
+    assert service.record_browser_callback("login-1", code="oauth-code") == {
+        "state": "completing"}
+    result = service.finish_browser_login("login-1")
+
+    assert exchanged == [(
+        "https://example.supabase.co/auth/v1/token",
+        {"grant_type": "pkce", "auth_code": "oauth-code", "code_verifier": "verifier-1"},
+        {"apikey": "publishable", "Authorization": "Bearer publishable",
+         "Accept": "application/json"},
+    )]
+    assert completed == [("login-1", "state-1", "access", "refresh", 1800)]
+    assert result == {"state": "success", "detail": "Signed in to Readyset"}
+    assert service.browser_callback_status("login-1") == {"state": "success"}
+
+
+def test_browser_callback_reports_a_failed_exchange(monkeypatch):
+    service = AccountService()
+    _pending_login(service, monkeypatch)
+    service.set_code_verifier("login-1", "state-1", "verifier-1")
+    response = MagicMock(status_code=400)
+    response.json.return_value = {"error": "invalid_grant"}
+    monkeypatch.setattr(
+        "features.account.service.requests.post", lambda *args, **kwargs: response)
+
+    service.record_browser_callback("login-1", code="used-code")
+    result = service.finish_browser_login("login-1")
+
+    assert result["state"] == "failed"
+    assert "expired or was already used" in result["detail"]
+    assert service.browser_callback_status("login-1")["state"] == "failed"
+
+
+def test_browser_callback_without_a_verifier_is_left_to_the_app(monkeypatch):
+    service = AccountService()
+    _pending_login(service, monkeypatch)
+
+    service.record_browser_callback("login-1", code="oauth-code")
+
+    assert service.finish_browser_login("login-1") is None
+    assert service.browser_callback_status("login-1")["code"] == "oauth-code"
+
+
+def test_code_verifier_needs_the_sign_in_state(monkeypatch):
+    service = AccountService()
+    _pending_login(service, monkeypatch)
+
+    with pytest.raises(AccountServiceError, match="state does not match"):
+        service.set_code_verifier("login-1", "wrong", "verifier-1")
 
 
 def test_account_status_prints_only_the_identity(monkeypatch):

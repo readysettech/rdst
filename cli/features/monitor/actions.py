@@ -96,6 +96,9 @@ def _drop_index(drop: dict[str, Any], window: dict[str, Any]) -> dict[str, Any]:
     score = 0.02 if drop["reason"] == "duplicate" else 0.04 if writes >= 20 else 0.01
     if drop["confidence"] == "low":
         score /= 4
+    if slows:
+        # Dropping the index saves its upkeep, a part of what the writes that maintain it spend.
+        score = min(score, sum(writer["share"] for writer in slows) * DROP_UPKEEP)
     return {"key": drop["id"], "type": "drop_index", "score": score,
             "payload": {"title": title, "summary": summary,
                         "note": "Replicas can read indexes the primary doesn't, so check them "
@@ -121,6 +124,8 @@ def _query_shape(sql: str) -> str:
 
 
 TRIVIAL_DROP_BYTES = 1024 * 1024
+# The most of a write's time one index's upkeep takes: writing the row costs at least as much.
+DROP_UPKEEP = 0.5
 WRITE_HEAVY_DROP = 20.0
 
 
@@ -1114,7 +1119,8 @@ def saves_ms_per_min(score: float, minute_ms: float) -> float:
     An action's score is that reduction as a share of all database time. For an index it is
     the plan's benefit, the sum over the queries it speeds up of share x expected gain; for a
     rewrite, its query's share x the tested gain; settings, maintenance and drops carry a
-    fixed share per severity on the same scale. So saves_ms_per_min = score x minute_ms, where
+    fixed share per severity on the same scale, a drop's capped by the upkeep its measured
+    writes pay. So saves_ms_per_min = score x minute_ms, where
     minute_ms is the database time all queries spend a minute over the plan's window."""
     return round(float(score) * minute_ms, 1)
 

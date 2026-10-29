@@ -193,8 +193,14 @@ export function AccountLoginDialog({
       try {
         const result = await fetchAccountBrowserCallback(desktopLoginId)
         if (cancelled || callbackStarted.current) return
-        if (result.state === 'pending') {
+        if (result.state === 'pending' || result.state === 'completing') {
           timer = window.setTimeout(poll, 500)
+          return
+        }
+        // RDST's local server finished the sign-in from the link.
+        if (result.state === 'success') {
+          callbackStarted.current = true
+          void finishRef.current()
           return
         }
 

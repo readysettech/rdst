@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import time
 from typing import Any
@@ -36,15 +37,17 @@ def _signed_in() -> None:
 router = APIRouter()
 
 
-def _browser_callback_page(succeeded: bool) -> str:
-    title = "You're signed in" if succeeded else "Sign-in failed"
-    message = (
-        "RDST is ready. Return to the app and close this tab."
-        if succeeded
-        else "Return to RDST to see the error and try again."
-    )
-    tone = "#a6f4c5" if succeeded else "#ffb4ab"
-    icon = "&#10003;" if succeeded else "!"
+def _browser_callback_page(outcome: str, detail: str = "") -> str:
+    """The tab the sign-in link lands on, for a sign-in that is ``signed_in``, finished by the
+    app (``in_app``) or ``failed``."""
+    title, message, tone, icon = {
+        "signed_in": ("You're signed in", "RDST is ready. Return to the app and close this tab.",
+                      "#a6f4c5", "&#10003;"),
+        "in_app": ("Finish in RDST", "Return to RDST to finish signing in. If it still shows "
+                   "Sign in, send a new link from there.", "#a6f4c5", "&#8594;"),
+    }.get(outcome, ("Sign-in failed", f"{html.escape(detail.rstrip('.'))}. Return to RDST to try again."
+                    if detail else "Return to RDST to see the error and try again.",
+                    "#ffb4ab", "!"))
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -91,6 +94,11 @@ class AccountLoginResponse(BaseModel):
     publishable_key: str
     callback_url: str
     expires_in: int
+
+
+class AccountLoginVerifierRequest(BaseModel):
+    state: str
+    code_verifier: str
 
 
 class AccountLoginCompleteRequest(BaseModel):
@@ -156,6 +164,20 @@ async def account_login_context(
     return AccountLoginResponse(**result)
 
 
+@router.post("/account/login/{login_id}/verifier", status_code=204)
+async def set_account_login_verifier(
+    request: Request, login_id: str, body: AccountLoginVerifierRequest
+) -> None:
+    """Hand RDST the sign-in's PKCE verifier, so the emailed link finishes sign-in by itself."""
+    require_local_request(request)
+    try:
+        account_service.set_code_verifier(login_id, body.state, body.code_verifier)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Sign-in attempt not found") from exc
+    except AccountServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/account/oauth/callback", response_class=HTMLResponse)
 async def capture_account_oauth_callback(
     request: Request,
@@ -178,9 +200,21 @@ async def capture_account_oauth_callback(
     except AccountServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    succeeded = bool(code)
+    outcome, detail = "failed", error_description[:200] or error
+    if code:
+        try:
+            result = await asyncio.to_thread(account_service.finish_browser_login, login_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Sign-in attempt not found") from exc
+        if result is None:
+            outcome = "in_app"
+        elif result["state"] == "success":
+            outcome = "signed_in"
+            await asyncio.to_thread(_signed_in)
+        else:
+            detail = result["detail"]
     return HTMLResponse(
-        content=_browser_callback_page(succeeded),
+        content=_browser_callback_page(outcome, detail),
         headers={
             "Cache-Control": "no-store",
             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",

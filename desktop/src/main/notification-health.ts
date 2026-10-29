@@ -65,6 +65,21 @@ const BLOCK_MESSAGE: Record<NotificationBlock, string> = {
   unsupported: `This system can't show notifications, ${MISSED}`,
 }
 
+const AGAIN = 'then send the test again.'
+
+const TEST_PROBLEM: Record<NotificationBlock, string> = {
+  windows_global: `Windows notifications are off. Turn them on in Windows Settings, ${AGAIN}`,
+  windows_app: `Windows notifications are off for RDST. Turn them on for RDST in Windows Settings, ${AGAIN}`,
+  macos_blocked: `macOS isn't showing RDST's notifications. Allow them for RDST in System Settings, ${AGAIN}`,
+  linux_no_daemon: `No notification service is running on this desktop. Start your desktop's notification service (such as dunst or mako), ${AGAIN}`,
+  unsupported: "This system can't show notifications. Alerts still appear in the Inbox.",
+}
+
+/** Why a test notification can't be shown and what to do, or null when the OS shows it. */
+export function testNotificationProblem(health: NotificationHealth | null): string | null {
+  return health?.blocked && health.reason ? TEST_PROBLEM[health.reason] : null
+}
+
 /**
  * A DWORD from `reg query` output ("    ToastEnabled    REG_DWORD    0x0"), or null
  * when the value isn't set.

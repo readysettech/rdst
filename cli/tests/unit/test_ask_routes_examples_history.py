@@ -36,7 +36,7 @@ class _NoLayerManager:
 
 
 @pytest.mark.asyncio
-async def test_examples_falls_back_to_introspection(app, monkeypatch, tmp_path):
+async def test_examples_wait_for_known_tables(app, monkeypatch, tmp_path):
     import features.schema.semantic_layer.manager as mgr
 
     monkeypatch.setattr(mgr, "SemanticLayerManager", _NoLayerManager)
@@ -48,11 +48,8 @@ async def test_examples_falls_back_to_introspection(app, monkeypatch, tmp_path):
         resp = await client.get("/api/ask/examples", params={"target": "demo"})
     assert resp.status_code == 200
     body = resp.json()
-    assert body["source"] == "introspection"
-    assert len(body["examples"]) == 3
-    # No hardcoded e-commerce prompt leaks through.
-    joined = " ".join(body["examples"]).lower()
-    assert "top 10 customers by revenue" not in joined
+    # Without known tables there is no question Ask could answer from them.
+    assert body == {"examples": [], "source": "introspection"}
 
 
 @pytest.mark.asyncio

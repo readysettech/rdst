@@ -1,5 +1,7 @@
 """MySQL Deep Analyze executes only supported, bounded SELECTs."""
 
+import time
+
 from features.analyze.functions.explain_analysis import (
     _extract_mysql_actual_time, _extract_mysql_rows_returned, _mysql_analyze_sql,
 )
@@ -100,6 +102,104 @@ def test_mysql_actual_time_is_the_root_last_row_time_times_loops():
     estimate_only = "-> Table scan on t  (cost=1 rows=5)\n"
     assert _extract_mysql_actual_time([{"EXPLAIN": estimate_only}]) is None
     assert _extract_mysql_actual_time([]) is None
+
+
+# MySQL 8.4 EXPLAIN ANALYZE output: the correlated COUNT runs once per returned row, after the
+# Limit iterator hands the row over, so the root's time excludes it.
+_DEPENDENT_PROJECTION_PLAN = (
+    "-> Limit: 10 row(s)  (cost=0.908 rows=1) (actual time=0.0138..0.0204 rows=10 loops=1)\n"
+    "    -> Filter: (customers.segment = 'partner')  (cost=0.908 rows=1) "
+    "(actual time=0.0117..0.0177 rows=10 loops=1)\n"
+    "        -> Index scan on customers using PRIMARY  (cost=0.908 rows=10) "
+    "(actual time=0.00607..0.0101 rows=30 loops=1)\n"
+    "-> Select #2 (subquery in projection; dependent)\n"
+    "    -> Aggregate: count(0)  (cost=1666 rows=1) (actual time=11.8..11.8 rows=1 loops=10)\n"
+    "        -> Filter: (orders.customer_id = customers.id)  (cost=861 rows=8049) "
+    "(actual time=0.17..11.8 rows=40 loops=10)\n"
+    "            -> Table scan on orders  (cost=861 rows=80494) "
+    "(actual time=0.169..8.36 rows=80000 loops=10)\n"
+)
+
+
+def test_mysql_actual_time_includes_subqueries_in_projection():
+    assert abs(_extract_mysql_actual_time([{"EXPLAIN": _DEPENDENT_PROJECTION_PLAN}])
+               - (0.0204 + 118)) < 1e-9
+    assert abs(_extract_mysql_actual_time([{"EXPLAIN": _DEPENDENT_PROJECTION_PLAN}], 125.0)
+               - (0.0204 + 118)) < 1e-9
+    # A subquery nested in another subquery's projection runs outside both trees.
+    nested = (
+        "-> Limit: 3 row(s)  (cost=202 rows=3) (actual time=0.0262..0.0273 rows=3 loops=1)\n"
+        "    -> Covering index scan on c using PRIMARY  (cost=202 rows=2000) "
+        "(actual time=0.0256..0.0263 rows=3 loops=1)\n"
+        "-> Select #2 (subquery in projection; dependent)\n"
+        "    -> Aggregate: max(o.total)  (cost=1666 rows=1) "
+        "(actual time=5.14..5.14 rows=1 loops=3)\n"
+        "    -> Select #3 (subquery in projection; dependent)\n"
+        "        -> Aggregate: count(0)  (cost=1666 rows=1) "
+        "(actual time=4.73..4.73 rows=1 loops=3)\n")
+    assert abs(_extract_mysql_actual_time([{"EXPLAIN": nested}])
+               - (0.0273 + 5.14 * 3 + 4.73 * 3)) < 1e-9
+    # A subquery in a condition is nested under its Filter, whose time already includes it.
+    condition = (
+        "-> Limit: 10 row(s)  (cost=202 rows=10) (actual time=6.18..59.6 rows=10 loops=1)\n"
+        "    -> Filter: ((customers.segment = 'partner') and ((select #2) > 39))  "
+        "(cost=202 rows=200) (actual time=6.18..59.6 rows=10 loops=1)\n"
+        "        -> Table scan on customers  (cost=202 rows=2000) "
+        "(actual time=0.0187..0.0227 rows=30 loops=1)\n"
+        "        -> Select #2 (subquery in condition; dependent)\n"
+        "            -> Aggregate: count(0)  (cost=1666 rows=1) "
+        "(actual time=5.95..5.95 rows=1 loops=10)\n")
+    assert _extract_mysql_actual_time([{"EXPLAIN": condition}]) == 59.6
+
+
+def test_mysql_actual_time_caps_projection_subqueries_an_iterator_already_ran():
+    # Sorting on the subquery runs it inside the Sort; the measured round trip bounds the sum.
+    sorted_on_subquery = (
+        "-> Limit: 3 row(s)  (cost=202 rows=3) (actual time=9533..9533 rows=3 loops=1)\n"
+        "    -> Sort: (select #2), limit input to 3 row(s) per chunk  (cost=202 rows=2000) "
+        "(actual time=9533..9533 rows=3 loops=1)\n"
+        "        -> Covering index scan on c using PRIMARY  (cost=202 rows=2000) "
+        "(actual time=0.0264..0.311 rows=2000 loops=1)\n"
+        "-> Select #2 (subquery in projection; dependent)\n"
+        "    -> Aggregate: count(0)  (cost=1666 rows=1) "
+        "(actual time=4.77..4.77 rows=1 loops=2000)\n")
+    assert _extract_mysql_actual_time([{"EXPLAIN": sorted_on_subquery}], 9541.5) == 9541.5
+    # The root's own measurement is the floor.
+    assert _extract_mysql_actual_time([{"EXPLAIN": sorted_on_subquery}], 9000.0) == 9533
+
+
+def test_mysql_analyze_times_dependent_subqueries(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from features.analyze.functions import explain_analysis
+
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+    cursor = conn.cursor.return_value.__enter__.return_value
+    cursor.fetchone.side_effect = [
+        {"EXPLAIN": '{"query_block": {"select_id": 1}}'}, {"VERSION()": "8.4.13"},
+        {"CONNECTION_ID()": 7}]
+    worker_conn = MagicMock()
+    worker_cursor = worker_conn.cursor.return_value.__enter__.return_value
+    worker_cursor.fetchone.return_value = {"CONNECTION_ID()": 8}
+    # The statement's round trip spans the subquery's work.
+    worker_cursor.execute.side_effect = lambda sql: time.sleep(0.15 if "ANALYZE" in sql else 0)
+    worker_cursor.fetchall.return_value = [{"EXPLAIN": _DEPENDENT_PROJECTION_PLAN}]
+    monkeypatch.setattr(explain_analysis, "resolve_connection_params",
+                        lambda **kw: {"password": ""})
+    monkeypatch.setattr(explain_analysis, "_mysql_connection", lambda *args: conn)
+    monkeypatch.setattr(explain_analysis, "_mysql_restore_table_case", lambda cur, run, sql: sql)
+    monkeypatch.setattr(explain_analysis, "create_mysql_connection_from_params",
+                        lambda *args, **kwargs: worker_conn)
+
+    result = explain_analysis._execute_mysql_explain_analyze(
+        "SELECT customers.id, (SELECT COUNT(*) FROM orders "
+        "WHERE orders.customer_id = customers.id) AS order_count FROM customers "
+        "WHERE customers.segment = 'partner' ORDER BY customers.id LIMIT 10",
+        {}, non_interactive=True, statement_timeout_ms=5000)
+
+    assert result["success"] and result["plan_format"] == "analyze"
+    assert abs(result["execution_time_ms"] - (0.0204 + 118)) < 1e-9
 
 
 def test_mysql_analyze_reports_the_plan_time_not_the_wall_clock(monkeypatch):

@@ -15,7 +15,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Iterable
 
-from features.monitor.analysis_digest import digest_for_ref, library_analysis_jobs, summary_for_job
+from features.monitor.analysis_digest import (analyzed_status, digest_for_ref,
+                                              library_analysis_jobs, summary_for_job)
 from features.monitor.connection import ANSWERED
 from features.monitor.db_actions import concurrent_index_sql
 from features.monitor.naming import target_names
@@ -653,7 +654,8 @@ def _state(key: str, items: list[dict[str, Any]], latency_change: float | None,
 def _query_page(store: MonitorStore, target: str, start: int, end: int, seconds: int,
                 prior_covered: bool, sort: str, filter: str, q: str, limit: int,
                 offset: int, only: str | None, keys: list[str] | None = None,
-                locate: str | None = None, active_order: list[str] | None = None
+                locate: str | None = None, active_order: list[str] | None = None,
+                linked: str | None = None
                 ) -> tuple[list[str], int, dict, list, float, dict, int | None]:
     current_sql, cp = _complete("stmt_series", _STMT_FIELDS, store, target, start, end, None, None)
     prior_sql, pp = _complete("stmt_series", _STMT_FIELDS, store, target,
@@ -675,7 +677,8 @@ def _query_page(store: MonitorStore, target: str, start: int, end: int, seconds:
            "ABS(c.ms/c.calls/(p.ms/p.calls)-1)>=0.2) significant,"
            "(? AND c.calls>0 AND COALESCE(p.calls,0)=0) fresh,"
            "ui.efficiency_score score,COALESCE(ui.fix_ready,0) fix_ready,"
-           "COALESCE(ui.analyzed,0) analyzed,COALESCE(ui.assessed,0) assessed,COALESCE(ui.findings,0) findings,"
+           "COALESCE(ui.analyzed,0) analyzed,ui.efficient efficient,"
+           "COALESCE(ui.assessed,0) assessed,COALESCE(ui.findings,0) findings,"
            "EXISTS (SELECT 1 FROM inbox_item i WHERE i.target=t.target AND i.subject=k.query_key "
            "AND i.state IN ('new','seen') AND i.delivery='digest') watch,"
            "EXISTS (SELECT 1 FROM inbox_item i WHERE i.target=? AND i.subject=k.query_key "
@@ -686,14 +689,14 @@ def _query_page(store: MonitorStore, target: str, start: int, end: int, seconds:
            "LEFT JOIN query_prior pr ON pr.target=? AND pr.query_key=k.query_key "
            "LEFT JOIN query_text t ON t.target=? AND t.query_key=k.query_key "
            "LEFT JOIN query_ui ui ON ui.target=t.target AND ui.query_key=k.query_key "
-           "WHERE k.query_key!=? AND COALESCE(ui.workload,1)=1 "
+           "WHERE k.query_key!=? AND (k.query_key=? OR COALESCE(ui.workload,1)=1 "
            "AND NOT EXISTS (SELECT 1 FROM system_query x "
-           "WHERE x.target=? AND x.query_key=k.query_key)),"
+           "WHERE x.target=? AND x.query_key=k.query_key))),"
            "selected AS (SELECT * FROM facts WHERE " )
     conditions = ["1"]
     parameters = (*cp, *pp, target, target, start, PRIOR_CALLS, PRIOR_CALLS,
                   int(prior_covered), int(prior_covered),
-                  target, target, end, target, target, EVERYTHING_ELSE, target)
+                  target, target, end, target, target, EVERYTHING_ELSE, linked, target)
     if only is not None:
         conditions.append("query_key=?")
         parameters += (only,)
@@ -720,7 +723,11 @@ def _query_page(store: MonitorStore, target: str, start: int, end: int, seconds:
     elif filter == "fix_ready":
         conditions.append("fix_ready AND NOT attention AND NOT watch")
     elif filter == "healthy":
-        conditions.append("analyzed AND NOT fix_ready AND NOT attention AND NOT watch")
+        conditions.append("analyzed AND NOT fix_ready AND efficient AND NOT attention "
+                          "AND NOT watch")
+    elif filter == "no_fix":
+        conditions.append("analyzed AND NOT fix_ready AND NOT efficient AND NOT attention "
+                          "AND NOT watch")
     elif filter == "not_analyzed":
         conditions.append("NOT analyzed AND NOT attention AND NOT watch")
     elif filter == "analyzed":
@@ -792,9 +799,13 @@ def queries(store: MonitorStore, target: str, range: str, now: int, *, sort: str
     plan = queue_plan(store, target, now)
     # The queue analyzes by the same impact the list sorts by, so its rows sit where they rank.
     active_order = None
+    # One query an Inbox item links to (a stuck bare pg_sleep) opens by key even when the list
+    # leaves it out.
+    linked = only if only is not None and store.read(
+        "SELECT 1 FROM inbox_item WHERE target=? AND subject=? LIMIT 1", (target, only)) else None
     keys, total, counts, composition, db_ms, colors, located = _query_page(
         store, target, start, end, seconds, prior_covered, sort, filter, q, limit, offset, only,
-        keys, locate, active_order)
+        keys, locate, active_order, linked)
     mini_rows = stmt_rows(store, target, start, end, keys, step=step) if keys else []
     current = totals_by_key(mini_rows)
     prior = stmt_totals(store, target, start - seconds, start, keys) if compare and keys else {}
@@ -803,7 +814,7 @@ def queries(store: MonitorStore, target: str, range: str, now: int, *, sort: str
         "AND query_key IN (SELECT value FROM json_each(?))", (target, start, json.dumps(keys)))}
     texts, entries = query_texts(store, target, keys)
     allowed = workload_keys(store, target, keys, texts)
-    keys = [key for key in keys if key in allowed]
+    keys = [key for key in keys if key in allowed or key == linked]
     names = target_names(store, target, texts)
     bases = {key: display_name(texts[key]) if texts.get(key) else f"Query {key}" for key in keys}
     family_sizes: dict[str, int] = defaultdict(int)
@@ -1357,8 +1368,11 @@ def _fallback_incident(item: dict[str, Any], body: dict[str, Any]) -> dict[str, 
         return None
     start = item["created_at"]
     duration = body.get("duration_s") or (body.get("numbers") or {}).get("duration_s")
-    if item["type"] == "stuck_query" and isinstance(duration, (int, float)):
-        start = int(item["created_at"] - duration)
+    if item["type"] == "stuck_query" and isinstance(body.get("started_at"), (int, float)):
+        start = int(body["started_at"])
+    elif item["type"] == "stuck_query" and isinstance(duration, (int, float)):
+        # The duration was read when the item was last updated.
+        start = int(item["updated_at"] - duration)
     end = item["resolved_at"] if item.get("resolved_by") == "code" else None
     return {"start": start, "end": end,
             "ongoing": end is None and item["state"] not in ("resolved", "dismissed"),
@@ -1647,7 +1661,9 @@ def query_status(stuck: bool, job: dict[str, Any] | None, digest: dict[str, Any]
         return "analyzing"
     if fix:
         return "fix_suggested"
-    return "healthy" if digest else "not_analyzed"
+    if not digest:
+        return "not_analyzed"
+    return analyzed_status(digest)
 
 
 def hourly_means(store: MonitorStore, target: str, keys: list[str],
@@ -1700,6 +1716,16 @@ def _also_note(description: Any) -> dict[str, Any]:
     """A suggestion's first sentence as its title, and the rest, whole, as its detail."""
     title, *rest = _SENTENCE_END.split(" ".join(str(description).split()), maxsplit=1)
     return {"title": title, "detail": rest[0] if rest else None}
+
+
+def _readyset_facts(cacheability: Any) -> dict[str, Any]:
+    """The stored cacheability verdict as the page's facts. Only a check that ran against
+    Readyset is verified; a static screen's blockers still count."""
+    if not isinstance(cacheability, dict) or not cacheability.get("checked"):
+        return {"blockers": [], "verified": False}
+    return {"blockers": [str(issue) for issue in cacheability.get("issues") or []],
+            "verified": cacheability.get("method") not in (None, "static_analysis",
+                                                           "readyset_unavailable")}
 
 
 def analysis_view(store: MonitorStore, target: str, key: str, digest: dict[str, Any],
@@ -1801,7 +1827,7 @@ def analysis_view(store: MonitorStore, target: str, key: str, digest: dict[str, 
                            "size": None, "write_cost": None}
             if fix and fix.get("sql") else None,
             "plan_findings": findings, "rewrites": rewrites, "also": also,
-            "readyset": {"blockers": [], "verified": False}, "benchmark": None,
+            "readyset": _readyset_facts(display.get("readyset_cacheability")), "benchmark": None,
             "run": {"model": str(llm.get("model") or getattr(analysis, "model", "") or "") or None,
                     "tokens": int(tokens) if tokens else None,
                     "seconds": _num(getattr(analysis, "duration_s", None)),
@@ -2046,6 +2072,10 @@ def _day_card(store: MonitorStore, target: str, now: int, midnight: int,
                          "AND state='done' AND sample=0 ORDER BY COALESCE(period_end,ts) DESC,"
                          "id DESC LIMIT 1", (target,))
     report = json.loads(reports[0]["report_json"] or "null") if reports else None
+    first = store.read("SELECT MIN(bucket_start) ts FROM (SELECT bucket_start FROM db_series "
+                       "WHERE target=? AND res=60 AND bucket_start>=? UNION ALL SELECT "
+                       "bucket_start FROM stmt_series WHERE target=? AND res=60 "
+                       "AND bucket_start>=?)", (target, midnight, target, midnight))[0]["ts"]
     mean, prior = today.get("mean_ms"), yesterday.get("mean_ms")
     return {"target": target, "qps": today.get("qps"), "qps_peak": today.get("peak_qps"),
             "qps_peak_at": today.get("peak_qps_at"), "mean_ms": mean,
@@ -2055,6 +2085,7 @@ def _day_card(store: MonitorStore, target: str, now: int, midnight: int,
             "cache_hit_reason": _cache_reason(report if isinstance(report, dict) else None, cache),
             "series": [{"ts": ts, "qps": qps} for ts, qps in zip(vitals.get("xs") or [],
                                                                  vitals.get("qps") or [])],
+            "first_reading_at": first,
             "report_id": reports[0]["id"] if reports else None,
             "report_day": (datetime.fromtimestamp(int(reports[0]["period_start"] or reports[0]["ts"]))
                            .date().isoformat() if reports else None)}
@@ -2164,20 +2195,24 @@ def home_log(store: MonitorStore, targets: list[str], since: int, limit: int,
     jobs = store.read(f"SELECT target,query_key,finished_at FROM analyze_job WHERE target IN "
                       f"({placeholders}) AND state='done' AND finished_at>=? AND reason!='user' "
                       "ORDER BY finished_at DESC LIMIT 100", (*targets, since))
-    ready = {(row["target"], row["query_key"]) for row in store.read(
-        f"SELECT target,query_key FROM query_ui WHERE target IN ({placeholders}) AND fix_ready=1",
-        tuple(targets))}
+    outcomes = {(row["target"], row["query_key"]): "fix" if row["fix_ready"] else "no_fix"
+                for row in store.read(
+                    f"SELECT target,query_key,fix_ready FROM query_ui WHERE target IN "
+                    f"({placeholders}) AND (fix_ready=1 OR efficient=0)", tuple(targets))}
     group: list[dict[str, Any]] = []
     for job in [*jobs, None]:
         if group and (job is None or job["target"] != group[0]["target"] or
                       group[-1]["finished_at"] - job["finished_at"] > 600):
             count = len(group)
-            fixes = sum((row["target"], row["query_key"]) in ready for row in group)
-            detail = ("both healthy" if count == 2 and not fixes else "all healthy" if not fixes
-                      else f"{fixes} with a fix")
+            found = [outcomes.get((row["target"], row["query_key"])) for row in group]
+            fixes, unfixed = found.count("fix"), found.count("no_fix")
+            detail = ", ".join([*([f"{fixes} with a fix"] if fixes else []),
+                                *([f"{unfixed} with no fix found"] if unfixed else [])]) \
+                or ("both healthy" if count == 2 else "all healthy")
+            single = "fix suggested" if fixes else "no fix found" if unfixed else "healthy"
             entries.append({"ts": group[0]["finished_at"],
                             "text": f"{count} new {'query' if count == 1 else 'queries'} analyzed",
-                            "detail": detail if count > 1 else ("fix suggested" if fixes else "healthy"),
+                            "detail": detail if count > 1 else single,
                             "link": {"kind": "queries", "target": group[0]["target"],
                                      "label": "Queries"}, "band": None})
             group = []
@@ -2335,14 +2370,14 @@ def home(store: MonitorStore, now: int, *, configured: list[dict[str, Any]] | No
                               f"WHERE target IN ({placeholders}) AND reason='user' AND state='done' "
                               "ORDER BY finished_at DESC,id DESC LIMIT 3", tuple(enabled_names)):
             names = names_by_target.setdefault(job["target"], target_names(store, job["target"]))
-            ready = store.read("SELECT fix_ready FROM query_ui WHERE target=? AND query_key=?",
-                               (job["target"], job["query_key"]))
+            ui = (store.read("SELECT fix_ready,efficient FROM query_ui WHERE target=? "
+                             "AND query_key=?", (job["target"], job["query_key"])) or [{}])[0]
             analyzed.append({"target": job["target"], "query_key": job["query_key"],
                              "display_name": names.get(job["query_key"]) or f"Query {job['query_key']}",
                              "analyzed_at": int(job["finished_at"] or 0),
                              "analysis_ref": job["analysis_ref"],
-                             "outcome": "fix_suggested" if ready and ready[0]["fix_ready"]
-                             else "healthy"})
+                             "outcome": "fix_suggested" if ui.get("fix_ready")
+                             else "no_fix" if ui.get("efficient") == 0 else "healthy"})
     return {"status": status, "day": day,
             "databases": [{key: value for key, value in row.items() if not key.startswith("_")}
                           for row in databases],
