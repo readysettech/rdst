@@ -30,3 +30,21 @@ export function userErrorClass(
   }
   return 'unknown'
 }
+
+/**
+ * The class of a provider sign-in, discovery or import error, for analytics: the server's
+ * error code when it sent one (a fixed slug), `network` when the request never got an
+ * answer, else the class its text matches, else `fallback`.
+ */
+export function providerErrorClass(
+  caught: unknown,
+  fallback = 'unknown'
+): string {
+  const code = (caught as { code?: unknown } | null | undefined)?.code
+  if (typeof code === 'string' && /^[a-z][a-z0-9_]{0,47}$/.test(code))
+    return code
+  if (caught instanceof TypeError) return 'network'
+  const text = caught instanceof Error ? caught.message : String(caught ?? '')
+  const found = userErrorClass(text)
+  return found === 'unknown' ? fallback : found
+}

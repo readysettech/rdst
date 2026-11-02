@@ -273,6 +273,49 @@ export type UserErrorClass =
 
 export type AnalysisAgeBucket = '<1h' | '1h-24h' | '1d-7d' | '7d+'
 
+/** Where an import of databases comes from: a hosting provider, or a CSV file. */
+export type ImportProvider =
+  | 'aws'
+  | 'supabase'
+  | 'neon'
+  | 'digitalocean'
+  | 'csv'
+
+/** How a provider sign-in proves who the user is. */
+export type ProviderSignInMethod = 'oauth' | 'api_key' | 'sso' | 'profile'
+
+/** A control the user used in a provider's sign-in panel or its import screens. */
+export type ProviderAction =
+  | 'sign_in'
+  | 'sign_out'
+  | 'retry'
+  | 'open_sign_in_link'
+  | 'open_verification_page'
+  | 'open_provider_console'
+  | 'save_key'
+  | 'cancel'
+  | 'choose_profile'
+  | 'add_profile'
+  | 'toggle_advanced'
+  | 'choose_account'
+  | 'choose_role'
+  | 'create_profile'
+  | 'back'
+  | 'toggle_region'
+  | 'add_region'
+  | 'discover'
+  | 'select'
+  | 'select_all'
+  | 'import'
+  | 'choose_csv'
+  | 'download_template'
+  | 'clear_import'
+  | 'skip_to_credentials'
+  | 'credentials_later'
+  | 'credentials_continue'
+  | 'turn_on_monitoring'
+  | 'monitoring_later'
+
 /**
  * Why a user chose to re-run rather than keep reading the stored analysis.
  * `stale` is age; `query-changed`/`target-changed` are the sharper causes once
@@ -364,6 +407,8 @@ export type RdstEventProperties = {
     agent_keys: string
     apps: string
     signed_out: string
+    /** The agents that are a desktop app's own copy rather than the user's CLI. */
+    app_agents: string
   }
   /** Run it for me on a readiness fix (Neon's CREATE EXTENSION), and how it went. */
   prereq_fix_run: { provider: string; ok: boolean }
@@ -381,6 +426,8 @@ export type RdstEventProperties = {
     app?: string
     /** For a scan: `auto` when RDST looked on opening, `click` when the user asked. */
     started?: 'auto' | 'click'
+    /** For a search with an agent: the user's CLI, or the copy a desktop app ships. */
+    via?: 'cli' | 'app'
   }
   /** RDST's own scan finished: what each method found, and which couldn't look. */
   find_scan_finished: {
@@ -404,6 +451,73 @@ export type RdstEventProperties = {
     clients: number
     folders: number
     failed: string
+  }
+  /** The user started a provider sign-in, or submitted a provider API key. */
+  provider_sign_in_started: {
+    provider: ImportProvider
+    method: ProviderSignInMethod
+  }
+  /** That sign-in ended. `error_class` is a fixed code or class, never the error's text. */
+  provider_sign_in_finished: {
+    provider: ImportProvider
+    method: ProviderSignInMethod
+    ok: boolean
+    error_class: string | null
+    seconds: number
+  }
+  /**
+   * The user used a control in a provider's panel or import screens. `surface` is the
+   * settings card or the add-database panel; `ok` and `error_class` are an action's outcome
+   * where it has one (sign out, create profile); `selected` is a toggle's new state; `count`
+   * is how many databases or regions the action covered.
+   */
+  provider_action: {
+    provider: ImportProvider
+    action: ProviderAction
+    surface?: 'card' | 'panel'
+    ok?: boolean
+    error_class?: string | null
+    selected?: boolean
+    count?: number
+  }
+  /** The browser blocked the sign-in tab, so the panel showed a link to open it. */
+  provider_sign_in_popup_blocked: { provider: ImportProvider }
+  /**
+   * Listing a provider's databases finished. `found` counts every database listed and
+   * `addable` the ones not yet in RDST; `errors` counts the parts that couldn't be listed.
+   * `auto` when RDST listed them on sign-in rather than on a click; `regions` is AWS only.
+   */
+  provider_discovery_finished: {
+    provider: ImportProvider
+    ok: boolean
+    found: number
+    addable: number
+    errors: number
+    error_class: string | null
+    auto: boolean
+    regions?: number
+    seconds: number
+  }
+  /** Adding the databases the user picked (or a CSV's rows) finished. */
+  provider_import_finished: {
+    provider: ImportProvider
+    ok: boolean
+    selected: number
+    imported: number
+    skipped: number
+    failed: number
+    error_class: string | null
+  }
+  /**
+   * The credentials step after an import closed: `connected` once every imported database
+   * connected, `later` when the user chose to set them up later. `saved` when they saved
+   * credentials at least once.
+   */
+  provider_credentials_finished: {
+    provider: ImportProvider
+    outcome: 'connected' | 'later'
+    databases: number
+    saved: boolean
   }
   /** The user picked one found database. `source` says whether RDST's scan or an agent
    * found it, and `found_by` the kinds of evidence (env, compose, docker, port...). */
@@ -438,6 +552,7 @@ export type RdstEventProperties = {
     state?: string
     found?: number
     seconds?: number
+    via?: 'cli' | 'app'
   }
   /** An agent's setup of one database ended, and how far it got. */
   find_agent_setup_finished: {

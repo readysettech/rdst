@@ -1089,3 +1089,18 @@ def test_prompt_works_in_a_fresh_agent_session():
     assert "call rdst_action with did_it" in text
     assert "rdst_query_timeseries" in text
     assert "quietly" not in text and all(ord(char) < 128 for char in text)
+
+
+def test_the_wsl_listener_leaves_the_main_servers_logging_alone():
+    """The desktop app waits for the main server's "Uvicorn running on" line at INFO, so the
+    WSL listener mustn't turn uvicorn's shared loggers down."""
+    import logging
+
+    error = logging.getLogger("uvicorn.error")
+    before = error.level
+    error.setLevel(logging.INFO)
+    try:
+        discovery.WslListener(lambda scope, receive, send: None, "127.0.0.1", 0)
+        assert error.getEffectiveLevel() == logging.INFO
+    finally:
+        error.setLevel(before)

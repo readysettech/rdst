@@ -143,8 +143,10 @@ def start_login(base_url: str, return_url: Optional[str] = None) -> dict[str, An
     return _OAUTH.start_login(return_url)
 
 
-def _mark_login(login_id: str, status: str, detail: str) -> None:
-    _OAUTH.mark_login(login_id, status, detail)
+def _mark_login(
+    login_id: str, status: str, detail: str, error_class: Optional[str] = None
+) -> None:
+    _OAUTH.mark_login(login_id, status, detail, error_class)
 
 
 def collect_outstanding_logins() -> bool:
@@ -206,6 +208,7 @@ def handle_callback(code: str, state: str) -> dict[str, Any]:
             "detail": "This sign-in link has expired. Start the sign-in again.",
         }
 
+    _OAUTH.report(login_id, "callback", True)
     try:
         body = _token_request(
             {
@@ -216,7 +219,7 @@ def handle_callback(code: str, state: str) -> dict[str, Any]:
             }
         )
     except (SupabaseAuthError, SupabaseOAuthUnconfigured) as exc:
-        _mark_login(login_id, "failed", str(exc))
+        _mark_login(login_id, "failed", str(exc), "token_exchange_failed")
         return {"state": "failed", "detail": str(exc)}
 
     tokens = _store_tokens(body)

@@ -532,6 +532,22 @@ def test_an_agent_step_carries_the_agents_version_and_how_it_went_over_the_list(
     assert sent[1]["step"] == "signin_retried" and "agent_version" not in sent[1]
 
 
+def test_an_agent_step_says_whether_the_agent_came_with_a_desktop_app(monkeypatch):
+    from shared import product_telemetry
+
+    sent = []
+    monkeypatch.setattr(product_telemetry, "enabled", lambda: True)
+    monkeypatch.setattr(product_telemetry, "capture", lambda event, props: sent.append(props))
+    product_telemetry.agent_connect_step(
+        "search_finished", attempt_id="a-via-1", tool="rdst_search_claude", ok=True,
+        agent_via="app")
+    product_telemetry.agent_connect_step(
+        "search_finished", attempt_id="a-via-2", tool="rdst_search_claude", ok=True,
+        agent_via="C:/Users/me/claude.exe")
+    assert sent[0]["agent_via"] == "app"
+    assert "agent_via" not in sent[1]
+
+
 @pytest.mark.parametrize("text", [
     "telemetry_enabled = false\n",
     "telemetry_enabled=false\n",

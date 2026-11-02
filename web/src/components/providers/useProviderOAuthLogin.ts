@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type {
-  FleetProviderLoginStart,
-  FleetProviderLoginStatus,
-} from '../../lib/useFleet'
+import { secondsSince, trackEvent } from '../../lib/analytics'
 import {
   isDesktopRuntime,
   registerDesktopOAuthProtocol,
 } from '../../lib/desktop'
+import type {
+  FleetProviderLoginStart,
+  FleetProviderLoginStatus,
+  FleetProviderSlug,
+} from '../../lib/useFleet'
+import { providerErrorClass } from '../../lib/userErrorClass'
 
 /** What the panel shows when a sign-in attempt fails, from any source. */
 export interface ProviderLoginFailure {
@@ -39,11 +42,13 @@ export interface UseProviderOAuthLoginReturn {
  * poll the login until the provider reports success or failure.
  */
 export function useProviderOAuthLogin({
+  provider,
   label,
   start,
   poll,
   onSuccess,
 }: {
+  provider: FleetProviderSlug
   /** Provider name, for the message a bare failed poll leaves behind. */
   label: string
   start: () => Promise<FleetProviderLoginStart>
@@ -61,10 +66,25 @@ export function useProviderOAuthLogin({
 
   // The poll runs on a timer owned by one login attempt: keying it on anything
   // but the login id would restart the timer whenever a caller re-renders.
-  const latest = useRef({ start, poll, onSuccess, label })
+  const latest = useRef({ start, poll, onSuccess, label, provider })
   useEffect(() => {
-    latest.current = { start, poll, onSuccess, label }
+    latest.current = { start, poll, onSuccess, label, provider }
   })
+
+  // One attempt reports one outcome, even when two polls in flight both see it settle.
+  const attempt = useRef<{ startedAt: number; reported: boolean } | null>(null)
+  const reportOutcome = useCallback((ok: boolean, errorClass?: string) => {
+    const current = attempt.current
+    if (!current || current.reported) return
+    current.reported = true
+    trackEvent('provider_sign_in_finished', {
+      provider: latest.current.provider,
+      method: 'oauth',
+      ok,
+      error_class: ok ? null : (errorClass ?? 'unknown'),
+      seconds: secondsSince(current.startedAt),
+    })
+  }, [])
 
   const beginLogin = useCallback(async () => {
     const desktop = isDesktopRuntime()
@@ -79,6 +99,9 @@ export function useProviderOAuthLogin({
     setLoginError(null)
     setLoginStatus(null)
     setBlockedAuthUrl(null)
+    attempt.current = { startedAt: Date.now(), reported: false }
+    const { provider } = latest.current
+    trackEvent('provider_sign_in_started', { provider, method: 'oauth' })
     try {
       await registerDesktopOAuthProtocol()
       const started = await latest.current.start()
@@ -89,16 +112,18 @@ export function useProviderOAuthLogin({
         popup.location.href = started.authorize_url
       } else {
         setBlockedAuthUrl(started.authorize_url)
+        trackEvent('provider_sign_in_popup_blocked', { provider })
       }
       setLoginId(started.login_id)
       setLoginStatus({ state: 'running' })
     } catch (caught) {
       popup?.close()
       setLoginError(asProviderFailure(caught))
+      reportOutcome(false, providerErrorClass(caught))
     } finally {
       setStarting(false)
     }
-  }, [])
+  }, [reportOutcome])
 
   useEffect(() => {
     if (!loginId) return
@@ -110,9 +135,14 @@ export function useProviderOAuthLogin({
         setLoginStatus(status)
         if (status.state === 'success') {
           setLoginId(null)
+          reportOutcome(true)
           await latest.current.onSuccess()
         } else if (status.state === 'failed') {
           setLoginId(null)
+          reportOutcome(
+            false,
+            providerErrorClass(new Error(status.detail ?? ''), 'login_failed')
+          )
           setLoginError({
             message: status.detail || `${latest.current.label} sign-in failed.`,
           })
@@ -121,6 +151,7 @@ export function useProviderOAuthLogin({
         if (!cancelled) {
           setLoginId(null)
           setLoginError(asProviderFailure(caught))
+          reportOutcome(false, providerErrorClass(caught))
         }
       }
     }
@@ -130,7 +161,7 @@ export function useProviderOAuthLogin({
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [loginId])
+  }, [loginId, reportOutcome])
 
   const clearError = useCallback(() => setLoginError(null), [])
 

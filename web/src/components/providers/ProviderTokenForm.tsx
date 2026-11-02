@@ -2,6 +2,9 @@ import { Alert } from '@rs/ui-new/alert'
 import { Button } from '@rs/ui-new/button'
 import { VStack } from '@rs/ui-new/stack'
 import { useState } from 'react'
+import { secondsSince, trackEvent } from '../../lib/analytics'
+import type { FleetProviderSlug } from '../../lib/useFleet'
+import { providerErrorClass } from '../../lib/userErrorClass'
 import { Field } from '../configure/Field'
 import { panelActions } from './cardShell'
 import {
@@ -15,6 +18,7 @@ import {
  * for a credential it refused.
  */
 export function ProviderTokenForm({
+  provider,
   name,
   label,
   placeholder,
@@ -27,6 +31,7 @@ export function ProviderTokenForm({
   onCancel,
   actions,
 }: {
+  provider: FleetProviderSlug
   name: string
   label: string
   placeholder: string
@@ -49,12 +54,27 @@ export function ProviderTokenForm({
   const submit = async () => {
     setSaving(true)
     setFailure(null)
+    const startedAt = Date.now()
+    const report = (ok: boolean, errorClass: string | null) =>
+      trackEvent('provider_sign_in_finished', {
+        provider,
+        method: 'api_key',
+        ok,
+        error_class: errorClass,
+        seconds: secondsSince(startedAt),
+      })
+    trackEvent('provider_action', { provider, action: 'save_key' })
+    trackEvent('provider_sign_in_started', { provider, method: 'api_key' })
+    let saved = false
     try {
       await save(value.trim())
+      saved = true
+      report(true, null)
       setValue('')
       await onSaved()
     } catch (caught) {
       setFailure(asProviderFailure(caught))
+      if (!saved) report(false, providerErrorClass(caught))
     } finally {
       setSaving(false)
     }
@@ -92,7 +112,10 @@ export function ProviderTokenForm({
               modifier="ghost"
               size={buttonSize}
               label="Cancel"
-              onClick={onCancel}
+              onClick={() => {
+                trackEvent('provider_action', { provider, action: 'cancel' })
+                onCancel()
+              }}
             />
           )}
           <Button

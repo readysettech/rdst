@@ -63,6 +63,22 @@ class ProviderOAuth:
         self._last_collect = 0.0
         self._tokens: Optional[dict[str, Any]] = None
         self._tokens_lock = threading.Lock()
+        # (login_id, stage) pairs already sent to product telemetry.
+        self._reported: set[tuple[str, str]] = set()
+
+    def report(
+        self, login_id: str, stage: str, ok: bool, error_class: Optional[str] = None
+    ) -> None:
+        """Send one `provider_oauth_step` event per login and stage."""
+        with self._registry_lock:
+            if (login_id, stage) in self._reported:
+                return
+            self._reported.add((login_id, stage))
+        from shared import product_telemetry
+
+        product_telemetry.provider_oauth_step(
+            self.provider, stage, ok=ok, error_class=error_class
+        )
 
     @property
     def waiting_detail(self) -> str:
@@ -135,14 +151,23 @@ class ProviderOAuth:
                     return login_id, entry
         return None, None
 
-    def mark_login(self, login_id: str, status: str, detail: str) -> None:
+    def mark_login(
+        self, login_id: str, status: str, detail: str, error_class: Optional[str] = None
+    ) -> None:
+        settled = False
         with self._registry_lock:
             entry = self.registry.get(login_id)
             if entry is not None and entry["status"] != "success":
                 # Success is sticky: concurrent pollers race for the one-time
                 # pickup, and the loser's "expired" must not erase the win.
+                settled = entry["status"] == "running" and status != "running"
                 entry["status"] = status
                 entry["detail"] = detail
+        if settled:
+            if status == "success":
+                self.report(login_id, "signed_in", True)
+            else:
+                self.report(login_id, "failed", False, error_class)
 
     def start_login(self, return_url: Optional[str] = None) -> dict[str, Any]:
         """Ask the keyservice to own the OAuth exchange for this sign-in.
@@ -181,7 +206,9 @@ class ProviderOAuth:
                 return None
             pickup_key = str(entry["pickup_key"])
         outcome = self.pickup(login_id, pickup_key, completion, untrusted=True)
-        if not outcome.get("rejected"):
+        if outcome.get("rejected"):
+            self.report(login_id, "callback", False, "completion_rejected")
+        else:
             with self._registry_lock:
                 entry = self.registry.get(login_id)
                 if entry is not None and not entry.get("completion"):
@@ -205,8 +232,11 @@ class ProviderOAuth:
         except self.broker_error as exc:
             if untrusted:
                 return {"state": "failed", "detail": str(exc), "rejected": True}
-            self.mark_login(login_id, "failed", str(exc))
+            self.mark_login(login_id, "failed", str(exc), "broker_error")
             return {"state": "failed", "detail": str(exc)}
+        if untrusted:
+            # The broker took the completion: the browser came back from the authorize screen.
+            self.report(login_id, "callback", True)
 
         status = str(body.get("status") or "").lower()
         if status == "pending":
@@ -216,7 +246,7 @@ class ProviderOAuth:
             try:
                 tokens = self.store_tokens(self.tokens_from_broker(body))
             except self.auth_error as exc:
-                self.mark_login(login_id, "failed", str(exc))
+                self.mark_login(login_id, "failed", str(exc), "token_rejected")
                 return {"state": "failed", "detail": str(exc)}
             from .identity import capture_provider_identity_async
 
@@ -228,7 +258,7 @@ class ProviderOAuth:
             detail = "This sign-in expired. Start the sign-in again."
         else:
             detail = str(body.get("detail") or f"{self.display_name} sign-in failed")
-        self.mark_login(login_id, "failed", detail)
+        self.mark_login(login_id, "failed", detail, "expired" if status == "expired" else "refused")
         return {"state": "failed", "detail": detail}
 
     def collect_outstanding_logins(self) -> bool:

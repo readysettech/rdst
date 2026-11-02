@@ -34,6 +34,12 @@ import {
   PrerequisitesChecker,
   TargetsPrerequisites,
 } from '../../features/prerequisites'
+import {
+  type ProviderAction,
+  type RdstEventProperties,
+  secondsSince,
+  trackEvent,
+} from '../../lib/analytics'
 import { fetchEnvRequirements } from '../../lib/api'
 import { downloadCsv } from '../../lib/csv'
 import { useMonitoringLimit } from '../../lib/monitor/hooks'
@@ -49,6 +55,7 @@ import {
   fetchFleetTargets,
   useFleetImport,
 } from '../../lib/useFleet'
+import { providerErrorClass } from '../../lib/userErrorClass'
 import type {
   FleetImportCompleteEvent,
   FleetImportProgressEvent,
@@ -347,6 +354,12 @@ export function ProviderImport({
     onStepChange?.(next)
   }
   const addTab = initialTab
+  const track = (
+    action: ProviderAction,
+    extra?: Omit<RdstEventProperties['provider_action'], 'provider' | 'action'>
+  ) => trackEvent('provider_action', { provider: addTab, action, ...extra })
+  // Whether the credentials step saved anything, for the step's closing event.
+  const credentialsSaved = useRef(false)
   const [credentialTargetNames, setCredentialTargetNames] = useState<string[]>(
     []
   )
@@ -440,16 +453,19 @@ export function ProviderImport({
   const activeConnected =
     addTab === 'aws' ? awsConnected : accountTab ? accountConnected : true
 
-  const toggleRegion = (region: string) =>
+  const toggleRegion = (region: string) => {
+    track('toggle_region', { selected: !selectedRegions.includes(region) })
     setSelectedRegions((current) =>
       current.includes(region)
         ? current.filter((r) => r !== region)
         : [...current, region]
     )
+  }
   // Picking a region from the dropdown promotes it into the toggle bar,
   // pre-selected; from there it toggles like the presets.
   const promoteRegion = (region: string) => {
     if (!region) return
+    track('add_region')
     setCustomRegions((current) =>
       current.includes(region) ? current : [...current, region]
     )
@@ -498,7 +514,19 @@ export function ProviderImport({
 
   const handleImport = async () => {
     if (!csvUpload) return
+    track('import')
     const completion = await runImport({ csv_content: csvUpload.content })
+    trackEvent('provider_import_finished', {
+      provider: 'csv',
+      ok: Boolean(completion?.success),
+      selected: completion
+        ? completion.imported + completion.skipped + completion.errors
+        : 0,
+      imported: completion?.imported ?? 0,
+      skipped: completion?.skipped ?? 0,
+      failed: completion?.errors ?? 0,
+      error_class: completion?.success ? null : 'import_failed',
+    })
     if (completion && completion.imported > 0) {
       await publishNewTargets()
       setCredentialTargetNames(completion.target_names)
@@ -509,11 +537,29 @@ export function ProviderImport({
     }
   }
 
-  const handleDiscoverPreview = async (input: FleetDiscoverInput) => {
+  const handleDiscoverPreview = async (
+    input: FleetDiscoverInput,
+    auto = false
+  ) => {
     setPreviewLoading(true)
     setPreviewErrors([])
+    const startedAt = Date.now()
+    const regions = 'regions' in input ? { regions: input.regions.length } : {}
     try {
       const preview = await fetchFleetDiscoverPreview(input)
+      trackEvent('provider_discovery_finished', {
+        provider: addTab,
+        ok: preview.errors.length === 0,
+        found: preview.members.length,
+        addable: preview.members.filter((member) => selectable(member)).length,
+        errors: preview.errors.length,
+        error_class: preview.errors.length
+          ? providerErrorClass(new Error(preview.errors[0]), 'discovery_error')
+          : null,
+        auto,
+        ...regions,
+        seconds: secondsSince(startedAt),
+      })
       setPreviewRegionCount('regions' in input ? input.regions.length : 0)
       setPreviewMembers(preview.members)
       setPreviewErrors(preview.errors)
@@ -525,6 +571,17 @@ export function ProviderImport({
         )
       )
     } catch (caught) {
+      trackEvent('provider_discovery_finished', {
+        provider: addTab,
+        ok: false,
+        found: 0,
+        addable: 0,
+        errors: 1,
+        error_class: providerErrorClass(caught),
+        auto,
+        ...regions,
+        seconds: secondsSince(startedAt),
+      })
       setPreviewErrors([
         caught instanceof Error ? caught.message : String(caught),
       ])
@@ -541,7 +598,7 @@ export function ProviderImport({
     if (previewMembers !== null || previewLoading) return
     if (autoDiscovered.current === accountTab) return
     autoDiscovered.current = accountTab
-    void handleDiscoverPreview({ provider: accountTab })
+    void handleDiscoverPreview({ provider: accountTab }, true)
   })
 
   const handleAddSelected = async () => {
@@ -550,9 +607,19 @@ export function ProviderImport({
       (member) => selectedNames.has(member.name) && selectable(member)
     )
     if (chosen.length === 0) return
+    track('import', { count: chosen.length })
     setAddingTargets(true)
     try {
       const added = await bulkAddFleetTargets(chosen)
+      trackEvent('provider_import_finished', {
+        provider: addTab,
+        ok: true,
+        selected: chosen.length,
+        imported: added.imported,
+        skipped: added.skipped,
+        failed: Math.max(0, chosen.length - added.imported - added.skipped),
+        error_class: null,
+      })
       await publishNewTargets()
       void queryClient.invalidateQueries({ queryKey: ['env-requirements'] })
       setPreviewMembers(null)
@@ -572,6 +639,15 @@ export function ProviderImport({
         setStep('credentials')
       }
     } catch (caught) {
+      trackEvent('provider_import_finished', {
+        provider: addTab,
+        ok: false,
+        selected: chosen.length,
+        imported: 0,
+        skipped: 0,
+        failed: chosen.length,
+        error_class: providerErrorClass(caught),
+      })
       setPreviewErrors([
         caught instanceof Error ? caught.message : String(caught),
       ])
@@ -632,6 +708,17 @@ export function ProviderImport({
   const credentialTargets = (fleetTargets?.members ?? []).filter((member) =>
     credentialTargetNames.includes(member.name)
   )
+  const credentialsFinished = (outcome: 'connected' | 'later') => {
+    track(
+      outcome === 'connected' ? 'credentials_continue' : 'credentials_later'
+    )
+    trackEvent('provider_credentials_finished', {
+      provider: addTab,
+      outcome,
+      databases: credentialTargetNames.length,
+      saved: credentialsSaved.current,
+    })
+  }
 
   if (step === 'prereqs' || step === 'credentials')
     return (
@@ -640,25 +727,46 @@ export function ProviderImport({
           <CredentialsStep
             targets={credentialTargets}
             keyringAvailable={envRequirements?.keyring_available ?? false}
-            onClose={finish}
-            onDone={() => setStep('prereqs')}
-            onSaved={(names) => publishNewTargets({ recheck: names })}
+            onClose={() => {
+              credentialsFinished('later')
+              finish()
+            }}
+            onDone={() => {
+              credentialsFinished('connected')
+              setStep('prereqs')
+            }}
+            onSaved={(names) => {
+              credentialsSaved.current = true
+              return publishNewTargets({ recheck: names })
+            }}
             privateTargetGroups={privateTargetGroups}
           />
         ) : credentialTargetNames.length === 1 ? (
           <PrerequisitesChecker
             target={credentialTargetNames[0]}
             layout="panel"
-            onContinue={() => turnOnMonitoring(credentialTargetNames[0])}
+            onContinue={() => {
+              track('turn_on_monitoring', { count: 1 })
+              turnOnMonitoring(credentialTargetNames[0])
+            }}
             continueLabel="Turn on monitoring"
-            onSkip={finish}
+            onSkip={() => {
+              track('monitoring_later')
+              finish()
+            }}
             skipLabel="Set up later"
           />
         ) : (
           <TargetsPrerequisites
             targets={credentialTargetNames}
-            onDone={finishImport}
-            onSkip={finish}
+            onDone={(monitored) => {
+              track('turn_on_monitoring', { ok: Boolean(monitored) })
+              finishImport(monitored)
+            }}
+            onSkip={() => {
+              track('monitoring_later')
+              finish()
+            }}
           />
         )}
       </Scrollable>
@@ -699,9 +807,10 @@ export function ProviderImport({
               size="small"
               label="Download template"
               className="self-start"
-              onClick={() =>
+              onClick={() => {
+                track('download_template')
                 downloadCsv(`${CSV_TEMPLATE}\n`, 'rdst-databases.csv')
-              }
+              }}
             />
             <input
               type="file"
@@ -714,7 +823,10 @@ export function ProviderImport({
               progress={importProgress}
               errors={importErrors}
               result={importResult}
-              onClear={clearImport}
+              onClear={() => {
+                track('clear_import')
+                clearImport()
+              }}
             />
           </VStack>
         </Show>
@@ -803,13 +915,17 @@ export function ProviderImport({
                       label={
                         allPreviewSelected ? 'Clear selection' : 'Select all'
                       }
-                      onClick={() =>
+                      onClick={() => {
+                        track('select_all', {
+                          selected: !allPreviewSelected,
+                          count: selectablePreviewNames.length,
+                        })
                         setSelectedNames(
                           allPreviewSelected
                             ? new Set()
                             : new Set(selectablePreviewNames)
                         )
-                      }
+                      }}
                     />
                   )}
                 </HStack>
@@ -850,12 +966,18 @@ export function ProviderImport({
                                 ? 'Clear selection'
                                 : 'Select all'
                             }
-                            onClick={() =>
+                            onClick={() => {
+                              const selectableRows = rows.filter((member) =>
+                                selectable(member)
+                              )
+                              track('select_all', {
+                                selected: !selectableRows.every((member) =>
+                                  selectedNames.has(member.name)
+                                ),
+                                count: selectableRows.length,
+                              })
                               setSelectedNames((current) => {
                                 const updated = new Set(current)
-                                const selectableRows = rows.filter((member) =>
-                                  selectable(member)
-                                )
                                 const allSelected = selectableRows.every(
                                   (member) => current.has(member.name)
                                 )
@@ -865,7 +987,7 @@ export function ProviderImport({
                                 }
                                 return updated
                               })
-                            }
+                            }}
                           />
                         )}
                       </HStack>
@@ -876,14 +998,15 @@ export function ProviderImport({
                             member={member}
                             showRegion={previewRegionCount > 1}
                             checked={selectedNames.has(member.name)}
-                            onCheckedChange={(next) =>
+                            onCheckedChange={(next) => {
+                              track('select', { selected: next })
                               setSelectedNames((current) => {
                                 const updated = new Set(current)
                                 if (next) updated.add(member.name)
                                 else updated.delete(member.name)
                                 return updated
                               })
-                            }
+                            }}
                           />
                         ))}
                       </div>
@@ -921,14 +1044,20 @@ export function ProviderImport({
               modifier="outline"
               label="Choose CSV file"
               disabled={isImporting}
-              onClick={() => csvFileInputRef.current?.click()}
+              onClick={() => {
+                track('choose_csv')
+                csvFileInputRef.current?.click()
+              }}
             />
             {reviewingImport ? (
               <Button
                 variant="primary"
                 modifier="solid"
                 label="Continue"
-                onClick={() => setStep('credentials')}
+                onClick={() => {
+                  track('skip_to_credentials')
+                  setStep('credentials')
+                }}
               />
             ) : (
               <Button
@@ -949,7 +1078,10 @@ export function ProviderImport({
                 variant="primary"
                 modifier="ghost"
                 label="Back to regions"
-                onClick={() => setPreviewMembers(null)}
+                onClick={() => {
+                  track('back')
+                  setPreviewMembers(null)
+                }}
                 disabled={addingTargets}
               />
             )}
@@ -972,7 +1104,11 @@ export function ProviderImport({
               aria-label="Discover"
               loading={previewLoading}
               disabled={addTab === 'aws' && selectedRegions.length === 0}
-              onClick={() =>
+              onClick={() => {
+                track(
+                  'discover',
+                  accountTab ? {} : { count: selectedRegions.length }
+                )
                 void handleDiscoverPreview(
                   accountTab
                     ? { provider: accountTab }
@@ -981,7 +1117,7 @@ export function ProviderImport({
                         profile: discoverProfile || undefined,
                       }
                 )
-              }
+              }}
             />
           )
         )}

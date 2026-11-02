@@ -8,7 +8,14 @@ import { Spinner } from '@rs/ui-new/spinner'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import {
+  type ProviderAction,
+  type ProviderSignInMethod,
+  type RdstEventProperties,
+  secondsSince,
+  trackEvent,
+} from '../../lib/analytics'
 import {
   FleetAwsLoginError,
   type FleetAwsLoginStatus,
@@ -22,6 +29,7 @@ import {
   startFleetAwsLogin,
   startFleetAwsSsoLogin,
 } from '../../lib/useFleet'
+import { providerErrorClass } from '../../lib/userErrorClass'
 import { Field } from '../configure/Field'
 import { COMPACT_CARD, panelActions } from '../providers/cardShell'
 import { AwsLogo } from '../providers/ProviderLogos'
@@ -69,6 +77,45 @@ function AwsErrorBlock({ error }: { error: FleetAwsLoginError }) {
     </VStack>
   )
 }
+
+/**
+ * Reports one AWS sign-in attempt: `started` on the click, then one outcome, even when two
+ * polls in flight both see the login settle.
+ */
+function useAwsSignInEvents(method: ProviderSignInMethod) {
+  const attempt = useRef<{ startedAt: number; reported: boolean } | null>(null)
+  const started = useCallback(() => {
+    attempt.current = { startedAt: Date.now(), reported: false }
+    trackEvent('provider_sign_in_started', { provider: 'aws', method })
+  }, [method])
+  const finished = useCallback(
+    (ok: boolean, errorClass?: string) => {
+      const current = attempt.current
+      if (!current || current.reported) return
+      current.reported = true
+      trackEvent('provider_sign_in_finished', {
+        provider: 'aws',
+        method,
+        ok,
+        error_class: ok ? null : (errorClass ?? 'unknown'),
+        seconds: secondsSince(current.startedAt),
+      })
+    },
+    [method]
+  )
+  return useMemo(() => ({ started, finished }), [started, finished])
+}
+
+const trackAws = (
+  action: ProviderAction,
+  extra?: Omit<RdstEventProperties['provider_action'], 'provider' | 'action'>
+) => trackEvent('provider_action', { provider: 'aws', action, ...extra })
+
+/** A failed or timed-out AWS login poll, as an analytics class. */
+const awsLoginFailureClass = (status: FleetAwsLoginStatus) =>
+  status.state === 'timeout'
+    ? 'timeout'
+    : providerErrorClass(new Error(status.detail), 'login_failed')
 
 const FIELD_LABEL = 'mb-1 block text-caption text-content-layout-3'
 const SELECT_TRIGGER = 'h-8.5 bg-surface-layout-2 text-body-small'
@@ -119,6 +166,7 @@ function AwsSsoWizard({
 
   const [finalizing, setFinalizing] = useState(false)
   const [finalizeError, setFinalizeError] = useState<string | null>(null)
+  const signInEvents = useAwsSignInEvents('sso')
 
   const loadAccounts = useCallback(async (start: string) => {
     setAccounts(null)
@@ -165,18 +213,21 @@ function AwsSsoWizard({
     setStarting(true)
     setSignInError(null)
     setLoginStatus(null)
+    signInEvents.started()
     try {
       const started = await startFleetAwsSsoLogin({
         start_url: startUrl,
         region,
       })
       if (started.state === 'already_signed_in' || !started.login_id) {
+        signInEvents.finished(true)
         goToAccounts()
         return
       }
       setLoginId(started.login_id)
       setLoginStatus({ state: 'running', detail: started.detail })
     } catch (caught) {
+      signInEvents.finished(false, providerErrorClass(caught))
       setSignInError(
         caught instanceof FleetAwsLoginError
           ? caught
@@ -185,7 +236,7 @@ function AwsSsoWizard({
     } finally {
       setStarting(false)
     }
-  }, [startUrl, region, goToAccounts])
+  }, [startUrl, region, goToAccounts, signInEvents])
 
   useEffect(() => {
     if (!loginId) return
@@ -197,9 +248,11 @@ function AwsSsoWizard({
         setLoginStatus(status)
         if (status.state === 'success') {
           setLoginId(null)
+          signInEvents.finished(true)
           goToAccounts()
         } else if (status.state === 'failed' || status.state === 'timeout') {
           setLoginId(null)
+          signInEvents.finished(false, awsLoginFailureClass(status))
           setSignInError(
             new FleetAwsLoginError(
               status.detail,
@@ -211,6 +264,7 @@ function AwsSsoWizard({
       } catch (caught) {
         if (!cancelled) {
           setLoginId(null)
+          signInEvents.finished(false, providerErrorClass(caught))
           setSignInError(
             caught instanceof FleetAwsLoginError
               ? caught
@@ -225,9 +279,10 @@ function AwsSsoWizard({
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [loginId, goToAccounts])
+  }, [loginId, goToAccounts, signInEvents])
 
   const selectAccount = (id: string) => {
+    trackAws('choose_account')
     setAccountId(id)
     setRoleName('')
     setFinalizeError(null)
@@ -250,6 +305,7 @@ function AwsSsoWizard({
         account_id: accountId,
         role_name: roleName,
       })
+      trackAws('create_profile', { ok: true, error_class: null })
       if (result.created) await onConnected(result.profile || profileName)
     } catch (caught) {
       // A deterministic name means a conflict is a profile for this exact
@@ -259,8 +315,13 @@ function AwsSsoWizard({
         caught instanceof FleetAwsLoginError &&
         caught.code === 'profile_exists'
       ) {
+        trackAws('create_profile', { ok: true, error_class: 'profile_exists' })
         await onConnected(profileName)
       } else {
+        trackAws('create_profile', {
+          ok: false,
+          error_class: providerErrorClass(caught),
+        })
         setFinalizeError(
           caught instanceof Error ? caught.message : String(caught)
         )
@@ -271,6 +332,7 @@ function AwsSsoWizard({
   }, [startUrl, region, accountId, roleName, onConnected])
 
   const backToConnect = () => {
+    trackAws('back')
     setLoginId(null)
     setLoginStatus(null)
     setSignInError(null)
@@ -289,7 +351,10 @@ function AwsSsoWizard({
       variant="primary"
       modifier="ghost"
       label="Cancel"
-      onClick={onCancel}
+      onClick={() => {
+        trackAws('cancel')
+        onCancel()
+      }}
     />
   )
 
@@ -320,6 +385,7 @@ function AwsSsoWizard({
                 href={loginStatus.verification_url}
                 target="_blank"
                 rel="noreferrer"
+                onClick={() => trackAws('open_verification_page')}
                 className="text-content-primary-soft underline-offset-4 hover:underline"
               >
                 Open the AWS verification page
@@ -348,7 +414,10 @@ function AwsSsoWizard({
               modifier="link"
               label={showAdvanced ? 'Hide advanced' : 'Advanced'}
               classMerge="h-auto p-0"
-              onClick={() => setShowAdvanced((v) => !v)}
+              onClick={() => {
+                trackAws('toggle_advanced', { selected: !showAdvanced })
+                setShowAdvanced((v) => !v)
+              }}
             />
             {showAdvanced && (
               <Field
@@ -431,7 +500,10 @@ function AwsSsoWizard({
                 name="aws-sso-role"
                 value={roleName}
                 placeholder="Select a role"
-                onValueChange={setRoleName}
+                onValueChange={(role) => {
+                  trackAws('choose_role')
+                  setRoleName(role)
+                }}
                 triggerClassName={SELECT_TRIGGER}
                 options={roles.map((role) => ({ value: role, label: role }))}
               />
@@ -463,7 +535,10 @@ function AwsSsoWizard({
               aria-label="Sign in with AWS SSO"
               loading={starting || Boolean(loginId)}
               disabled={!startUrl.trim() || !region.trim()}
-              onClick={() => void beginSignIn()}
+              onClick={() => {
+                trackAws('sign_in')
+                void beginSignIn()
+              }}
             />
           </>
         ) : step === 'account' ? (
@@ -482,7 +557,10 @@ function AwsSsoWizard({
               variant="primary"
               modifier="ghost"
               label="Back to accounts"
-              onClick={goToAccounts}
+              onClick={() => {
+                trackAws('back')
+                goToAccounts()
+              }}
             />
             {cancel}
             <Button
@@ -536,6 +614,20 @@ export function AwsConnectionPanel({
   const [starting, setStarting] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
   const [showAddProfile, setShowAddProfile] = useState(false)
+  const signInEvents = useAwsSignInEvents('profile')
+  const surface = compact ? 'card' : 'panel'
+  const chooseProfile = (name: string) => {
+    trackAws('choose_profile', { surface })
+    setProfile(name)
+  }
+  const addProfile = () => {
+    trackAws('add_profile', { surface })
+    setShowAddProfile(true)
+  }
+  const retry = () => {
+    trackAws('retry', { surface })
+    void refetch()
+  }
 
   const {
     data: aws,
@@ -588,15 +680,18 @@ export function AwsConnectionPanel({
       setStarting(true)
       setLoginError(null)
       setLoginStatus(null)
+      signInEvents.started()
       try {
         const started = await startFleetAwsLogin(profileName)
         if (started.state === 'already_signed_in') {
+          signInEvents.finished(true)
           await refetch()
           return
         }
         setLoginId(started.login_id)
         setLoginStatus({ state: 'running', detail: started.detail })
       } catch (caught) {
+        signInEvents.finished(false, providerErrorClass(caught))
         setLoginError(
           caught instanceof FleetAwsLoginError
             ? caught
@@ -606,7 +701,7 @@ export function AwsConnectionPanel({
         setStarting(false)
       }
     },
-    [refetch]
+    [refetch, signInEvents]
   )
 
   useEffect(() => {
@@ -619,9 +714,11 @@ export function AwsConnectionPanel({
         setLoginStatus(status)
         if (status.state === 'success') {
           setLoginId(null)
+          signInEvents.finished(true)
           await refetch()
         } else if (status.state === 'failed' || status.state === 'timeout') {
           setLoginId(null)
+          signInEvents.finished(false, awsLoginFailureClass(status))
           setLoginError(
             new FleetAwsLoginError(
               status.detail,
@@ -633,6 +730,7 @@ export function AwsConnectionPanel({
       } catch (caught) {
         if (!cancelled) {
           setLoginId(null)
+          signInEvents.finished(false, providerErrorClass(caught))
           setLoginError(
             caught instanceof FleetAwsLoginError
               ? caught
@@ -647,7 +745,7 @@ export function AwsConnectionPanel({
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [loginId, refetch])
+  }, [loginId, refetch, signInEvents])
 
   if (!enabled) return null
   if (isLoading) {
@@ -676,7 +774,7 @@ export function AwsConnectionPanel({
         title="Couldn't check AWS credentials"
         message={error instanceof Error ? error.message : String(error)}
         trustworthy="Your databases and saved reports are unaffected."
-        onRetry={() => void refetch()}
+        onRetry={retry}
       />
     )
   if (!aws) return null
@@ -709,7 +807,15 @@ export function AwsConnectionPanel({
     const signOut = () => {
       setSigningOut(true)
       void fleetAwsLogout()
-        .catch(() => {})
+        .then(
+          () => trackAws('sign_out', { surface, ok: true, error_class: null }),
+          (caught) =>
+            trackAws('sign_out', {
+              surface,
+              ok: false,
+              error_class: providerErrorClass(caught),
+            })
+        )
         .then(() => refetch())
         .finally(() => setSigningOut(false))
     }
@@ -739,7 +845,7 @@ export function AwsConnectionPanel({
                 id={profileSelectId}
                 name="fleet-discover-profile"
                 value={selectedProfile}
-                onValueChange={setProfile}
+                onValueChange={chooseProfile}
                 // Profile names run long (e.g. AdministratorAccess-<account>); keep
                 // the value on one truncated, left-aligned line.
                 triggerClassName={`${SELECT_TRIGGER} [&>span]:min-w-0 [&>span]:text-left [&>span]:whitespace-nowrap`}
@@ -821,7 +927,7 @@ export function AwsConnectionPanel({
           modifier="link"
           label="Add another account or role"
           classMerge="h-auto self-start p-0"
-          onClick={() => setShowAddProfile(true)}
+          onClick={addProfile}
         />
       </VStack>
     )
@@ -847,11 +953,11 @@ export function AwsConnectionPanel({
           fullWidth
           className="mt-auto"
           label="Sign in"
-          onClick={() =>
-            onSignIn
-              ? onSignIn()
-              : void beginLogin(selectedProfile || aws.available_profiles[0])
-          }
+          onClick={() => {
+            trackAws('sign_in', { surface })
+            if (onSignIn) onSignIn()
+            else void beginLogin(selectedProfile || aws.available_profiles[0])
+          }}
         />
       </div>
     )
@@ -875,6 +981,7 @@ export function AwsConnectionPanel({
                 href={loginStatus.verification_url}
                 target="_blank"
                 rel="noreferrer"
+                onClick={() => trackAws('open_verification_page')}
                 className="text-content-primary-soft underline-offset-4 hover:underline"
               >
                 Open the AWS verification page
@@ -902,7 +1009,7 @@ export function AwsConnectionPanel({
               id={profileSelectId}
               name="fleet-discover-profile"
               value={selectedProfile || aws.available_profiles[0]}
-              onValueChange={setProfile}
+              onValueChange={chooseProfile}
               triggerClassName={SELECT_TRIGGER}
               options={aws.available_profiles.map((name) => ({
                 value: name,
@@ -916,7 +1023,7 @@ export function AwsConnectionPanel({
             modifier="link"
             label="Add another profile"
             classMerge="h-auto self-start p-0"
-            onClick={() => setShowAddProfile(true)}
+            onClick={addProfile}
           />
         </>
       ) : (
@@ -942,7 +1049,7 @@ export function AwsConnectionPanel({
               modifier="ghost"
               label="Check again"
               loading={isFetching}
-              onClick={() => void refetch()}
+              onClick={retry}
             />
             <Button
               variant="primary"
@@ -950,9 +1057,10 @@ export function AwsConnectionPanel({
               label="Sign in with AWS SSO"
               aria-label="Sign in with AWS SSO"
               loading={starting || Boolean(loginId)}
-              onClick={() =>
+              onClick={() => {
+                trackAws('sign_in', { surface })
                 void beginLogin(selectedProfile || aws.available_profiles[0])
-              }
+              }}
             />
           </>
         )}

@@ -8,11 +8,13 @@ import { Text } from '@rs/ui-new/text'
 import { useQuery } from '@tanstack/react-query'
 import type { ComponentType, ReactNode } from 'react'
 import { useState } from 'react'
+import { type ProviderAction, trackEvent } from '../../lib/analytics'
 import type {
   FleetProviderLoginStart,
   FleetProviderLoginStatus,
   FleetProviderSlug,
 } from '../../lib/useFleet'
+import { providerErrorClass } from '../../lib/userErrorClass'
 import { COMPACT_CARD, panelActions, shorten } from './cardShell'
 import { useProviderOAuthLogin } from './useProviderOAuthLogin'
 
@@ -118,6 +120,7 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
     starting,
     beginLogin,
   } = useProviderOAuthLogin({
+    provider: slug,
     label,
     start: client.startLogin ?? noBrowserSignIn,
     poll: client.pollLogin ?? noBrowserSignIn,
@@ -125,6 +128,16 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
   })
 
   const testId = `${slug}-connection-panel`
+  const track = (
+    action: ProviderAction,
+    extra?: { ok?: boolean; error_class?: string | null }
+  ) =>
+    trackEvent('provider_action', {
+      provider: slug,
+      action,
+      surface: compact ? 'card' : 'panel',
+      ...extra,
+    })
 
   if (!enabled) return null
   if (isLoading) {
@@ -153,13 +166,19 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
         title={`Couldn't check the ${label} connection`}
         message={error instanceof Error ? error.message : String(error)}
         trustworthy="Your databases and saved reports are unaffected."
-        onRetry={() => void refetch()}
+        onRetry={() => {
+          track('retry')
+          void refetch()
+        }}
       />
     )
   if (!status) return null
 
   if (!status.connected && status.unreachable) {
-    const retry = () => void refetch()
+    const retry = () => {
+      track('retry')
+      void refetch()
+    }
     return compact ? (
       <div className={COMPACT_CARD} data-testid={testId}>
         <HStack className="gap-2 items-center">
@@ -206,7 +225,14 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
       setSigningOut(true)
       void client
         .logout()
-        .catch(() => {})
+        .then(
+          () => track('sign_out', { ok: true, error_class: null }),
+          (caught) =>
+            track('sign_out', {
+              ok: false,
+              error_class: providerErrorClass(caught),
+            })
+        )
         .then(() => refetch())
         .finally(() => setSigningOut(false))
     }
@@ -319,6 +345,7 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
           label={connectLabel}
           loading={Boolean(loginId)}
           onClick={() => {
+            track('sign_in')
             if (onSignIn) onSignIn()
             else if (oauth) void beginLogin()
           }}
@@ -359,6 +386,7 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
                 target="_blank"
                 rel="noreferrer"
                 className="text-content-primary-soft underline-offset-4 hover:underline"
+                onClick={() => track('open_sign_in_link')}
               >
                 Popup blocked. Open sign-in.
               </a>
@@ -391,7 +419,10 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
             label={`Sign in with ${label}`}
             aria-label={`Sign in with ${label}`}
             loading={signingIn}
-            onClick={() => void beginLogin()}
+            onClick={() => {
+              track('sign_in')
+              void beginLogin()
+            }}
           />
         )}
     </VStack>

@@ -12,6 +12,9 @@ export interface DiscoveryAgent {
   name: string
   /** Whether it has a sign-in it can run with; null when it can't say. */
   signed_in?: boolean | null
+  /** `app` for the copy the Claude or Codex desktop app ships, which RDST runs when the
+   * user has no CLI of their own. */
+  via?: 'cli' | 'app'
 }
 
 export type DiscoveryProvider =

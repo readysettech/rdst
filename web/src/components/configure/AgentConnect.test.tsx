@@ -846,6 +846,7 @@ describe('AgentConnect finding databases', () => {
       agent_keys: '',
       apps: 'claude',
       signed_out: '',
+      app_agents: '',
     })
     await waitFor(() =>
       expect(calls.some(([url]) => url.endsWith('/open-app'))).toBe(true)
@@ -861,6 +862,87 @@ describe('AgentConnect finding databases', () => {
       option: 'open_app',
       app: 'claude',
     })
+  })
+
+  it("searches with the Claude app's own Claude Code when there's no CLI", async () => {
+    const APP_AGENT = {
+      key: 'claude:local',
+      id: 'claude',
+      side: 'local',
+      label: 'Claude Code',
+      name: 'Claude',
+      signed_in: true,
+      via: 'app',
+    }
+    const calls = routeFetch([APP_AGENT], ['claude'])
+    renderFull()
+    const card = await screen.findByTestId('search-with-agent')
+    expect(card.textContent).toContain('Search for databases with Claude')
+    expect(card.textContent).toContain('Claude Code from your Claude app helps')
+    expect(trackEvent).toHaveBeenCalledWith('find_view_shown', {
+      agents: 1,
+      agent_keys: 'claude:local',
+      apps: 'claude',
+      signed_out: '',
+      app_agents: 'claude:local',
+    })
+    // The big card takes over from the start-in-the-app link, as it does for a CLI.
+    expect(screen.queryByTestId('open-in-app')).toBeNull()
+    fireEvent.click(card)
+    expect(trackEvent).toHaveBeenCalledWith('find_option_chosen', {
+      option: 'search_with_agent',
+      started: 'click',
+      via: 'app',
+    })
+    expect(
+      (await screen.findByTestId('find-databases-title')).textContent
+    ).toBe('Searching for databases with Claude')
+    await waitFor(() =>
+      expect(calls.some(([url]) => url.endsWith('/discover'))).toBe(true)
+    )
+    const started = calls.find(([url]) => url.endsWith('/discover'))
+    expect(JSON.parse(String(started?.[1]?.body))).toEqual({
+      agent: 'claude:local',
+      scan: 'scan-1',
+    })
+    expect(await screen.findByTestId('search-trace')).toBeTruthy()
+    await waitFor(
+      () =>
+        expect(trackEvent).toHaveBeenCalledWith(
+          'find_agent_search',
+          expect.objectContaining({ stage: 'finished', state: 'done' })
+        ),
+      { timeout: 4000 }
+    )
+    expect(
+      (await screen.findAllByTestId('found-database'))[0].textContent
+    ).toContain('reports')
+  })
+
+  it("asks for a sign-in when the app's Claude Code hasn't got one yet", async () => {
+    const calls = routeFetch(
+      [
+        {
+          key: 'claude:local',
+          id: 'claude',
+          side: 'local',
+          label: 'Claude Code',
+          name: 'Claude',
+          signed_in: false,
+          via: 'app',
+        },
+      ],
+      ['claude']
+    )
+    renderFull()
+    fireEvent.click(await screen.findByTestId('search-with-agent'))
+    const signIn = await screen.findByTestId('agent-sign-in')
+    expect(signIn.textContent).toContain(
+      "RDST runs the Claude Code that came with your Claude app, and it isn't signed in yet."
+    )
+    expect(signIn.textContent).toContain('carry on in the Claude app')
+    expect(screen.getByTestId('agent-sign-in-app')).toBeTruthy()
+    expect(calls.some(([url]) => url.endsWith('/scan'))).toBe(false)
   })
 
   it('reports what the scan found and what the user did with it, never paths', async () => {

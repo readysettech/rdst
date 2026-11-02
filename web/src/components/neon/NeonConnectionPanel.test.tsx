@@ -1,9 +1,14 @@
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderWithClient } from '@/test-utils'
+import { type RdstEvent, trackEvent } from '../../lib/analytics'
 import { fetchFleetNeonStatus, setFleetNeonKey } from '../../lib/useFleet'
 import { NeonConnectionPanel } from './NeonConnectionPanel'
 
+vi.mock('../../lib/analytics', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/analytics')>()),
+  trackEvent: vi.fn(),
+}))
 vi.mock('../../lib/useFleet', () => ({
   fetchFleetNeonStatus: vi.fn(),
   FleetProviderError: class FleetProviderError extends Error {
@@ -16,6 +21,12 @@ vi.mock('../../lib/useFleet', () => ({
   fleetNeonLogout: vi.fn(),
   setFleetNeonKey: vi.fn(),
 }))
+
+const tracked = (event: RdstEvent) =>
+  vi
+    .mocked(trackEvent)
+    .mock.calls.filter(([name]) => name === event)
+    .map(([, properties]) => properties)
 
 afterEach(() => {
   cleanup()
@@ -194,6 +205,21 @@ describe('NeonConnectionPanel', () => {
       expect(setFleetNeonKey).toHaveBeenCalledWith('napi_secret')
     )
     await waitFor(() => expect(fetchFleetNeonStatus).toHaveBeenCalledTimes(2))
+    expect(tracked('provider_sign_in_started')).toEqual([
+      { provider: 'neon', method: 'api_key' },
+    ])
+    expect(tracked('provider_sign_in_finished')).toEqual([
+      {
+        provider: 'neon',
+        method: 'api_key',
+        ok: true,
+        error_class: null,
+        seconds: expect.any(Number),
+      },
+    ])
+    expect(tracked('provider_action')).toEqual([
+      { provider: 'neon', action: 'save_key' },
+    ])
   })
 
   it('names a rejected key inline instead of the raw error', async () => {
@@ -223,6 +249,15 @@ describe('NeonConnectionPanel', () => {
         'That API key was rejected by Neon. Check it and try again.'
       )
     ).not.toHaveLength(0)
+    expect(tracked('provider_sign_in_finished')).toEqual([
+      {
+        provider: 'neon',
+        method: 'api_key',
+        ok: false,
+        error_class: 'invalid_token',
+        seconds: expect.any(Number),
+      },
+    ])
   })
 
   it('says a malformed key is not a key, not that Neon rejected it', async () => {

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -289,7 +290,8 @@ def test_starting_a_search_is_for_this_computer_only(app, monkeypatch):
     assert remote.status_code == 403
     agents = run(_request(app, "GET", "/api/agent-connect/agents")).json()
     assert agents["agents"] == [{"key": "claude:local", "id": "claude", "side": "local",
-                                 "label": "Claude Code", "name": "Claude", "signed_in": None}]
+                                 "label": "Claude Code", "name": "Claude", "signed_in": None,
+                                 "via": "cli"}]
 
 
 def test_a_search_follows_the_agent_and_ends_with_its_reply(tmp_path, monkeypatch, data_dir):
@@ -431,6 +433,7 @@ def test_windows_drives_its_own_agent_and_a_signed_in_one_comes_first(monkeypatc
     monkeypatch.setattr(discover.os, "name", "nt")
     monkeypatch.setattr(discover.sys, "platform", "win32")
     monkeypatch.setattr(discover, "_which_local", lambda name: f"C:/{name}.exe")
+    monkeypatch.setattr(discover, "app_agent_path", lambda name: None)
     monkeypatch.setattr(discover, "_best_install", lambda name, first, path: discover.Agent(
         name, "local", first, env_path=path, signed_in=name == "codex"))
     wsl = discover.Agent("claude", "wsl", "/home/u/.local/bin/claude", "Ubuntu", "/usr/bin",
@@ -777,6 +780,7 @@ def test_on_a_mac_rdst_finds_agents_without_running_the_users_shell(monkeypatch,
     claude = tmp_path / ".local" / "bin" / "claude"
     claude.write_text("#!/bin/sh\n")
     claude.chmod(0o755)
+    monkeypatch.setattr(discover, "app_agent_path", lambda name: None)
     ran = []
     monkeypatch.setattr(discover, "_login_shell_path", lambda: ran.append("shell"))
     agents = discover.detect(refresh=True)
@@ -786,6 +790,53 @@ def test_on_a_mac_rdst_finds_agents_without_running_the_users_shell(monkeypatch,
     path = discover._without_protected(
         f"{tmp_path}/Downloads/tools/bin:{tmp_path}/.local/bin:/Volumes/x/bin:/usr/bin")
     assert path == f"{tmp_path}/.local/bin:/usr/bin"
+
+
+def test_on_a_mac_an_apps_own_agent_skips_the_users_shell(monkeypatch, tmp_path):
+    """With only the Claude app, RDST runs its copy of Claude Code and never the login shell,
+    whose startup files can make macOS ask about Downloads or Documents."""
+    monkeypatch.setattr(discover.sys, "platform", "darwin")
+    monkeypatch.setattr(discover.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(discover, "_detected", None)
+    monkeypatch.setattr(discover, "_detect_wsl", lambda: [])
+    monkeypatch.setattr(discover, "_mac_path", lambda: str(tmp_path / "empty"))
+    bundled = tmp_path / "Library" / "Application Support" / "Claude" / "claude-code" / \
+        "2.1.309" / "5af865b9901c" / "claude.app" / "Contents" / "MacOS" / "claude"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_text("#!/bin/sh\n")
+    bundled.chmod(0o755)
+    monkeypatch.setattr(discover, "_signed_in", lambda agent: True)
+    ran = []
+    monkeypatch.setattr(discover, "_login_shell_path", lambda: ran.append("shell"))
+    agents = discover.detect(refresh=True)
+    assert [(a.path, a.via) for a in agents] == [(str(bundled), "app")]
+    assert ran == []
+
+
+def test_a_test_run_hides_installs_without_touching_them(monkeypatch, tmp_path):
+    """RDST_TEST_HIDE_AGENTS lets a Mac test treat a CLI or an app as missing while the user's
+    own installs stay put; hiding the CLI leaves the app's copy, and hiding that too leaves
+    nothing and no shell run."""
+    monkeypatch.setattr(discover.sys, "platform", "darwin")
+    monkeypatch.setattr(discover.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(discover, "_detected", None)
+    monkeypatch.setattr(discover, "_detect_wsl", lambda: [])
+    (tmp_path / ".local" / "bin").mkdir(parents=True)
+    cli = tmp_path / ".local" / "bin" / "claude"
+    cli.write_text("#!/bin/sh\n")
+    cli.chmod(0o755)
+    bundled = tmp_path / "Library" / "Application Support" / "Claude" / "claude-code" / \
+        "2.1.309" / "claude"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_text("#!/bin/sh\n")
+    bundled.chmod(0o755)
+    monkeypatch.setattr(discover, "_signed_in", lambda agent: True)
+    monkeypatch.setattr(discover, "_login_shell_path", lambda: None)
+    monkeypatch.setenv("RDST_TEST_HIDE_AGENTS", "claude")
+    assert [(a.path, a.via) for a in discover.detect(refresh=True)] == [(str(bundled), "app")]
+    monkeypatch.setenv("RDST_TEST_HIDE_AGENTS", "claude, claude-app")
+    assert discover.detect(refresh=True) == []
+    assert "claude" not in discover.desktop_apps()
 
 
 def test_only_the_users_own_conversation_offers_a_workload_for_a_quiet_database():
@@ -1159,6 +1210,7 @@ def test_on_a_mac_rdst_finds_agents_without_running_the_users_shell(monkeypatch,
     claude = tmp_path / ".local" / "bin" / "claude"
     claude.write_text("#!/bin/sh\n")
     claude.chmod(0o755)
+    monkeypatch.setattr(discover, "app_agent_path", lambda name: None)
     ran = []
     monkeypatch.setattr(discover, "_login_shell_path", lambda: ran.append("shell"))
     agents = discover.detect(refresh=True)
@@ -1284,3 +1336,95 @@ def test_a_stale_agent_list_answers_at_once_and_refreshes_behind(monkeypatch):
             break
         time.sleep(0.05)
     assert discover.detect() == [CLAUDE] and len(calls) == 1
+
+
+def _exe(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("")
+    path.chmod(0o755)
+    return path
+
+
+def test_rdst_finds_the_agent_a_desktop_app_ships_on_windows(monkeypatch, tmp_path):
+    """The Claude app keeps Claude Code for its Code tab, one folder per version, and the
+    Codex app keeps codex: RDST finds the newest of each."""
+    roaming, local = tmp_path / "Roaming", tmp_path / "Local"
+    code = roaming / "Claude" / "claude-code"
+    _exe(code / "2.1.99" / "aaa111" / "claude.exe")
+    newest = _exe(code / "2.1.309" / "9078b9c1d466" / "claude.exe")
+    _exe(code / "2.1.308" / "c17a819afb40" / "claude.exe")
+    codex = _exe(local / "OpenAI" / "Codex" / "bin" / "a96ca4c1eee0cf35" / "codex.exe")
+    _exe(local / "OpenAI" / "Codex" / "bin" / "90ee5f622914d088" / "rg.exe")
+    monkeypatch.setattr(discover, "os", SimpleNamespace(
+        name="nt", environ={"APPDATA": str(roaming), "LOCALAPPDATA": str(local)}))
+    assert discover.app_agent_path("claude") == str(newest)
+    assert discover.app_agent_path("codex") == str(codex)
+    monkeypatch.setattr(discover, "os", SimpleNamespace(
+        name="nt", environ={"APPDATA": str(tmp_path / "a"), "LOCALAPPDATA": str(tmp_path / "b")}))
+    assert discover.app_agent_path("claude") is None
+    assert discover.app_agent_path("codex") is None
+
+
+def test_rdst_finds_the_agent_a_desktop_app_ships_on_a_mac(monkeypatch, tmp_path):
+    """The Claude app keeps each version's Claude Code in its own claude.app, under a folder
+    per build."""
+    monkeypatch.setattr(discover.sys, "platform", "darwin")
+    monkeypatch.setattr(discover.Path, "home", lambda: tmp_path)
+    code = tmp_path / "Library" / "Application Support" / "Claude" / "claude-code"
+    bundle = Path("claude.app") / "Contents" / "MacOS" / "claude"
+    _exe(code / "2.1.308" / "a93ded4b1b47" / bundle)
+    newest = _exe(code / "2.1.309" / "5af865b9901c" / bundle)
+    _exe(tmp_path / "Applications" / "Codex.app" / "Contents" / "Resources" / "codex")
+    assert discover.app_agent_path("claude") == str(newest)
+    assert discover.app_agent_path("codex").endswith("Codex.app/Contents/Resources/codex")
+
+
+def test_with_no_cli_rdst_searches_with_the_copy_the_app_ships(monkeypatch):
+    """No claude on PATH, but the Claude app is installed: its Claude Code is the agent the
+    dialog offers. A WSL agent stays on offer only while the app's copy isn't signed in."""
+    monkeypatch.setattr(discover, "_detected", None)
+    monkeypatch.setattr(discover.sys, "platform", "linux")
+    monkeypatch.setattr(discover, "_which_local", lambda name: None)
+    monkeypatch.setattr(discover, "_login_shell_path", lambda: None)
+    bundled = "C:/Users/me/AppData/Roaming/Claude/claude-code/2.1.309/x/claude.exe"
+    monkeypatch.setattr(discover, "app_agent_path",
+                        lambda name: bundled if name == "claude" else None)
+    wsl = discover.Agent("claude", "wsl", "/home/u/.local/bin/claude", "Ubuntu", "/usr/bin",
+                         True)
+    monkeypatch.setattr(discover, "_detect_wsl", lambda: [wsl])
+    signed = {"value": True}
+    monkeypatch.setattr(discover, "_signed_in", lambda agent: signed["value"])
+    agents = discover.detect(refresh=True)
+    assert [(a.key, a.path, a.via, a.signed_in) for a in agents] == [
+        ("claude:local", bundled, "app", True)]
+    assert agents[0].as_dict() == {"key": "claude:local", "id": "claude", "side": "local",
+                                   "label": "Claude Code", "name": "Claude",
+                                   "signed_in": True, "via": "app"}
+    # The app's copy needs its own sign-in: the signed-in WSL agent comes first.
+    signed["value"] = False
+    agents = discover.detect(refresh=True)
+    assert [(a.key, a.via, a.signed_in) for a in agents] == [
+        ("claude:wsl", "cli", True), ("claude:local", "app", False)]
+    # A CLI of the user's own wins over the app's copy.
+    monkeypatch.setattr(discover, "_which_local",
+                        lambda name: "/usr/bin/claude" if name == "claude" else None)
+    monkeypatch.setattr(discover, "_best_install", lambda name, first, path: discover.Agent(
+        name, "local", first, env_path=path, signed_in=True))
+    agents = discover.detect(refresh=True)
+    assert [(a.path, a.via) for a in agents] == [("/usr/bin/claude", "cli")]
+
+
+def test_the_apps_copy_runs_headless_like_the_cli(tmp_path):
+    """The same headless command, stream-json events and MCP config as a CLI search; only
+    the program differs. Picking it up later names the app's copy, which isn't on PATH."""
+    bundled = discover.Agent("claude", "local", "/apps/claude-code/2.1.309/claude", via="app")
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("find them", encoding="utf-8")
+    command = discover._command(bundled, prompt, "http://127.0.0.1:9/mcp?d=r1")
+    assert command[0] == bundled.path
+    assert command[1:] == discover._command(CLAUDE, prompt, "http://127.0.0.1:9/mcp?d=r1")[1:]
+    run = discover.Run(id="r1", agent=bundled, session="0123456789abcdef")
+    assert discover.resume_command(run) == \
+        "/apps/claude-code/2.1.309/claude --resume 0123456789abcdef"
+    assert discover.continue_url(run, "claude") == "claude://resume?session=0123456789abcdef"
+

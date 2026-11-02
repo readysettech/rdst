@@ -1,3 +1,4 @@
+import { trackEvent } from '../../lib/analytics'
 import {
   type FleetNeonStatus,
   fetchFleetNeonStatus,
@@ -49,6 +50,12 @@ export function NeonConnectionPanel({
             href="https://console.neon.tech"
             target="_blank"
             rel="noreferrer"
+            onClick={() =>
+              trackEvent('provider_action', {
+                provider: 'neon',
+                action: 'open_provider_console',
+              })
+            }
             className="text-content-primary-soft underline-offset-4 hover:underline"
           >
             Neon console
@@ -61,6 +68,7 @@ export function NeonConnectionPanel({
       connectLabel="Connect"
       credentialSlot={({ onSaved, actions: footer }) => (
         <ProviderTokenForm
+          provider="neon"
           name="neon-api-key"
           label="API key"
           placeholder="napi_..."

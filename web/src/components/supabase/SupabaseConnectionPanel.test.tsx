@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderWithClient } from '@/test-utils'
+import { type RdstEvent, trackEvent } from '../../lib/analytics'
 import {
   fetchFleetSupabaseLogin,
   fetchFleetSupabaseStatus,
@@ -8,6 +9,10 @@ import {
 } from '../../lib/useFleet'
 import { SupabaseConnectionPanel } from './SupabaseConnectionPanel'
 
+vi.mock('../../lib/analytics', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/analytics')>()),
+  trackEvent: vi.fn(),
+}))
 vi.mock('../../lib/useFleet', () => ({
   fetchFleetSupabaseLogin: vi.fn(),
   fetchFleetSupabaseStatus: vi.fn(),
@@ -15,7 +20,14 @@ vi.mock('../../lib/useFleet', () => ({
   startFleetSupabaseLogin: vi.fn(),
 }))
 
+const tracked = (event: RdstEvent) =>
+  vi
+    .mocked(trackEvent)
+    .mock.calls.filter(([name]) => name === event)
+    .map(([, properties]) => properties)
+
 afterEach(() => {
+  vi.mocked(trackEvent).mockClear()
   cleanup()
   vi.unstubAllGlobals()
   delete window.rdstDesktop
@@ -223,5 +235,116 @@ describe('SupabaseConnectionPanel', () => {
     expect(
       screen.queryByRole('link', { name: 'Popup blocked. Open sign-in.' })
     ).toBeNull()
+  })
+
+  it('reports one sign-in outcome when two polls in flight both see success', async () => {
+    vi.mocked(fetchFleetSupabaseStatus).mockResolvedValue({
+      connected: false,
+      method: null,
+      detail: null,
+    })
+    vi.mocked(startFleetSupabaseLogin).mockResolvedValue({
+      login_id: 'login-1',
+      authorize_url: 'https://supabase.example/authorize',
+    })
+    const settle: ((value: { state: 'success' }) => void)[] = []
+    vi.mocked(fetchFleetSupabaseLogin).mockReset()
+    vi.mocked(fetchFleetSupabaseLogin).mockImplementation(
+      () => new Promise((resolve) => settle.push(resolve))
+    )
+    vi.stubGlobal('open', vi.fn().mockReturnValue(null))
+
+    renderWithClient(<SupabaseConnectionPanel />)
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Sign in with Supabase' })
+    )
+    fireEvent.click(
+      await screen.findByRole('link', { name: 'Popup blocked. Open sign-in.' })
+    )
+    await waitFor(() => expect(settle).toHaveLength(2), { timeout: 3_000 })
+    for (const resolve of settle) resolve({ state: 'success' })
+
+    await waitFor(() =>
+      expect(tracked('provider_sign_in_finished')).toHaveLength(1)
+    )
+    expect(tracked('provider_sign_in_started')).toEqual([
+      { provider: 'supabase', method: 'oauth' },
+    ])
+    expect(tracked('provider_sign_in_popup_blocked')).toEqual([
+      { provider: 'supabase' },
+    ])
+    expect(tracked('provider_sign_in_finished')).toEqual([
+      {
+        provider: 'supabase',
+        method: 'oauth',
+        ok: true,
+        error_class: null,
+        seconds: expect.any(Number),
+      },
+    ])
+    expect(tracked('provider_action')).toEqual([
+      { provider: 'supabase', action: 'sign_in', surface: 'panel' },
+      { provider: 'supabase', action: 'open_sign_in_link', surface: 'panel' },
+    ])
+  })
+
+  it('reports a sign-in that could not start by its error code', async () => {
+    vi.mocked(fetchFleetSupabaseStatus).mockResolvedValue({
+      connected: false,
+      method: null,
+      detail: null,
+    })
+    vi.mocked(startFleetSupabaseLogin).mockRejectedValue(
+      Object.assign(new Error('Connect from https://host.example'), {
+        code: 'supabase_oauth_remote_browser',
+      })
+    )
+    vi.stubGlobal('open', vi.fn().mockReturnValue({ close: vi.fn() }))
+
+    renderWithClient(<SupabaseConnectionPanel />)
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Sign in with Supabase' })
+    )
+
+    await waitFor(() =>
+      expect(tracked('provider_sign_in_finished')).toEqual([
+        {
+          provider: 'supabase',
+          method: 'oauth',
+          ok: false,
+          error_class: 'supabase_oauth_remote_browser',
+          seconds: expect.any(Number),
+        },
+      ])
+    )
+  })
+
+  it('reports a failed poll with a coarse class, never its text', async () => {
+    vi.mocked(fetchFleetSupabaseStatus).mockResolvedValue({
+      connected: false,
+      method: null,
+      detail: null,
+    })
+    vi.mocked(startFleetSupabaseLogin).mockResolvedValue({
+      login_id: 'login-1',
+      authorize_url: 'https://supabase.example/authorize',
+    })
+    vi.mocked(fetchFleetSupabaseLogin).mockReset()
+    vi.mocked(fetchFleetSupabaseLogin).mockResolvedValue({
+      state: 'failed',
+      detail: 'This sign-in expired. Start the sign-in again.',
+    })
+    vi.stubGlobal('open', vi.fn().mockReturnValue(null))
+
+    renderWithClient(<SupabaseConnectionPanel />)
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Sign in with Supabase' })
+    )
+
+    await waitFor(() =>
+      expect(tracked('provider_sign_in_finished')).toEqual([
+        expect.objectContaining({ ok: false, error_class: 'login_failed' }),
+      ])
+    )
   })
 })

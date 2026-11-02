@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { renderWithClient } from '@/test-utils'
+import { type RdstEvent, trackEvent } from '../../lib/analytics'
 import {
   fetchFleetAwsSsoAccounts,
   fetchFleetAwsSsoRoles,
@@ -11,6 +12,10 @@ import {
 } from '../../lib/useFleet'
 import { AwsConnectionPanel } from './AwsConnectionPanel'
 
+vi.mock('../../lib/analytics', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/analytics')>()),
+  trackEvent: vi.fn(),
+}))
 vi.mock('../../lib/useFleet', () => ({
   fetchFleetAwsLogin: vi.fn(),
   fetchFleetAwsStatus: vi.fn(),
@@ -30,6 +35,12 @@ vi.mock('../../lib/useFleet', () => ({
     }
   },
 }))
+
+const tracked = (event: RdstEvent) =>
+  vi
+    .mocked(trackEvent)
+    .mock.calls.filter(([name]) => name === event)
+    .map(([, properties]) => properties)
 
 const SIGNED_OUT_NO_PROFILES = {
   has_credentials: false,
@@ -112,6 +123,15 @@ describe('AwsConnectionPanel', () => {
         'Sign in with AWS SSO so we can read details about your imported databases.'
       )
     ).toBeTruthy()
+    expect(tracked('provider_action')).toEqual([
+      {
+        provider: 'aws',
+        action: 'sign_out',
+        surface: 'panel',
+        ok: true,
+        error_class: null,
+      },
+    ])
   })
 
   it('runs the guided wizard: sign in, pick account, pick role, connect', async () => {
@@ -181,6 +201,23 @@ describe('AwsConnectionPanel', () => {
       })
     )
     expect(await screen.findByText(/Signed in to AWS as mike/)).toBeTruthy()
+    expect(tracked('provider_sign_in_started')).toEqual([
+      { provider: 'aws', method: 'sso' },
+    ])
+    expect(tracked('provider_sign_in_finished')).toEqual([
+      {
+        provider: 'aws',
+        method: 'sso',
+        ok: true,
+        error_class: null,
+        seconds: expect.any(Number),
+      },
+    ])
+    expect(
+      tracked('provider_action').map(
+        (properties) => (properties as { action: string }).action
+      )
+    ).toEqual(['sign_in', 'choose_account', 'choose_role', 'create_profile'])
   })
 
   it('treats a duplicate profile as success and signs in with it', async () => {

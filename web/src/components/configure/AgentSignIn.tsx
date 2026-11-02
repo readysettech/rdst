@@ -63,7 +63,7 @@ export function AgentSignIn({
     <div className="space-y-2" data-testid="agent-sign-in">
       <Text as="p" level="body-small" className="text-content-layout-2">
         {opened === null
-          ? `${agent.label} is signed out on this computer. Sign in to it and RDST picks up where it left off${inApp ? `, or carry on in the ${inApp.name} app` : ''}.`
+          ? `${agent.via === 'app' ? `RDST runs the ${agent.label} that came with your ${agent.name} app, and it isn't signed in yet. Sign in with the same account` : `${agent.label} is signed out on this computer. Sign in to it`} and RDST picks up where it left off${inApp ? `, or carry on in the ${inApp.name} app` : ''}.`
           : `Finish signing in to ${agent.label} in the window that opened. RDST carries on once you're signed in.`}
       </Text>
       <div className="flex flex-wrap items-center gap-2">

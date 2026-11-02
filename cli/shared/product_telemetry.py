@@ -708,6 +708,22 @@ def _engine(value: Any) -> str:
     return engine if engine in {"mysql", "mariadb"} else "unknown"
 
 
+_SLUG = re.compile(r"[a-z][a-z0-9_]{0,47}")
+
+
+def provider_oauth_step(provider: str, stage: str, *, ok: bool,
+                        error_class: str | None = None) -> None:
+    """A provider OAuth sign-in as the server saw it: `callback` when the browser came back
+    from the provider's authorize screen, then `signed_in` or `failed` when it ended."""
+    if not enabled():
+        return
+    error = str(error_class or "").lower()
+    capture("provider_oauth_step", {
+        "provider": provider, "stage": stage, "ok": bool(ok),
+        "error_class": None if ok else (error if _SLUG.fullmatch(error) else "unknown"),
+    })
+
+
 def database_add_test_completed(engine: Any, *, via: Any, ok: bool,
                                 error_class: str | None = None) -> None:
     if not enabled():
@@ -772,10 +788,12 @@ def agent_attempt_id(nonce: str) -> str:
 def agent_connect_step(step: str, *, attempt_id: str | None, tool: str | None = None,
                        ok: bool | None = None, error_class: str | None = None,
                        agent_version: str | None = None,
-                       counts: dict[str, int] | None = None) -> None:
+                       counts: dict[str, int] | None = None,
+                       agent_via: str | None = None) -> None:
     """One step of an agent connecting, at most once per (attempt_id, step, tool, ok).
-    ``agent_version`` is the agent's own version, like 2.1.312, when it reported one, and
-    ``counts`` how a search went over RDST's list: proposed, skipped, unmentioned."""
+    ``agent_version`` is the agent's own version, like 2.1.312, when it reported one,
+    ``counts`` how a search went over RDST's list: proposed, skipped, unmentioned, and
+    ``agent_via`` whether the agent is the user's CLI or the copy their desktop app ships."""
     if step not in AGENT_CONNECT_STEPS or not enabled():
         return
     key = (attempt_id, step, tool, ok)
@@ -792,6 +810,8 @@ def agent_connect_step(step: str, *, attempt_id: str | None, tool: str | None = 
         props["error_class"] = error_class if error_class in AGENT_ERROR_CLASSES else "unknown"
     if agent_version and re.fullmatch(r"\d{1,4}(\.\d{1,5}){1,3}", agent_version):
         props["agent_version"] = agent_version
+    if agent_via in ("cli", "app"):
+        props["agent_via"] = agent_via
     for name, value in (counts or {}).items():
         if name in ("proposed", "skipped", "unmentioned") and isinstance(value, int):
             props[name] = value

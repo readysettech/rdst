@@ -1,6 +1,7 @@
 """Find the user's databases with their own coding agent.
 
-RDST runs Claude Code or Codex headless, here or inside WSL, with RDST's MCP server attached.
+RDST runs Claude Code or Codex headless, here or inside WSL, with RDST's MCP server attached:
+the user's own CLI, or with none, the copy the Claude or Codex desktop app ships.
 The agent reads its recent sessions and the projects they ran in, then proposes the databases
 it found through rdst_propose_databases. The user picks which ones RDST adds; the agent never
 adds anything itself.
@@ -70,6 +71,9 @@ class Agent:
     env_path: str | None = None
     # Whether the agent has a sign-in it can run with; None when it can't say.
     signed_in: bool | None = None
+    # "app" for the copy a desktop app ships (the Claude app's Claude Code, the Codex app's
+    # codex), which RDST runs when the user has no CLI of their own.
+    via: str = "cli"
 
     @property
     def key(self) -> str:
@@ -81,7 +85,7 @@ class Agent:
 
     def as_dict(self) -> dict[str, Any]:
         return {"key": self.key, "id": self.id, "side": self.side, "label": self.label,
-                "name": AGENT_NAMES[self.id], "signed_in": self.signed_in}
+                "name": AGENT_NAMES[self.id], "signed_in": self.signed_in, "via": self.via}
 
 
 _detect_lock = threading.Lock()
@@ -107,14 +111,67 @@ def _which_local(name: str) -> str | None:
     if os.name == "nt":
         extra = [home / ".local" / "bin" / f"{name}.exe",
                  Path(os.environ.get("APPDATA", home)) / "npm" / f"{name}.cmd"]
-        # The Codex desktop app keeps its own codex.exe, one folder per version.
-        bundled = Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local")) / \
-            "OpenAI" / "Codex" / "bin"
-        extra += sorted(bundled.glob(f"*/{name}.exe"), key=_mtime, reverse=True)
     else:
         extra = [home / ".local" / "bin" / name, home / ".claude" / "local" / name,
                  Path("/opt/homebrew/bin") / name, Path("/usr/local/bin") / name]
     return next((str(path) for path in extra if path.is_file()), None)
+
+
+def _version_in(path: Path) -> tuple[int, ...]:
+    """The version a folder on ``path`` is named for, like claude-code/2.1.309/."""
+    found = next((re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", part) for part in path.parts
+                  if re.fullmatch(r"\d+\.\d+\.\d+", part)), None)
+    return tuple(int(group) for group in found.groups()) if found else ()
+
+
+def _hidden() -> set[str]:
+    """Installs a test run treats as missing, from RDST_TEST_HIDE_AGENTS: any of claude,
+    codex (their CLIs), claude-app and codex-app. A test machine keeps everything installed."""
+    return {part.strip() for part in os.environ.get("RDST_TEST_HIDE_AGENTS", "").split(",")
+            if part.strip()}
+
+
+def app_agent_path(name: str) -> str | None:
+    """The copy of agent ``name`` its desktop app put on this computer, newest first: the
+    Claude app keeps Claude Code for its Code tab, one folder per version, and the Codex app
+    keeps codex. None when there's no app, or it hasn't unpacked one yet."""
+    if f"{name}-app" in _hidden():
+        return None
+    home = Path.home()
+    if os.name == "nt":
+        if name == "claude":
+            root = Path(os.environ.get("APPDATA") or home / "AppData" / "Roaming") / \
+                "Claude" / "claude-code"
+            found = [*root.glob("*/claude.exe"), *root.glob("*/*/claude.exe")]
+        else:
+            root = Path(os.environ.get("LOCALAPPDATA") or home / "AppData" / "Local") / \
+                "OpenAI" / "Codex" / "bin"
+            found = list(root.glob("*/codex.exe"))
+    elif sys.platform == "darwin":
+        if name == "claude":
+            root = home / "Library" / "Application Support" / "Claude" / "claude-code"
+            found = [*root.glob("*/claude"), *root.glob("*/*/claude"),
+                     *root.glob("*/claude.app/Contents/MacOS/claude"),
+                     *root.glob("*/*/claude.app/Contents/MacOS/claude")]
+        else:
+            found = [folder / "Codex.app" / "Contents" / "Resources" / "codex"
+                     for folder in (Path("/Applications"), home / "Applications")]
+    else:
+        return None
+    found = [path for path in found if path.is_file()]
+    return str(max(found, key=lambda path: (_version_in(path), _mtime(path)))) \
+        if found else None
+
+
+def _app_agent(name: str, path: str | None) -> Agent | None:
+    """The agent ``name``'s desktop app ships, with whether it's signed in. The Claude app
+    signs its own copy in for each conversation, so on its own that copy needs a sign-in of
+    its own; the Codex app's copy shares the user's Codex sign-in."""
+    found = app_agent_path(name)
+    if not found:
+        return None
+    agent = Agent(name, "local", found, env_path=path, via="app")
+    return replace(agent, signed_in=_signed_in(agent))
 
 
 def _login_shell_path() -> str | None:
@@ -382,26 +439,34 @@ def _detect_now() -> list[Agent]:
 
 
 def _find_agents() -> list[Agent]:
+    hidden = _hidden()
     if sys.platform == "darwin":
         # A login shell runs the user's startup files as RDST, and anything they touch in
         # Downloads or Documents makes macOS ask about RDST. The usual install folders come
-        # first; the shell only when neither agent is there.
+        # first, then a desktop app's own copy; the shell only when there's neither.
         shell_path = _mac_path()
         found = {name: path for name in AGENTS
-                 if (path := shutil.which(name, path=shell_path))}
-        if not found:
+                 if name not in hidden and (path := shutil.which(name, path=shell_path))}
+        if not found and not any(app_agent_path(name) for name in AGENTS):
             shell_path = _without_protected(_login_shell_path()) or shell_path
             found = _login_shell_paths(tuple(AGENTS), shell_path)
+        found = {name: path for name, path in found.items() if name not in hidden}
     else:
         found = {name: path for name in AGENTS if (path := _which_local(name))}
         shell_path = _login_shell_path() if os.name != "nt" else None
         found = {**_login_shell_paths(tuple(name for name in AGENTS if name not in found),
                                       shell_path), **found}
+        found = {name: path for name, path in found.items() if name not in hidden}
     agents = [_best_install(name, found[name], shell_path) for name in AGENTS if name in found]
+    # No CLI, but the agent's desktop app ships one: RDST runs that copy the same way.
+    apps = [agent for name in AGENTS if name not in found
+            if (agent := _app_agent(name, shell_path))]
+    agents += apps
     # On Windows the agent runs on Windows and reaches into WSL itself (see WSL_NOTE), so
     # its conversation can continue in the Windows app or terminal. An agent only WSL has
-    # is still offered.
-    agents += [agent for agent in _detect_wsl() if agent.id not in found]
+    # is still offered, and so is one beside an app's copy that isn't signed in.
+    ready = {*found, *(agent.id for agent in apps if agent.signed_in is not False)}
+    agents += [agent for agent in _detect_wsl() if agent.id not in ready | hidden]
     # One that can run comes first: it's the one the dialog offers.
     agents.sort(key=lambda agent: agent.signed_in is False)
     return agents
@@ -424,6 +489,8 @@ def desktop_apps() -> list[str]:
 
         apps = []
         for app in AGENTS:
+            if f"{app}-app" in _hidden():
+                continue
             try:
                 with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, app) as key:
                     winreg.QueryValueEx(key, "URL Protocol")
@@ -433,8 +500,8 @@ def desktop_apps() -> list[str]:
         return apps
     if sys.platform == "darwin":
         bundles = {"claude": "Claude.app", "codex": "Codex.app"}
-        return [app for app, bundle in bundles.items()
-                if any((root / bundle).exists()
+        return [app for app, bundle in bundles.items() if f"{app}-app" not in _hidden()
+                and any((root / bundle).exists()
                        for root in (Path("/Applications"), Path.home() / "Applications"))]
     return []
 
@@ -592,8 +659,14 @@ def resume_command(run: "Run") -> str | None:
     """What a terminal runs to pick the session up, from the folder it ran in."""
     if not run.session:
         return None
-    command = (f"claude --resume {run.session}" if run.agent.id == "claude"
-               else f"codex resume {run.session}")
+    program = run.agent.id
+    if run.agent.via == "app":
+        # The app's copy isn't on the user's PATH.
+        path = run.agent.path
+        program = (f'"{path}"' if " " in path else path) if os.name == "nt" \
+            else shlex.quote(path)
+    command = (f"{program} --resume {run.session}" if run.agent.id == "claude"
+               else f"{program} resume {run.session}")
     # Claude Code keeps a session with the folder it ran in, and resumes it only there.
     return f"cd {shlex.quote(run.folder)} && {command}" if run.folder else command
 
@@ -1408,7 +1481,7 @@ def _report_finished(run: Run, final: str | None) -> None:
         product_telemetry.agent_connect_step(
             step, attempt_id=run.id, tool=tool, ok=False,
             error_class="cancelled" if run.state == "cancelled" else _failure_class(run),
-            agent_version=run.agent_version)
+            agent_version=run.agent_version, agent_via=run.agent.via)
         return
     said_last = next((line["text"] for line in reversed(run.activity)
                       if line["kind"] == "say"), None)
@@ -1427,7 +1500,7 @@ def _report_finished(run: Run, final: str | None) -> None:
         product_telemetry.agent_connect_step(
             step, attempt_id=run.id, tool=tool, ok=run.state == "done",
             error_class=None if run.state == "done" else _failure_class(run),
-            agent_version=run.agent_version)
+            agent_version=run.agent_version, agent_via=run.agent.via)
         return
     code = run.process.returncode if run.process else None
     if run.candidates is not None and run.proposed and not run.errored and \
@@ -1450,7 +1523,7 @@ def _report_finished(run: Run, final: str | None) -> None:
     product_telemetry.agent_connect_step(
         step, attempt_id=run.id, tool=tool, ok=run.state == "done",
         error_class=None if run.state == "done" else _failure_class(run),
-        agent_version=run.agent_version, counts=run.counts)
+        agent_version=run.agent_version, counts=run.counts, agent_via=run.agent.via)
 
 
 WSL_NOTE = """

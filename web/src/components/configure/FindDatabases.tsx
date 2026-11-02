@@ -94,6 +94,11 @@ const LOGOS: Record<SignInProvider, ComponentType<{ size?: number }>> = {
 }
 
 const APP_NAMES = { claude: 'Claude', codex: 'Codex' } as const
+/** An agent as a choice: the copy a desktop app ships says which app it came with. */
+const agentLabel = (agent: DiscoveryAgent) =>
+  agent.via === 'app'
+    ? `${agent.label} from your ${APP_NAMES[agent.id]} app`
+    : agent.label
 
 /** Where a conversation carries on once the user took it out of RDST. */
 const whereItIs = (place: 'claude' | 'codex' | 'terminal') =>
@@ -1041,6 +1046,10 @@ export function FindDatabases({
             .filter((item) => item.signed_in === false)
             .map((item) => item.key)
             .join(','),
+          app_agents: found
+            .filter((item) => item.via === 'app')
+            .map((item) => item.key)
+            .join(','),
         })
       })
       .catch(() => {
@@ -1177,6 +1186,7 @@ export function FindDatabases({
             state: next.state,
             found: next.candidates.length,
             seconds: next.elapsed,
+            ...(next.agent?.via ? { via: next.agent.via } : {}),
           })
           const best = recommended(next.candidates)
           setPicked(best ? { run: next.id, id: best.id } : null)
@@ -1293,6 +1303,7 @@ export function FindDatabases({
     trackEvent('find_option_chosen', {
       option: viaAgent ? 'search_with_agent' : 'scan',
       started: 'click',
+      ...(viaAgent && agent?.via ? { via: agent.via } : {}),
     })
     try {
       const run = await startScan()
@@ -1927,7 +1938,7 @@ export function FindDatabases({
               kind="scan"
               primary
               title={`Search for databases with ${agent.name}`}
-              caption={`${agent.label} helps search for databases on this computer and figures out the ones you've been working with most recently. ${agent.name} can then drive the setup in RDST.`}
+              caption={`${agentLabel(agent)} helps search for databases on this computer and figures out the ones you've been working with most recently. ${agent.name} can then drive the setup in RDST.`}
               onClick={() =>
                 agent.signed_in === false
                   ? setSignInFirst(true)
@@ -1950,7 +1961,9 @@ export function FindDatabases({
                 }
               />
             )}
-            <div className="-mt-2 flex flex-wrap items-center justify-end gap-1">
+            {/* -mr-3 takes back the ghost buttons' padding, so their text lines up with the
+                card's right edge. */}
+            <div className="-mt-2 -mr-3 flex flex-wrap items-center justify-end gap-1">
               {(agents ?? [])
                 .filter((other) => other.key !== agent.key)
                 .map((other) => (
@@ -1960,7 +1973,7 @@ export function FindDatabases({
                     variant="primary"
                     modifier="ghost"
                     size="small"
-                    label={`Use ${other.label} instead${other.signed_in === false ? ' (signed out)' : ''}`}
+                    label={`Use ${agentLabel(other)} instead${other.signed_in === false ? ' (signed out)' : ''}`}
                     onClick={() => {
                       trackEvent('find_agent_switched', { agent: other.key })
                       setAgentKey(other.key)

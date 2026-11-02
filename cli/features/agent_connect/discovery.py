@@ -141,8 +141,10 @@ class WslListener:
     def __init__(self, app: Any, host: str, port: int) -> None:
         import uvicorn
 
+        # log_config=None: a Config with logging settings reconfigures uvicorn's shared loggers,
+        # which would hide the main server's "Uvicorn running on" line the desktop app waits for.
         config = uvicorn.Config(wsl_only(app), host=host, port=port, lifespan="off",
-                                log_level="warning", access_log=False)
+                                log_config=None, access_log=False)
         self.server = uvicorn.Server(config)
         self.host = host
         self.url = local_url(host, port)

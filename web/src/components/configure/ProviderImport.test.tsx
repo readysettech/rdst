@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fleetStatusStub, renderWithClient } from '@/test-utils'
+import { type RdstEvent, trackEvent } from '../../lib/analytics'
 import { fetchEnvRequirements, setEnvSecret } from '../../lib/api'
 import * as csv from '../../lib/csv'
 import {
@@ -20,6 +21,10 @@ import { ProviderImport } from './ProviderImport'
 vi.mock('@tanstack/react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-router')>()),
   useNavigate: () => vi.fn(),
+}))
+vi.mock('../../lib/analytics', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/analytics')>()),
+  trackEvent: vi.fn(),
 }))
 vi.mock('../../lib/api', () => ({
   fetchEnvRequirements: vi.fn(),
@@ -85,6 +90,12 @@ const discovered: DiscoveredFleetMember[] = [
     already_exists: true,
   },
 ]
+
+const tracked = (event: RdstEvent) =>
+  vi
+    .mocked(trackEvent)
+    .mock.calls.filter(([name]) => name === event)
+    .map(([, properties]) => properties)
 
 let changes: DatabasesChange[] = []
 let unsubscribe: () => void = () => {}
@@ -470,6 +481,99 @@ describe('ProviderImport', () => {
       expect(changes).toContainEqual({ recheck: ['orders-writer'] })
     )
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['fleet-targets'] })
+  })
+
+  it('reports discovery, import and the credentials step once each', async () => {
+    renderImport({ initialTab: 'aws' })
+    fireEvent.click(await screen.findByRole('button', { name: 'us-east-2' }))
+    await addDiscoveredWriter()
+    fireEvent.click(screen.getByRole('button', { name: 'Set up later' }))
+
+    expect(tracked('provider_discovery_finished')).toEqual([
+      {
+        provider: 'aws',
+        ok: true,
+        found: 2,
+        addable: 1,
+        errors: 0,
+        error_class: null,
+        auto: false,
+        regions: 3,
+        seconds: expect.any(Number),
+      },
+    ])
+    expect(tracked('provider_import_finished')).toEqual([
+      {
+        provider: 'aws',
+        ok: true,
+        selected: 1,
+        imported: 1,
+        skipped: 0,
+        failed: 0,
+        error_class: null,
+      },
+    ])
+    expect(tracked('provider_credentials_finished')).toEqual([
+      { provider: 'aws', outcome: 'later', databases: 1, saved: false },
+    ])
+    expect(tracked('provider_action')).toEqual([
+      { provider: 'aws', action: 'toggle_region', selected: false },
+      { provider: 'aws', action: 'discover', count: 3 },
+      { provider: 'aws', action: 'import', count: 1 },
+      { provider: 'aws', action: 'credentials_later' },
+    ])
+  })
+
+  it('reports an account discovery RDST ran on sign-in, and its failure class', async () => {
+    vi.mocked(fetchFleetSupabaseStatus).mockResolvedValue({
+      connected: true,
+      method: 'oauth',
+      detail: null,
+    })
+    vi.mocked(fetchFleetDiscoverPreview).mockRejectedValue(
+      new Error('Supabase request timed out')
+    )
+    renderImport({ initialTab: 'supabase' })
+
+    expect(
+      await screen.findAllByText('Supabase request timed out')
+    ).not.toHaveLength(0)
+    expect(tracked('provider_discovery_finished')).toEqual([
+      {
+        provider: 'supabase',
+        ok: false,
+        found: 0,
+        addable: 0,
+        errors: 1,
+        error_class: 'timeout',
+        auto: true,
+        seconds: expect.any(Number),
+      },
+    ])
+  })
+
+  it('reports a failed import with every picked database failed', async () => {
+    vi.mocked(bulkAddFleetTargets).mockRejectedValue(new TypeError('fetch'))
+    renderImport({ initialTab: 'aws' })
+    await discoverEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Add 1 selected' })
+    )
+
+    await waitFor(() =>
+      expect(tracked('provider_import_finished')).toEqual([
+        {
+          provider: 'aws',
+          ok: false,
+          selected: 1,
+          imported: 0,
+          skipped: 0,
+          failed: 1,
+          error_class: 'network',
+        },
+      ])
+    )
   })
 
   it('asks for a fresh connectivity sweep when the credentials step is left', async () => {

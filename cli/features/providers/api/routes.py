@@ -552,6 +552,10 @@ async def fleet_supabase_callback(
     from ..supabase_oauth import handle_callback
 
     if error:
+        from shared import product_telemetry
+
+        # OAuth error codes (access_denied) are fixed slugs; anything else reads "unknown".
+        product_telemetry.provider_oauth_step("supabase", "callback", ok=False, error_class=error)
         return HTMLResponse(
             _supabase_callback_page("Supabase sign-in failed", error), status_code=400
         )
