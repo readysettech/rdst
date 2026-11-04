@@ -28,6 +28,11 @@ from shared.db_connection import (
     resolve_connection_params,
 )
 
+from .json_shape import (
+    json_sample_sql_mysql,
+    json_sample_sql_postgres,
+    summarize_json_documents,
+)
 from .pattern_detector import (
     DELIMITER_FRACTION_THRESHOLD,
     detect_delimiter_columns_sql_mysql,
@@ -309,6 +314,26 @@ class SchemaIntrospector:
                             ].value_pattern = "comma_separated_list"
             except Exception:
                 pass  # Don't abort table introspection for enrichment
+
+        # Describe the keys inside JSON columns from a bounded sample of documents
+        for col_name, col in table.columns.items():
+            if col.data_type not in ("json", "jsonb"):
+                continue
+            cursor.execute("SAVEPOINT rdst_json_keys")
+            try:
+                cursor.execute(
+                    json_sample_sql_postgres(
+                        quote_identifier(table_name),
+                        quote_identifier(col_name),
+                        row_estimate,
+                        _SELF_MARKER,
+                    )
+                )
+                col.json_keys = summarize_json_documents([row[0] for row in cursor.fetchall()])
+            except Exception:
+                cursor.execute("ROLLBACK TO SAVEPOINT rdst_json_keys")
+            else:
+                cursor.execute("RELEASE SAVEPOINT rdst_json_keys")
 
         # Get indexes
         cursor.execute(
@@ -729,6 +754,23 @@ class SchemaIntrospector:
                             table.columns[
                                 col_name
                             ].value_pattern = "comma_separated_list"
+            except Exception:
+                pass
+
+        # Describe the keys inside JSON columns from a bounded sample of documents
+        for col_name, col in table.columns.items():
+            if col.data_type != "json":
+                continue
+            try:
+                cursor.execute(
+                    json_sample_sql_mysql(
+                        quote_identifier(table_name, "mysql"),
+                        quote_identifier(col_name, "mysql"),
+                        row_estimate,
+                        _SELF_MARKER,
+                    )
+                )
+                col.json_keys = summarize_json_documents([row[0] for row in cursor.fetchall()])
             except Exception:
                 pass
 

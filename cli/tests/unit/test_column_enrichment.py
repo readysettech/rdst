@@ -1,4 +1,4 @@
-"""Tests for ColumnAnnotation value_pattern field.
+"""Tests for the auto-detected ColumnAnnotation fields value_pattern and json_keys.
 
 Covers:
 - Serialization roundtrip (to_dict/from_dict)
@@ -54,3 +54,19 @@ class TestColumnAnnotationEnrichment:
         assert restored.description == "Movie genres"
         assert restored.quality_notes == "May contain duplicates"
         assert restored.value_pattern == "comma_separated_list"
+
+
+class TestJsonKeys:
+    """Test json_keys on ColumnAnnotation."""
+
+    def test_roundtrip(self):
+        col = ColumnAnnotation(
+            name="snapshot", data_type="jsonb", json_keys={"a.b": "number, e.g. 1"}
+        )
+        d = col.to_dict()
+        assert d["json_keys"] == {"a.b": "number, e.g. 1"}
+        assert ColumnAnnotation.from_dict("snapshot", d).json_keys == {"a.b": "number, e.g. 1"}
+
+    def test_absent_from_old_yaml_and_from_empty_columns(self):
+        assert ColumnAnnotation.from_dict("x", {"type": "jsonb"}).json_keys == {}
+        assert "json_keys" not in ColumnAnnotation(name="x", data_type="jsonb").to_dict()

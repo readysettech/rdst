@@ -59,6 +59,8 @@ class ColumnAnnotation:
 
     # Auto-detected enrichment (populated by introspector)
     value_pattern: str = ""  # comma_separated_list (columns requiring split/unnest)
+    # JSON columns: key path -> value type and an example, from sampled documents
+    json_keys: dict[str, str] = field(default_factory=dict)
 
     # Column statistics (populated by DataProfiler, persisted under 'stats' key)
     null_fraction: float | None = None
@@ -89,6 +91,8 @@ class ColumnAnnotation:
             result["quality_notes"] = self.quality_notes
         if self.value_pattern:
             result["value_pattern"] = self.value_pattern
+        if self.json_keys:
+            result["json_keys"] = self.json_keys
         # Column statistics under a separate 'stats' sub-key
         stats = {}
         if self.null_fraction is not None:
@@ -119,6 +123,7 @@ class ColumnAnnotation:
             is_pii=data.get("is_pii", False),
             quality_notes=data.get("quality_notes", ""),
             value_pattern=data.get("value_pattern", ""),
+            json_keys=data.get("json_keys", {}),
             null_fraction=stats.get("null_fraction"),
             distinct_count=stats.get("distinct_count"),
             top_values=stats.get("top_values"),

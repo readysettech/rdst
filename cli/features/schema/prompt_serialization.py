@@ -47,6 +47,9 @@ def _format_semantic_schema(layer) -> str:
                 col_str += f" [enum: {enum_preview}]"
             if col.value_pattern:
                 col_str += f" [pattern: {col.value_pattern}]"
+            if col.json_keys:
+                keys = "; ".join(f"{path}: {shape}" for path, shape in col.json_keys.items())
+                col_str += f" [json keys: {keys}]"
             if col.null_fraction is not None and col.null_fraction > 0.05:
                 col_str += f" [null: {col.null_fraction:.0%}]"
             if col.distinct_count is not None:
@@ -173,12 +176,17 @@ def format_semantic_schema_compact(layer) -> str:
         data_type: _compact_schema_code(index)
         for index, data_type in enumerate(ordered_types[1:])
     }
+    has_json_keys = any(
+        col.json_keys for table in layer.tables.values() for col in table.columns.values()
+    )
     lines = [
         (
             f"{COMPACT_SCHEMA_FORMAT_VERSION}; @table<TAB>columns; "
             "column or column:type-code, bare column uses !default_type and !type "
             "defines codes; # table metadata; +column metadata; metadata tags "
-            "d=description,b=business context,e=enum,p=pattern,n=null %,k=distinct; "
+            "d=description,b=business context,e=enum,p=pattern,"
+            + ("j=json key paths," if has_json_keys else "")
+            + "n=null %,k=distinct; "
             ">source-column<TAB>target-table<TAB>optional-target-column"
             "<TAB>optional-relationship-type; >!<TAB>type<TAB>target<TAB>join "
             "preserves full relationship; "
@@ -219,6 +227,10 @@ def format_semantic_schema_compact(layer) -> str:
                 )
             if col.value_pattern:
                 metadata.append(f"p={_compact_schema_escape(col.value_pattern)}")
+            if col.json_keys:
+                metadata.append(
+                    "j=" + json.dumps(col.json_keys, ensure_ascii=False, separators=(",", ":"))
+                )
             if col.null_fraction is not None and col.null_fraction > 0.05:
                 metadata.append(f"n={col.null_fraction:.0%}")
             if col.distinct_count is not None:

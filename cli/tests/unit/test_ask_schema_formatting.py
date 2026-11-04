@@ -136,6 +136,7 @@ def test_compact_schema_retains_every_effective_semantic_field() -> None:
                             "C": "TODO: describe C",
                         },
                         value_pattern="comma,separated",
+                        json_keys={"a.b": "number, e.g. 1"},
                         null_fraction=0.125,
                         distinct_count=1234,
                     )
@@ -184,7 +185,8 @@ def test_compact_schema_retains_every_effective_semantic_field() -> None:
     assert table_metadata_line == "#\td=Table description\tb=Business context"
     assert column_metadata_line == (
         "+status,value\td=Column description\t"
-        'e=[["A","Active"],"B","C"]\tp=comma,separated\tn=12%\tk=1,234'
+        'e=[["A","Active"],"B","C"]\tp=comma,separated\t'
+        'j={"a.b":"number, e.g. 1"}\tn=12%\tk=1,234'
     )
     assert relationship_line == (
         '>!\tone_to_many\tother\t"odd|table".id = other.odd_id'
@@ -508,3 +510,39 @@ def test_schema_phase_refuses_mysql_system_database_before_introspecting() -> No
     assert "mysql system database" in result.error_message
     introspector.assert_not_called()
     manager.exists.assert_not_called()
+
+
+def test_verbose_schema_lists_json_key_paths() -> None:
+    layer = SemanticLayer(
+        target="fixture",
+        tables={
+            "readings": TableAnnotation(
+                name="readings",
+                columns={
+                    "snapshot": ColumnAnnotation(
+                        name="snapshot",
+                        data_type="jsonb",
+                        json_keys={
+                            "power.now_w": "null|number, e.g. 412.5",
+                            "site": "string, e.g. \"west\"",
+                        },
+                    )
+                },
+            )
+        },
+    )
+
+    assert (
+        '  snapshot (jsonb) [json keys: power.now_w: null|number, e.g. 412.5; '
+        'site: string, e.g. "west"]'
+    ) in _format_semantic_schema(layer)
+
+
+def test_compact_legend_names_json_keys_only_when_present() -> None:
+    def layer(json_keys):
+        column = ColumnAnnotation(name="doc", data_type="jsonb", json_keys=json_keys)
+        table = TableAnnotation(name="t", columns={"doc": column})
+        return SemanticLayer(target="fixture", tables={"t": table})
+
+    assert "j=json key paths" not in format_semantic_schema_compact(layer({}))
+    assert "j=json key paths" in format_semantic_schema_compact(layer({"a": "number"}))
