@@ -21,6 +21,7 @@ from features.ask.sql_generation import generate_sql_from_nl
 from features.ask.sql_validation import (
     check_read_only,
     describe_validation_issues,
+    quote_case_sensitive_identifiers,
     validate_filter_literal_provenance,
     validate_resolved_columns_against_schema,
     validate_sql_for_ask,
@@ -1028,3 +1029,37 @@ def test_outer_limit_survives_dialect_quoting(sql, dialect, validated):
 
     assert result["is_valid"], result["issues"]
     assert result["validated_sql"] == validated
+
+
+MIXED_CASE_SCHEMA = {"Equipment": ["EquipKey", "Name", "doc"], "sites": ["label", "id"]}
+
+
+def test_unquoted_mixed_case_postgres_names_are_quoted():
+    sql = (
+        "SELECT e.Name, COUNT(*) FROM Equipment e JOIN sites s ON s.id = e.equipkey "
+        "WHERE e.doc->>'Equipment' = 'x' AND date '2020-01-01' < now() -- Equipment\n"
+        'GROUP BY 1, "Equipment".Name'
+    )
+
+    assert quote_case_sensitive_identifiers(sql, MIXED_CASE_SCHEMA, "postgresql") == (
+        'SELECT e."Name", COUNT(*) FROM "Equipment" e JOIN sites s ON s.id = e."EquipKey" '
+        "WHERE e.doc->>'Equipment' = 'x' AND date '2020-01-01' < now() -- Equipment\n"
+        'GROUP BY 1, "Equipment"."Name"'
+    )
+
+
+@pytest.mark.parametrize("schema,sql", [
+    # "Name" folds to sites.name, which exists, so an unqualified name is left alone.
+    ({"Equipment": ["Name"], "sites": ["name"]}, "SELECT name FROM sites"),
+    # Two mixed-case spellings match: there is no single intended name.
+    ({"Equipment": ["id"], "EQUIPMENT": ["id"]}, "SELECT id FROM equipment"),
+    # A function call keeps its name.
+    ({"Count": ["id"]}, "SELECT count(*) FROM t"),
+])
+def test_ambiguous_or_resolvable_names_stay_unquoted(schema, sql):
+    assert quote_case_sensitive_identifiers(sql, schema, "postgresql") == sql
+
+
+def test_mysql_names_are_left_as_written():
+    sql = "SELECT Name FROM Equipment"
+    assert quote_case_sensitive_identifiers(sql, MIXED_CASE_SCHEMA, "mysql") == sql

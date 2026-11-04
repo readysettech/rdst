@@ -58,12 +58,15 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
     # Import validation functions
     # Path: lib/engines/ask3/phases/validate.py -> lib/functions/sql_validation.py
     from features.ask.sql_validation import (
+        quote_case_sensitive_identifiers,
         validate_columns_against_schema,
         validate_resolved_columns_against_schema,
         validate_filter_literal_provenance,
         validate_sql_for_ask,
         validate_tables_against_schema,
     )
+
+    ctx.sql = quote_case_sensitive_identifiers(ctx.sql, ctx.get_schema_as_dict(), ctx.db_type)
 
     # Step 1: Read-only and LIMIT validation
     validation_result = validate_sql_for_ask(

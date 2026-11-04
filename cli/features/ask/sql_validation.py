@@ -1263,6 +1263,54 @@ def validate_tables_against_schema(
     }
 
 
+_UNQUOTED_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_$]*")
+
+
+def quote_case_sensitive_identifiers(
+    sql: str, schema: Dict[str, List[str]], dialect: str
+) -> str:
+    """Quote unquoted PostgreSQL names that can only mean a mixed-case table or column.
+
+    PostgreSQL folds an unquoted name to lower case, so `FROM Equipment` misses a table
+    created as "Equipment". A name is quoted when its lower-case form names nothing in the
+    schema and exactly one mixed-case table or column matches it ignoring case. Only the
+    names change; the rest of the text is kept as written.
+    """
+    if dialect != "postgresql" or not schema:
+        return sql
+    names = set(schema) | {column for columns in schema.values() for column in columns}
+    lower = {name for name in names if name == name.lower()}
+    candidates: Dict[str, set] = {}
+    for name in names - lower:
+        if name.lower() not in lower:
+            candidates.setdefault(name.casefold(), set()).add(name)
+    exact = {key: next(iter(found)) for key, found in candidates.items() if len(found) == 1}
+    if not exact:
+        return sql
+    try:
+        tokens = sqlglot.tokenize(sql, read="postgres")
+    except sqlglot.errors.TokenError:
+        return sql
+
+    replacements = []
+    for index, token in enumerate(tokens):
+        name = exact.get(token.text.casefold())
+        written = sql[token.start : token.end + 1]
+        if name is None or written != token.text or not _UNQUOTED_WORD.fullmatch(written):
+            continue
+        following = tokens[index + 1].token_type if index + 1 < len(tokens) else None
+        preceding = tokens[index - 1].token_type if index else None
+        # A keyword-typed word is a name only when qualified, as in e.Name.
+        if following == sqlglot.TokenType.L_PAREN or (
+            token.token_type != sqlglot.TokenType.VAR and preceding != sqlglot.TokenType.DOT
+        ):
+            continue
+        replacements.append((token.start, token.end + 1, f'"{name}"'))
+    for start, end, quoted in reversed(replacements):
+        sql = sql[:start] + quoted + sql[end:]
+    return sql
+
+
 def _find_similar_columns(
     target: str, candidates: List[str], max_suggestions: int = 3
 ) -> List[str]:
