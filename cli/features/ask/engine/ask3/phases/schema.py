@@ -63,6 +63,13 @@ def load_schema(
     """
     ctx.phase = "schema"
     presenter.schema_loading(ctx.target)
+    if "mysql" in (ctx.db_type or "") and ctx.database_name().casefold() == "mysql":
+        # Every table there is a system table, and its user table holds password hashes.
+        ctx.mark_error(
+            "Ask doesn't run on MySQL's mysql system database, which holds account "
+            "credentials. Connect RDST to an application database instead."
+        )
+        return ctx
 
     # Import here to avoid circular imports
     # Path: features/ask/engine/ask3/phases/schema.py -> features/schema/semantic_layer/manager.py
@@ -105,6 +112,13 @@ def load_schema(
             enum_threshold=20,
             sample_enums=True,
         )
+        if not layer.tables:
+            # An empty database still answers questions about itself from the catalog.
+            # Nothing is saved, so the next question introspects again once tables exist.
+            return _apply_semantic_layer(
+                ctx, presenter, layer, source=SchemaSource.DATABASE,
+                semantic_schema_formatter=semantic_schema_formatter,
+            )
         if not _is_complete(layer):
             ctx.mark_error("Schema initialization produced no usable typed tables")
             return ctx

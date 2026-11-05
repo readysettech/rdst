@@ -469,3 +469,42 @@ def test_schema_phase_does_not_overwrite_incomplete_existing_layer() -> None:
 
     manager.save.assert_not_called()
     assert result.schema_info.tables["events"].columns["id"].data_type == "bigint"
+
+
+def test_schema_phase_continues_for_an_empty_database_without_saving_it() -> None:
+    # "List all tables" on an empty database is answered from the catalog.
+    manager = Mock()
+    manager.exists.return_value = False
+    introspector = Mock()
+    introspector.introspect.return_value = SemanticLayer(target="fixture", tables={})
+    ctx = Ask3Context(
+        question="Show me the list of all tables in this database.",
+        target="fixture",
+        target_config={"engine": "mysql", "database": "qa_empty"},
+    )
+
+    with patch(
+        "features.schema.semantic_layer.introspector.SchemaIntrospector",
+        return_value=introspector,
+    ):
+        result = load_schema(ctx, Mock(), manager)
+
+    assert result.error_message is None
+    assert result.schema_info is not None and result.schema_info.tables == {}
+    manager.save.assert_not_called()
+
+
+def test_schema_phase_refuses_mysql_system_database_before_introspecting() -> None:
+    # Its unqualified `user` table holds password hashes, so no Ask query runs there.
+    manager = Mock()
+    ctx = Ask3Context(
+        question="Show every account", target="sysmy", db_type="mysql",
+        target_config={"engine": "mysql", "database": "MySQL"},
+    )
+
+    with patch("features.schema.semantic_layer.introspector.SchemaIntrospector") as introspector:
+        result = load_schema(ctx, Mock(), manager)
+
+    assert "mysql system database" in result.error_message
+    introspector.assert_not_called()
+    manager.exists.assert_not_called()

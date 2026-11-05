@@ -271,6 +271,77 @@ def test_table_validation_does_not_treat_cte_alias_as_physical_table() -> None:
     assert result["is_valid"] is True
 
 
+PAGILA = {"actor": ["actor_id", "first_name"], "payment": ["amount"]}
+
+
+@pytest.mark.parametrize("dialect,sql", [
+    ("postgresql", "SELECT table_name FROM information_schema.tables "
+                   "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"),
+    ("postgresql", "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public'"),
+    ("postgresql", "SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY n_live_tup DESC"),
+    ("postgresql", "SELECT t.table_name, s.n_live_tup FROM information_schema.tables t "
+                   "JOIN pg_stat_user_tables s ON s.relname = t.table_name"),
+    ("mysql", "SELECT TABLE_NAME, TABLE_ROWS FROM INFORMATION_SCHEMA.TABLES "
+              "WHERE TABLE_SCHEMA = 'cf2' ORDER BY TABLE_ROWS DESC"),
+    ("mysql", "SELECT * FROM performance_schema.table_io_waits_summary_by_table"),
+])
+@pytest.mark.parametrize("validator", [
+    validate_tables_against_schema,
+    validate_resolved_columns_against_schema,
+])
+def test_schema_validation_accepts_system_catalog_reads(validator, dialect, sql) -> None:
+    # Questions about the database itself (its tables, sizes, indexes) read the catalog.
+    assert validator(sql, PAGILA, dialect)["is_valid"] is True
+
+
+@pytest.mark.parametrize("dialect,sql,invalid", [
+    ("postgresql", "SELECT rolname, rolpassword FROM pg_authid", "pg_authid"),
+    ("postgresql", "SELECT * FROM pg_catalog.pg_shadow", "pg_shadow"),
+    ("mysql", "SELECT user, authentication_string FROM mysql.user", "user"),
+    ("mysql", "SELECT * FROM pg_tables", "pg_tables"),
+    ("postgresql", "SELECT * FROM public.pg_report", "pg_report"),
+])
+def test_table_validation_keeps_credentials_and_other_engines_out(dialect, sql, invalid):
+    result = validate_tables_against_schema(sql, PAGILA, dialect)
+    assert result["invalid_tables"] == [invalid]
+
+
+@pytest.mark.parametrize("dialect,sql", [
+    ("postgresql", "SELECT subname, subconninfo FROM pg_catalog.pg_subscription"),
+    ("postgresql", "SELECT rolname, rolpassword FROM pg_authid"),
+    ("mysql", "SELECT user, authentication_string FROM mysql.user"),
+    ("mysql", "SELECT user FROM `mysql`.`user`"),
+])
+def test_credential_catalogs_are_blocked_even_without_a_schema(dialect, sql):
+    # An empty database loads no tables, so this check can't rely on the schema.
+    result = validate_sql_for_ask(sql, dialect=dialect)
+    assert result["is_valid"] is False
+    assert "credentials" in result["issues"][0]
+
+
+@pytest.mark.parametrize("dialect,sql", [
+    ("postgresql", "SELECT 'pg_shadow' AS label"),
+    ("mysql", "SELECT mysql_version FROM app_settings"),
+    ("mysql", "SELECT OBJECT_NAME FROM performance_schema.table_io_waits_summary_by_table"),
+])
+def test_credential_check_ignores_literals_and_lookalike_names(dialect, sql):
+    assert validate_sql_for_ask(sql, dialect=dialect)["is_valid"] is True
+
+
+def test_validation_phase_accepts_a_catalog_query_with_strict_column_resolution():
+    ctx = Ask3Context(question="Show me the list of all tables in database", target="pagila")
+    ctx.resolved_column_validation_enabled = True
+    ctx.sql = ("SELECT table_name FROM information_schema.tables "
+               "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'")
+    ctx.schema_info = SchemaInfo(target="pagila", db_type="postgresql", tables={
+        "actor": TableInfo(name="actor", columns={
+            "actor_id": ColumnInfo(name="actor_id", data_type="integer")
+        })
+    })
+    validate_sql(ctx, MagicMock())
+    assert ctx.validation_errors == []
+
+
 class TestSelectInto:
     """SELECT ... INTO writes rows to a destination the caller never sees."""
 

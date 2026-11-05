@@ -90,7 +90,7 @@ def generate_sql(
         nl_question=question,
         filtered_schema=ctx.schema_formatted,
         database_engine=ctx.db_type,
-        target_database=ctx.target,
+        target_database=ctx.database_name(),
         llm_manager=llm_manager,
         provided_context=ctx.provided_context,
         schema_format=ctx.schema_format,

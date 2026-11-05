@@ -582,3 +582,20 @@ def test_invalid_validation_repair_output_does_not_abort_request() -> None:
 
     assert result["success"] is False
     assert "Expecting value" in result["error"]
+
+
+def test_generation_names_the_database_not_the_target_label() -> None:
+    # On MySQL a catalog query filters on the database name; the target is RDST's label.
+    from features.ask.engine.ask3.phases.generate import generate_sql
+
+    ctx = Ask3Context(question="Which table has the most rows?", target="cfmy",
+                      db_type="mysql", target_config={"database": "cf2"})
+    refusal = {"success": True, "sql": "", "explanation": "", "confidence": 0.0,
+               "assumptions": [], "cannot_answer": True, "cannot_answer_reason": "missing_schema",
+               "missing_schema": ["rows"], "error": None, "raw_response": {}}
+    with patch("features.ask.sql_generation.generate_sql_from_nl",
+               return_value=refusal) as generate:
+        generate_sql(ctx, MagicMock(), llm_manager=MagicMock())
+
+    assert generate.call_args.kwargs["target_database"] == "cf2"
+    assert Ask3Context(question="q", target="cfmy").database_name() == "cfmy"

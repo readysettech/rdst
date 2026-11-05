@@ -609,6 +609,10 @@ class Ask3Context:
         self.total_tokens += tokens
         self.total_llm_time_ms += latency_ms
 
+    def database_name(self) -> str:
+        """The database's own name, which catalog queries filter on; `target` is RDST's label."""
+        return str((self.target_config or {}).get("database") or self.target)
+
     def get_schema_as_dict(self) -> Dict[str, List[str]]:
         """
         Get schema as dict mapping table names to column names.

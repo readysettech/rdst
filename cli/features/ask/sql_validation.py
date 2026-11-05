@@ -54,6 +54,17 @@ WRITE_KEYWORDS = {
 # Safe read-only keywords
 READ_KEYWORDS = {"SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN"}
 
+# System catalogs a question about the database itself reads (its tables, row counts,
+# sizes, indexes). They are absent from the loaded schema, so the server checks their
+# columns when the query runs. MySQL's `mysql` schema holds account credentials.
+CATALOG_SCHEMAS = {
+    "postgresql": frozenset({"information_schema", "pg_catalog"}),
+    "mysql": frozenset({"information_schema", "performance_schema", "sys"}),
+}
+CREDENTIAL_RELATIONS = frozenset({
+    "pg_authid", "pg_shadow", "pg_user_mapping", "pg_user_mappings", "pg_subscription",
+})
+
 
 def describe_validation_issues(issues: Any) -> str:
     """One sentence for a validation refusal, built from each issue's message.
@@ -630,6 +641,19 @@ def _is_mysql(dialect: str) -> bool:
     return "mysql" in (dialect or "").casefold()
 
 
+def is_catalog_relation(table: exp.Table, schema_names: set[str], dialect: str) -> bool:
+    """True when ``table`` names a readable system catalog rather than a user table."""
+    name = table.name.casefold()
+    if not name or name in CREDENTIAL_RELATIONS:
+        return False
+    mysql = _is_mysql(dialect)
+    schema = table.db.casefold()
+    if schema:
+        return schema in CATALOG_SCHEMAS["mysql" if mysql else "postgresql"]
+    # PostgreSQL searches pg_catalog before the user's schemas.
+    return not mysql and name.startswith("pg_") and name not in schema_names
+
+
 def _continues_identifier(sql: str, i: int) -> bool:
     """Whether the character before ``i`` belongs to an identifier or keyword."""
     return i > 0 and (sql[i - 1].isalnum() or sql[i - 1] in "_$")
@@ -804,6 +828,11 @@ def _check_forbidden_constructs(sql: str, dialect: str = "") -> List[str]:
                 found.append(
                     f"{func}() reaches outside the queried tables and is not permitted"
                 )
+        for relation in sorted(CREDENTIAL_RELATIONS):
+            if re.search(r"\b" + relation.upper() + r"\b", names_upper):
+                found.append(f"{relation} holds credentials and is not permitted")
+        if _is_mysql(dialect) and re.search(r"(?<![\w$])MYSQL[`\"]?\s*\.", names_upper):
+            found.append("The mysql schema holds account credentials and is not permitted")
         if view.escaped_name:
             found.append("Unicode-escaped quoted names are not permitted")
         issues.extend(issue for issue in found if issue not in issues)
@@ -1156,6 +1185,13 @@ def validate_resolved_columns_against_schema(
     }
     try:
         tree = sqlglot.parse_one(sql, read=read_dialect)
+        schema_names = {name.casefold() for name in schema}
+        if any(
+            is_catalog_relation(table, schema_names, dialect)
+            for table in tree.find_all(exp.Table)
+        ):
+            # Catalog columns aren't in the loaded schema; the server resolves them.
+            return {"is_valid": True, "error_message": None}
         resolved_schema = MappingSchema(
             mapping,
             dialect=read_dialect,
@@ -1213,6 +1249,7 @@ def validate_tables_against_schema(
             if table.name
             and table.name.casefold() not in cte_names
             and table.name.casefold() not in schema_names
+            and not is_catalog_relation(table, set(schema_names), dialect)
         },
         key=str.casefold,
     )

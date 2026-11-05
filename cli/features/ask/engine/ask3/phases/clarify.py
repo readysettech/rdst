@@ -53,7 +53,7 @@ def clarify_question(
 
     # Detect ambiguities
     result = detect_ambiguities(
-        target_database=ctx.target,
+        target_database=ctx.database_name(),
         nl_question=ctx.question,
         filtered_schema=ctx.schema_formatted,
         database_engine=ctx.db_type,

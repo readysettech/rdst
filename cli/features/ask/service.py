@@ -814,7 +814,8 @@ class AskService:
                 )
                 return
 
-            if not ctx.schema_info or not ctx.schema_info.tables:
+            # A database with no tables still answers questions about itself.
+            if not ctx.schema_info:
                 self._observe(AskPhase.SCHEMA, ctx)
                 yield AskErrorEvent(
                     type="error",
@@ -4052,7 +4053,7 @@ class AskService:
 
         result = detect_ambiguities(
             nl_question=ctx.question,
-            target_database=ctx.target,
+            target_database=ctx.database_name(),
             filtered_schema=ctx.schema_formatted,
             database_engine=ctx.db_type,
             llm_manager=llm_manager,

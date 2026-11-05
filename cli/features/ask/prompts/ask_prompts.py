@@ -62,6 +62,10 @@ Requirements:
   output columns and cardinality, and dialect-correct non-integer arithmetic. Remove
   any unsupported join, predicate, limit, exclusion, rounding, or intermediate output.
 - Use only tables and columns present in the schema and the requested database dialect.
+- A question about the database itself (its tables, row counts, sizes, indexes, I/O)
+  may also read the engine's system catalogs: information_schema, on PostgreSQL the
+  pg_catalog views and size functions, and on MySQL performance_schema and sys. Keep
+  catalog results to this database's own schemas.
 - Keep `explanation` to one short sentence.
 - Put every unavoidable interpretation in `assumptions`; do not encode a hedge as an
   invented SQL predicate.
