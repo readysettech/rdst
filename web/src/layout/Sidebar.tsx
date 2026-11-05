@@ -12,6 +12,7 @@ import {
   onDatabasesChanged,
   useOpenAddDatabase,
 } from '../components/configure/addDatabase'
+import { DesktopUpdateControl } from '../components/DesktopUpdateControl'
 import { ACTIVE_RUN } from '../features/agent-activity/RunningNow'
 import { useInboxUnread } from '../features/inbox/useInboxUnread'
 import { RADAR_STATE, Radar, RadarTooltip } from '../features/monitor-kit/Radar'
@@ -29,6 +30,7 @@ import {
   useConfiguredDatabases,
   useMonitorSettings,
 } from '../lib/monitor/hooks'
+import { useDesktopUpdates } from '../lib/useDesktopUpdates'
 import '../features/monitor-kit/charts/monitorKit.css'
 import { PlatformCard } from './PlatformCard'
 import { SidebarAccountMenu } from './SidebarAccountMenu'
@@ -242,7 +244,7 @@ function DatabaseList({
 /**
  * The sidebar on the page tone, flush with the canvas: the four pages that cover every
  * database, one item per configured database, the Readyset Platform card, then the
- * secondary group and the account line.
+ * secondary group with the desktop update and the account line.
  */
 export function Sidebar() {
   const currentPath = useRouterState({
@@ -270,6 +272,7 @@ export function Sidebar() {
   const inboxUnread = useInboxUnread()
   const openAddDatabase = useOpenAddDatabase()
   const queryClient = useQueryClient()
+  const update = useDesktopUpdates()
   // What Activity lists under Running now: this browser's runs, and each database's
   // analysis or report in progress.
   const running =
@@ -358,6 +361,7 @@ export function Sidebar() {
         aria-label="Secondary"
         className="flex flex-col gap-1 border-t border-border-layout-soft pt-3.5"
       >
+        <DesktopUpdateControl state={update.state} install={update.install} />
         {secondaryItems.map((item) => (
           <NavLink
             key={item.to}

@@ -33,7 +33,6 @@ import {
   useOpenAddDatabase,
 } from '../../components/configure/addDatabase'
 import type { AddTab } from '../../components/configure/addTabs'
-import { DesktopUpdateControl } from '../../components/DesktopUpdateControl'
 import { EnvSecretsDialog } from '../../components/EnvSecretsDialog'
 import { FeedbackChat } from '../../components/FeedbackChat'
 import { TrialRegistrationDialog } from '../../components/TrialRegistrationDialog'
@@ -58,7 +57,6 @@ import {
 import { fetchTunnelStatuses, testTunnel } from '../../lib/tunnels'
 import { useAnthropicValidity } from '../../lib/useAnthropicValidity'
 import { useConfigure } from '../../lib/useConfigure'
-import { useDesktopUpdates } from '../../lib/useDesktopUpdates'
 import { fetchFleetTargets, useFleetStatus } from '../../lib/useFleet'
 import { useSystemStatus } from '../../lib/useSystemStatus'
 import type { ConfigureTargetDetail } from '../../types/configure'
@@ -268,7 +266,6 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   const currentTarget =
     selectedTarget ?? statusData?.default_target ?? targets[0]?.name ?? null
   const monitorSettings = useMonitorSettings(currentTarget ?? '')
-  const updates = useDesktopUpdates()
   const pushOn = useSyncExternalStore(
     subscribePush,
     desktopNotificationsEnabled,
@@ -799,12 +796,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
                 <span className="tabular-nums">{statusData.version}</span>
               ) : undefined
             }
-          >
-            <DesktopUpdateControl
-              state={updates.state}
-              install={updates.install}
-            />
-          </SettingsRow>
+          />
           <div className="flex gap-5 py-3.5 text-body-small text-content-layout-2">
             <a
               href={DOCS_URL}

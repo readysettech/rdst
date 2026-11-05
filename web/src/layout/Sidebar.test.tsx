@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { trackEvent } from '../lib/analytics'
+import type { DesktopUpdateState } from '../lib/desktop'
 import type { ConfiguredDatabase } from '../lib/monitor/hooks'
 import { renderWithClient } from '../test-utils'
 import { SHOWN_DATABASES, Sidebar } from './Sidebar'
@@ -81,6 +82,14 @@ vi.mock('../components/configure/addDatabase', () => ({
   onDatabasesChanged: () => () => {},
 }))
 
+const update = vi.hoisted(() => ({
+  state: null as DesktopUpdateState | null,
+  install: vi.fn(),
+}))
+vi.mock('../lib/useDesktopUpdates', () => ({
+  useDesktopUpdates: () => update,
+}))
+
 vi.mock('../lib/analytics', () => ({
   trackEvent: vi.fn(),
 }))
@@ -110,6 +119,8 @@ afterEach(() => {
   configured.databases = []
   configured.doFirst = null
   openAdd.mockClear()
+  update.state = null
+  update.install.mockClear()
 })
 
 describe('Sidebar', () => {
@@ -379,5 +390,37 @@ describe('Sidebar', () => {
     expect(trackEvent).toHaveBeenCalledWith('nav_item_clicked', {
       label: 'Ask',
     })
+  })
+
+  it('shows the desktop update in the secondary group and restarts from it', () => {
+    renderSidebar()
+    expect(screen.queryByRole('button', { name: /Version/ })).toBeNull()
+    cleanup()
+
+    update.state = { status: 'ready', version: '1.4.0', downloadLinks: [] }
+    renderSidebar()
+    const button = screen.getByRole('button', {
+      name: /Version 1.4.0 is ready/,
+    })
+    expect(
+      screen.getByRole('navigation', { name: 'Secondary' }).contains(button)
+    ).toBe(true)
+    expect(button.textContent).toBe('Restart to update')
+    fireEvent.click(button)
+    expect(update.install).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows download progress while the update downloads', () => {
+    update.state = {
+      status: 'downloading',
+      version: '1.4.0',
+      downloadLinks: [],
+      progress: 42.4,
+    }
+    renderSidebar()
+    expect(
+      screen.getByRole('button', { name: /Downloading version 1.4.0/ })
+        .textContent
+    ).toBe('Downloading 42%')
   })
 })

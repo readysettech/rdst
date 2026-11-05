@@ -1,4 +1,7 @@
+import { cn } from '@rs/tailwind-base'
 import { Button } from '@rs/ui-new/button'
+import { focusRing } from '@rs/ui-new/focus'
+import { Icon } from '@rs/ui-new/icon'
 import { Popover, PopoverContent, PopoverTrigger } from '@rs/ui-new/popover'
 import { Pressable } from '@rs/ui-new/pressable'
 import { Progress } from '@rs/ui-new/progress'
@@ -14,7 +17,7 @@ function updateCopy(state: DesktopUpdateState): {
 } {
   if (state.status === 'ready') {
     return {
-      button: 'Restart',
+      button: 'Restart to update',
       title: `Version ${state.version} is ready`,
       detail: 'Restart RDST to finish installing the update.',
     }
@@ -23,14 +26,14 @@ function updateCopy(state: DesktopUpdateState): {
   if (state.status === 'downloading') {
     const progress = Math.round(state.progress ?? 0)
     return {
-      button: `${progress}%`,
+      button: `Downloading ${progress}%`,
       title: `Downloading version ${state.version}`,
       detail: 'RDST will be ready to restart when the download finishes.',
     }
   }
 
   return {
-    button: 'Update',
+    button: 'Update available',
     title: `Version ${state.version} is available`,
     detail:
       state.downloadLinks.length > 0
@@ -78,26 +81,27 @@ export function DesktopUpdateControl({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         {/* Kept as a hand-roll: this is the PopoverTrigger asChild target with
-            hover-intent handlers, and a compact h-7 status pill below the
-            smallest Button/IconButton size — a Button here would grow its visual
-            weight and IconButton's tooltip wrapper breaks asChild ref
-            forwarding. */}
+            hover-intent handlers, shaped as a sidebar row rather than a Button. */}
         <Pressable
           type="button"
           aria-label={`${copy.button}: ${copy.title}`}
           onClick={handleClick}
           onMouseEnter={hoverOpen}
           onMouseLeave={hoverClose}
-          className="inline-flex h-7 min-w-14 cursor-pointer items-center justify-center rounded-lg border border-border-primary-soft bg-surface-primary-soft px-2 text-button-small text-content-primary-soft transition-colors hover:bg-surface-primary-soft-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-primary-soft"
+          className={cn(
+            'flex w-full cursor-pointer items-center gap-2.5 rounded-control border border-border-primary-soft bg-surface-primary-soft px-2.5 py-1.5 text-left text-caption text-content-primary-soft transition-colors hover:bg-surface-primary-soft-hover',
+            focusRing
+          )}
         >
-          {copy.button}
+          <Icon name="arrow-down" label="" size="small" />
+          <span className="min-w-0 truncate">{copy.button}</span>
         </Pressable>
       </PopoverTrigger>
       <PopoverContent
-        side="right"
-        align="end"
+        side="top"
+        align="start"
         sideOffset={8}
-        className="w-72 flex-col gap-3 p-4"
+        className="w-(--radix-popover-trigger-width) min-w-0 flex-col gap-3 p-4"
         onMouseEnter={hoverOpen}
         onMouseLeave={hoverClose}
         onOpenAutoFocus={(event) => event.preventDefault()}
@@ -121,7 +125,7 @@ export function DesktopUpdateControl({
         )}
 
         {state.status === 'available' && state.downloadLinks.length > 0 && (
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2">
             {state.downloadLinks.map((link) => (
               <a
                 key={link.url}

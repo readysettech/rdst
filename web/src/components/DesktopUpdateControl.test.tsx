@@ -28,7 +28,7 @@ describe('DesktopUpdateControl', () => {
     render(<DesktopUpdateControl state={state} install={install} />)
     fireEvent.mouseEnter(
       screen.getByRole('button', {
-        name: '47%: Downloading version 1.0.9',
+        name: 'Downloading 47%: Downloading version 1.0.9',
       })
     )
     act(() => vi.advanceTimersByTime(120))
@@ -47,7 +47,7 @@ describe('DesktopUpdateControl', () => {
     render(<DesktopUpdateControl state={state} install={install} />)
     fireEvent.mouseEnter(
       screen.getByRole('button', {
-        name: 'Update: Version 1.0.9 is available',
+        name: 'Update available: Version 1.0.9 is available',
       })
     )
     act(() => vi.advanceTimersByTime(120))
@@ -69,7 +69,7 @@ describe('DesktopUpdateControl', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Restart: Version 1.0.9 is ready',
+        name: 'Restart to update: Version 1.0.9 is ready',
       })
     )
     expect(install).toHaveBeenCalledTimes(1)

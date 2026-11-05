@@ -6,14 +6,12 @@ import { PageContainer } from '@rs/ui-new/page-container'
 import { Pressable } from '@rs/ui-new/pressable'
 import { Text } from '@rs/ui-new/text'
 import { type ReactNode, useState } from 'react'
-import { DesktopUpdateControl } from '../components/DesktopUpdateControl'
 import { FeedbackChat } from '../components/FeedbackChat'
 import {
   openTour,
   useSavedTourStep,
 } from '../features/onboarding/onboardingState'
 import { DISCORD_INVITE_URL, DOCS_URL } from '../features/settings/links'
-import { useDesktopUpdates } from '../lib/useDesktopUpdates'
 import { useSystemStatus } from '../lib/useSystemStatus'
 
 const doorClass = `flex w-full cursor-pointer items-center gap-3.5 rounded-card border border-border-layout-2 bg-surface-primary-soft px-5 py-4.5 text-left transition-[border-color] duration-fast ease-base hover:border-content-layout-3 ${focusRingClass}`
@@ -81,7 +79,6 @@ const GO_SHORTCUTS = [
 export function HelpPage() {
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const { data: status } = useSystemStatus()
-  const updates = useDesktopUpdates()
   const tourStep = useSavedTourStep()
 
   return (
@@ -190,10 +187,6 @@ export function HelpPage() {
           {status?.version && (
             <span className="tabular-nums">RDST {status.version}</span>
           )}
-          <DesktopUpdateControl
-            state={updates.state}
-            install={updates.install}
-          />
         </div>
       </PageContainer>
       <FeedbackChat
