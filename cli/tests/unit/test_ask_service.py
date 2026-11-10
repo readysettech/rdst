@@ -16,6 +16,7 @@ from features.ask.ambiguity_detection import (
     RANKED_RESOLVER_POLICY,
     Ambiguity,
     AmbiguityOption,
+    AmbiguityReport,
 )
 from features.ask.events import (
     AskClarificationNeededEvent,
@@ -552,6 +553,53 @@ class TestAskServiceSessionManagement:
         assert ctx.retry_count == 1
 
     @pytest.mark.asyncio
+    async def test_validation_repair_quotes_the_definition_of_a_metric_used_as_column(
+        self,
+    ):
+        from features.ask.engine.ask3.context import Ask3Context
+        from features.ask.engine.ask3.types import ValidationError
+
+        service = AskService(persist_queries=False)
+        ctx = Ask3Context(question="Top devices by WPR", target="test", dry_run=True)
+        ctx.provided_context = "Metrics:\nWPR = wlrangem / 10 * wlsignal"
+
+        def fake_generate(context, _presenter, _manager):
+            context.sql = "SELECT d.WPR FROM deviceidentity d"
+            return context
+
+        def fake_validate(context, _presenter):
+            context.clear_validation_errors()
+            if "WPR" in context.sql:
+                context.validation_errors.append(
+                    ValidationError(column="wpr", table_alias=None, message="Column not found")
+                )
+            return context
+
+        prompts = []
+
+        def fake_repair(context, _presenter, error_message, _manager):
+            prompts.append(error_message)
+            context.sql = "SELECT d.wlrangem / 10 * d.wlsignal FROM deviceidentity d"
+            return context
+
+        with (
+            patch("features.ask.service.generate_sql", side_effect=fake_generate),
+            patch("features.ask.service.validate_sql", side_effect=fake_validate),
+            patch(
+                "features.ask.service.repair_validation_error", side_effect=fake_repair
+            ),
+        ):
+            events = [
+                event
+                async for event in service._run_from_generate(ctx, persist_query=False)
+            ]
+
+        assert isinstance(events[-1], AskResultEvent)
+        assert len(prompts) == 1
+        assert prompts[0].startswith("SQL Validation Errors:\n- wpr: Column not found")
+        assert prompts[0].endswith("\n- WPR = wlrangem / 10 * wlsignal")
+
+    @pytest.mark.asyncio
     async def test_failed_validation_repair_does_not_execute_invalid_sql(self):
         from features.ask.engine.ask3.context import Ask3Context
         from features.ask.engine.ask3.types import ValidationError
@@ -1067,6 +1115,8 @@ class TestAskServiceSessionManagement:
                 "question": "What does active mean?",
                 "action": "answer",
                 "answer": "active means enabled = 1",
+                "answer_type": "choice",
+                "origin": "detector",
                 "source": "user",
                 "applied": True,
             }
@@ -1254,6 +1304,102 @@ class TestAskServiceDependencyInjection:
             code=None,
             category=None,
         )
+
+    @pytest.mark.parametrize("code", ["PROMPT_NOT_ALLOWED", "OPERATION_LIMIT_EXCEEDED"])
+    def test_a_detector_request_keyservice_does_not_admit_proceeds(self, code):
+        service = AskService(llm_manager=Mock())
+        ctx = Mock(question="Which users?", schema_formatted="users table",
+                   db_type="postgresql", provided_context="", no_interactive=False)
+
+        with patch(
+            "features.ask.service.detect_ambiguities",
+            return_value={"success": False, "error": "not admitted", "error_code": code},
+        ):
+            _, interpretations, ambiguities = service._detect_ambiguities(ctx)
+
+        assert (interpretations, ambiguities) == ([], [])
+        assert ctx.ambiguity_report["fallback"] == "proceed_without_clarification"
+        ctx.mark_error.assert_not_called()
+
+    @pytest.mark.parametrize("compact", [False, True])
+    def test_ambiguity_detection_requests_the_configured_reply(self, compact):
+        service = AskService(llm_manager=Mock(), compact_clarification_enabled=compact)
+        ctx = Mock(question="Which users?", schema_formatted="users", db_type="mysql")
+
+        with patch(
+            "features.ask.service.detect_ambiguities",
+            return_value={"success": True, "report": None},
+        ) as detect:
+            service._detect_ambiguities(ctx)
+
+        assert detect.call_args.kwargs["compact"] is compact
+
+    @pytest.mark.parametrize(
+        ("ceiling", "confidence", "asks"),
+        [(None, 0.9, True), (0.55, 0.55, True), (0.55, 0.6, False)],
+    )
+    def test_clarification_confidence_ceiling_gates_asking(self, ceiling, confidence, asks):
+        service = AskService(
+            llm_manager=Mock(), clarification_confidence_ceiling=ceiling
+        )
+        ctx = Mock(question="Which users?", schema_formatted="users", db_type="mysql")
+        ambiguity = Ambiguity(
+            id="status",
+            category="status",
+            clarifying_question="What does active mean?",
+            possible_interpretations=[
+                AmbiguityOption("enabled", "enabled = 1", 0.6),
+                AmbiguityOption("recent", "last_seen is recent", 0.4),
+            ],
+            term="active",
+            reason="active is undefined",
+        )
+        report = AmbiguityReport(
+            ambiguities=[ambiguity],
+            total_ambiguities=1,
+            requires_clarification=True,
+            overall_confidence=confidence,
+        )
+
+        with patch(
+            "features.ask.service.detect_ambiguities",
+            return_value={"success": True, "report": report},
+        ):
+            _, _, ambiguities = service._detect_ambiguities(ctx)
+
+        assert ambiguities == ([ambiguity] if asks else [])
+        assert ("confidence_ceiling_proceeded" in ctx.ambiguity_report) is not asks
+
+    def test_unparseable_detector_reply_proceeds_without_clarification(self):
+        service = AskService(llm_manager=Mock())
+        ctx = Mock(
+            question="Which users?",
+            schema_formatted="users table",
+            db_type="postgresql",
+            provided_context="",
+            no_interactive=False,
+        )
+
+        with patch(
+            "features.ask.service.detect_ambiguities",
+            return_value={
+                "success": False,
+                "error": "Invalid JSON from LLM: Expecting value",
+                "parse_failure": True,
+                "raw_response": "not json",
+            },
+        ):
+            returned_ctx, interpretations, ambiguities = service._detect_ambiguities(
+                ctx
+            )
+
+        assert (returned_ctx, interpretations, ambiguities) == (ctx, [], [])
+        assert ctx.ambiguity_report == {
+            "error": "Invalid JSON from LLM: Expecting value",
+            "error_code": None,
+            "fallback": "proceed_without_clarification",
+        }
+        ctx.mark_error.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_duplicate_clarification_categories_receive_unique_answer_keys(self):
@@ -2418,3 +2564,250 @@ class TestAskEngineImports:
         from features.ask.engine.ask3.engine import Ask3Engine
 
         assert Ask3Engine is not None
+
+
+def _fake_schema_load(ctx, _presenter, _manager):
+    from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
+
+    ctx.schema_info = SchemaInfo(
+        target="test", db_type="postgresql", source=SchemaSource.DATABASE
+    )
+    ctx.schema_info.tables = {"lab": Mock()}
+    return ctx
+
+
+async def _load_test_config(target):
+    return (target, {"engine": "postgresql"})
+
+
+@pytest.mark.asyncio
+async def test_open_question_is_asked_without_options_and_resumes_with_text():
+    sessions = {}
+    service = AskService(session_store=sessions, persist_queries=False)
+    cutoff = Ambiguity(
+        id="glucose-cutoff",
+        category="unclear_value_reference",
+        term="high glucose",
+        reason="No stated cutoff defines high glucose.",
+        clarifying_question="What glucose level counts as high?",
+        possible_interpretations=[],
+        answer_type="value",
+    )
+    generated = []
+
+    def fake_generate(ctx, _presenter, _manager):
+        generated.append(ctx.refined_question)
+        ctx.sql = "SELECT COUNT(*) FROM lab WHERE glu > 180"
+        ctx.generated_sql = ctx.sql
+        return ctx
+
+    with (
+        patch.object(service, "_load_config", side_effect=_load_test_config),
+        patch("features.ask.service.load_schema", side_effect=_fake_schema_load),
+        patch.object(
+            service, "_detect_ambiguities", side_effect=lambda ctx: (ctx, [], [cutoff])
+        ),
+        patch("features.ask.service.generate_sql", side_effect=fake_generate),
+        patch(
+            "features.ask.service.validate_sql", side_effect=lambda ctx, _presenter: ctx
+        ),
+    ):
+        events = [
+            event
+            async for event in service.ask(
+                AskInput(question="How many patients have high glucose?", target="t"),
+                AskOptions(no_interactive=False, dry_run=True, persist_query=False),
+            )
+        ]
+        clarification = events[-1]
+        assert isinstance(clarification, AskClarificationNeededEvent)
+        [question] = clarification.questions
+        assert question.options == []
+        resumed = [
+            event
+            async for event in service.resume(
+                clarification.session_id, {question.id: "Above 180 mg/dL"}
+            )
+        ]
+
+    assert isinstance(resumed[-1], AskResultEvent)
+    assert "Above 180 mg/dL" in generated[0]
+
+
+@pytest.mark.asyncio
+async def test_validation_repair_quotes_the_answers_definition_not_the_questions_filter():
+    from features.ask.engine.ask3.types import ValidationError
+
+    service = AskService(session_store={}, persist_queries=False)
+    wpr = Ambiguity(
+        id="wpr",
+        category="unclear_knowledge_source",
+        term="WPR",
+        reason="No definition of WPR is given.",
+        clarifying_question="How is WPR computed?",
+        possible_interpretations=[],
+        answer_type="definition",
+    )
+    validations = []
+    repairs = []
+
+    def fake_generate(ctx, _presenter, _manager):
+        ctx.sql = ctx.generated_sql = "SELECT wpr FROM devices WHERE category = 'toys'"
+        return ctx
+
+    def fake_validate(ctx, _presenter):
+        validations.append(ctx.sql)
+        ctx.clear_validation_errors()
+        if len(validations) == 1:
+            for name in ("wpr", "category"):
+                ctx.validation_errors.append(ValidationError(
+                    column=name, table_alias=None, message=f"Column '{name}' not found"))
+        return ctx
+
+    def fake_repair(ctx, _presenter, message, _manager):
+        repairs.append(message)
+        return ctx
+
+    with (
+        patch.object(service, "_load_config", side_effect=_load_test_config),
+        patch("features.ask.service.load_schema", side_effect=_fake_schema_load),
+        patch.object(service, "_detect_ambiguities", side_effect=lambda ctx: (ctx, [], [wpr])),
+        patch("features.ask.service.generate_sql", side_effect=fake_generate),
+        patch("features.ask.service.validate_sql", side_effect=fake_validate),
+        patch("features.ask.service.repair_validation_error", side_effect=fake_repair),
+    ):
+        events = [
+            event
+            async for event in service.ask(
+                AskInput(question="Show devices where category = 'toys' by WPR", target="t"),
+                AskOptions(no_interactive=False, dry_run=True, persist_query=False),
+            )
+        ]
+        clarification = events[-1]
+        [question] = clarification.questions
+        [event async for event in service.resume(
+            clarification.session_id, {question.id: "WPR = wlrangem / 10 * wlsignal"})]
+
+    [message] = repairs
+    assert "WPR = wlrangem / 10 * wlsignal" in message
+    assert "category = 'toys'" not in message
+
+
+async def _writer_dialogue(refusals, answer=None, *, no_interactive=False, missing=("elderly",)):
+    """Ask a question whose SQL writer cannot find ``missing`` for the first ``refusals``
+    calls, and answer each question Ask raises with ``answer``."""
+    generated = []
+
+    def fake_generate(ctx, _presenter, _manager):
+        generated.append(ctx.refined_question or ctx.question)
+        if len(generated) <= refusals:
+            ctx.missing_schema = list(missing)
+            ctx.mark_error(
+                "No column defines elderly.",
+                code="ask_cannot_answer",
+                category="missing_schema",
+            )
+            return ctx
+        ctx.sql = "SELECT COUNT(*) FROM lab WHERE age > 65"
+        ctx.generated_sql = ctx.sql
+        return ctx
+
+    service = AskService(session_store={}, persist_queries=False)
+    rounds = []
+    with (
+        patch.object(service, "_load_config", side_effect=_load_test_config),
+        patch("features.ask.service.load_schema", side_effect=_fake_schema_load),
+        patch.object(
+            service, "_detect_ambiguities", side_effect=lambda ctx: (ctx, [], [])
+        ),
+        patch("features.ask.service.generate_sql", side_effect=fake_generate),
+        patch(
+            "features.ask.service.validate_sql", side_effect=lambda ctx, _presenter: ctx
+        ),
+    ):
+        events = [
+            event
+            async for event in service.ask(
+                AskInput(question="How many elderly patients are there?", target="t"),
+                AskOptions(
+                    no_interactive=no_interactive, dry_run=True, persist_query=False
+                ),
+            )
+        ]
+        rounds.append(events)
+        while isinstance(events[-1], AskClarificationNeededEvent) and len(rounds) < 4:
+            clarification = events[-1]
+            answers = {q.id: answer for q in clarification.questions if answer}
+            events = [
+                event
+                async for event in service.resume(clarification.session_id, answers)
+            ]
+            rounds.append(events)
+    return rounds, generated
+
+
+@pytest.mark.asyncio
+async def test_writer_refusal_asks_about_the_missing_concept_and_retries():
+    rounds, generated = await _writer_dialogue(refusals=1, answer="Older than 65")
+
+    asked, answered = rounds
+    assert not any(isinstance(event, AskErrorEvent) for event in asked)
+    [question] = asked[-1].questions
+    assert question.options == []
+    assert "elderly" in question.question
+    assert isinstance(answered[-1], AskResultEvent)
+    assert "- elderly: " in generated[-1] and "Answer: Older than 65" in generated[-1]
+
+
+@pytest.mark.asyncio
+async def test_writer_refusal_names_every_missing_concept_in_one_question():
+    missing = (
+        "weather forecast data",
+        "weather conditions for Monaco",
+        "Weather forecast data",
+        "forecast date for tomorrow",
+        "forecast provider",
+    )
+    rounds, generated = await _writer_dialogue(
+        refusals=2, answer="There is none", missing=missing
+    )
+
+    asked, refused = rounds
+    [question] = asked[-1].questions
+    assert question.question == (
+        "I couldn't find weather forecast data, weather conditions for Monaco or forecast "
+        "date for tomorrow in this database. Which table, column or JSON key hold them, "
+        "or how should I work them out?"
+    )
+    assert "Answer: There is none" in generated[-1]
+    error = refused[-1]
+    assert isinstance(error, AskErrorEvent)
+    assert error.code == "ask_cannot_answer"
+
+
+@pytest.mark.asyncio
+async def test_writer_refusal_is_asked_about_once():
+    rounds, generated = await _writer_dialogue(refusals=2, answer="Older than 65")
+
+    assert len(rounds) == 2 and len(generated) == 2
+    error = rounds[-1][-1]
+    assert isinstance(error, AskErrorEvent)
+    assert error.code == "ask_cannot_answer"
+
+
+@pytest.mark.asyncio
+async def test_unanswered_writer_question_keeps_the_refusal():
+    rounds, generated = await _writer_dialogue(refusals=1, answer=None)
+
+    assert len(generated) == 1
+    error = rounds[-1][-1]
+    assert isinstance(error, AskErrorEvent)
+    assert (error.code, error.category) == ("ask_cannot_answer", "missing_schema")
+
+
+@pytest.mark.asyncio
+async def test_non_interactive_writer_refusal_is_an_error():
+    rounds, generated = await _writer_dialogue(refusals=1, no_interactive=True)
+
+    assert len(rounds) == 1 and len(generated) == 1
+    assert isinstance(rounds[0][-1], AskErrorEvent)

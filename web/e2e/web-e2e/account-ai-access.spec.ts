@@ -185,11 +185,18 @@ test('account login unlocks hosted Ask and sign-out asks for a sign-in again', a
     })
     await expect(clarifyFailure).not.toBeVisible()
     if (await choice.isVisible()) {
-      // One question or several, one at a time with the first option chosen:
+      // One question or several, one at a time with the first option chosen,
+      // or a short answer typed for a question about a value or definition:
       // run with each until the last one asks for the answer.
       for (let step = 0; step < 6 && (await choice.isVisible()); step += 1) {
         const question = await choice.locator('p').first().innerText()
-        await choice.getByRole('button', { name: /^Run with / }).click()
+        const typed = choice.getByRole('textbox')
+        if (await typed.isVisible()) {
+          await typed.fill('the highest rated ones')
+          await choice.getByRole('button', { name: 'Run', exact: true }).click()
+        } else {
+          await choice.getByRole('button', { name: /^Run with / }).click()
+        }
         await expect(choice.getByText(question, { exact: true })).toHaveCount(
           0,
           { timeout: 60_000 }

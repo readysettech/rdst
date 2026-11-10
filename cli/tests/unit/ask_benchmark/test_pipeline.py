@@ -190,6 +190,7 @@ def _rdst_runner(
     context_mode=ContextMode.RAW,
     semantic_schema_format="verbose-v1",
     ask_accuracy_profile="baseline",
+    compact_clarification=False,
 ):
     store = ArtifactStore(tmp_path / "run")
     store.initialize({"run_id": "run"})
@@ -205,6 +206,7 @@ def _rdst_runner(
         adapter_factory=lambda model: _Adapter(model),
         semantic_schema_format=semantic_schema_format,
         ask_accuracy_profile=ask_accuracy_profile,
+        compact_clarification=compact_clarification,
     )
 
 
@@ -872,6 +874,31 @@ def test_rdst_runner_binds_candidate_accuracy_profile(tmp_path: Path):
     ).configuration_fingerprint(_spec())
 
 
+def test_rdst_runner_binds_compact_clarification(tmp_path: Path):
+    default = _rdst_runner(tmp_path / "default")
+    compact = _rdst_runner(tmp_path / "compact", compact_clarification=True)
+
+    assert "compact_clarification_enabled" not in default._ask_service_options()
+    assert compact._ask_service_options() == {
+        **default._ask_service_options(),
+        "compact_clarification_enabled": True,
+    }
+    assert compact.configuration_fingerprint(_spec()) != (
+        default.configuration_fingerprint(_spec())
+    )
+    with pytest.raises(ValueError, match="rdst-ask track"):
+        BenchmarkRunner(
+            run_id="run",
+            track=EvaluationTrack.MODEL_ONLY,
+            context_mode=ContextMode.RAW,
+            executor=_RDSTExecutor(),
+            schema_loader=_SchemaLoader(),
+            artifact_store=ArtifactStore(tmp_path / "model-only"),
+            semantic_dir=tmp_path / "semantic",
+            compact_clarification=True,
+        )
+
+
 @pytest.mark.parametrize("profile", ["candidate-v2", "candidate-v3"])
 def test_rdst_runner_binds_candidate_storage_repairs(tmp_path: Path, profile: str):
     ctx = _rdst_context()
@@ -1018,6 +1045,55 @@ def test_rdst_runner_continues_a_clarification_with_default_options(
     assert runner.configuration_fingerprint(_spec()) != _rdst_runner(
         tmp_path / "no-answer"
     ).configuration_fingerprint(_spec())
+
+
+
+def test_rdst_runner_leaves_an_open_follow_up_unanswered_by_default(tmp_path: Path):
+    ctx = _rdst_context()
+    resumed = []
+
+    class FakeAskService:
+        def __init__(self, **kwargs):
+            self.observer = kwargs["phase_observer"]
+
+        async def ask(self, _input, _options):
+            self.observer("clarify", ctx)
+            yield AskClarificationNeededEvent(
+                type="clarification_needed",
+                session_id="session-1",
+                interpretations=[],
+                questions=[
+                    AskClarificationQuestion(
+                        id="period", question="Which period?", options=["2024", "2025"]
+                    )
+                ],
+            )
+
+        async def resume(self, session_id, answers):
+            resumed.append((session_id, answers))
+            if session_id == "session-1":
+                yield AskClarificationNeededEvent(
+                    type="clarification_needed",
+                    session_id="session-2",
+                    interpretations=[],
+                    questions=[
+                        AskClarificationQuestion(
+                            id="missing-1", question="What is churn?", options=[]
+                        )
+                    ],
+                )
+                return
+            yield AskErrorEvent(type="error", message="No column defines churn.")
+
+        def abandon(self, _session_id):
+            raise AssertionError("A continued clarification is resumed, not abandoned")
+
+    runner = _rdst_runner(tmp_path, InteractionMode.INTERACTIVE_DEFAULT)
+    runner.preflight_gold([_case()])
+    with patch("devtools.ask_benchmark.runner.AskService", FakeAskService):
+        runner._run_rdst(_case(), _Adapter(_spec()))
+
+    assert resumed == [("session-1", {"period": "2024"}), ("session-2", {})]
 
 
 def test_rdst_runner_answers_a_clarification_as_the_oracle_user(tmp_path: Path):

@@ -334,6 +334,8 @@ class BenchmarkRunner:
         semantic_schema_format: str = ADAPTIVE_SCHEMA_FORMAT_VERSION,
         ask_accuracy_profile: str = ASK_ACCURACY_PROFILE_BASELINE,
         oracle_user: OracleUserSimulator | None = None,
+        compact_clarification: bool = False,
+        clarification_confidence_ceiling: float | None = None,
     ):
         self.run_id = run_id
         self.track = track
@@ -403,6 +405,18 @@ class BenchmarkRunner:
         ):
             raise ValueError("Ask accuracy profiles apply only to the rdst-ask track")
         self.ask_accuracy_profile = ask_accuracy_profile
+        if compact_clarification and track != EvaluationTrack.RDST:
+            raise ValueError("Compact clarification applies only to the rdst-ask track")
+        self.compact_clarification = compact_clarification
+        if clarification_confidence_ceiling is not None and track != EvaluationTrack.RDST:
+            raise ValueError(
+                "A clarification confidence ceiling applies only to the rdst-ask track"
+            )
+        if clarification_confidence_ceiling is not None and not (
+            0.0 <= clarification_confidence_ceiling <= 1.0
+        ):
+            raise ValueError("The clarification confidence ceiling must be between 0 and 1")
+        self.clarification_confidence_ceiling = clarification_confidence_ceiling
         self.budget_stop_reason: str | None = None
         self._gold_fingerprints: dict[int, str] = {}
         self._gold_results: dict[int, QueryResult] = {}
@@ -779,12 +793,24 @@ class BenchmarkRunner:
             }
 
             async def collect_resumed_events():
-                return [
-                    event
-                    async for event in service.resume(
-                        clarification.session_id, default_answers
+                resumed = []
+                session_id, answers = clarification.session_id, default_answers
+                while session_id is not None:
+                    round_events = [
+                        event async for event in service.resume(session_id, answers)
+                    ]
+                    resumed.extend(round_events)
+                    # Open follow-up questions have no default; leaving them unanswered
+                    # keeps the outcome they came from.
+                    session_id, answers = next(
+                        (
+                            (event.session_id, {})
+                            for event in round_events
+                            if isinstance(event, AskClarificationNeededEvent)
+                        ),
+                        (None, None),
                     )
-                ]
+                return resumed
 
             events.extend(self._run_async(collect_resumed_events()))
         oracle_rounds = None
@@ -1104,6 +1130,17 @@ class BenchmarkRunner:
                 if profile in _ASK_ACCURACY_STORAGE_PROFILES
                 or profile in _ASK_ACCURACY_ADVISORY_PROFILES
                 else None
+            ),
+            # Only a run that turns it on records it, so earlier fingerprints still match.
+            **(
+                {"compact_clarification_enabled": True}
+                if self.compact_clarification
+                else {}
+            ),
+            **(
+                {"clarification_confidence_ceiling": self.clarification_confidence_ceiling}
+                if self.clarification_confidence_ceiling is not None
+                else {}
             ),
         }
 

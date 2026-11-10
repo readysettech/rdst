@@ -158,6 +158,10 @@ class Ask3Context:
     ambiguity_report: Dict[str, Any] = field(default_factory=dict)
     clarification_resolutions: List[Dict[str, Any]] = field(default_factory=list)
     clarification_policy: str = ""
+    # Concepts the SQL writer named when it could not answer; Ask asks the user about
+    # them once before giving up.
+    missing_schema: list[str] = field(default_factory=list)
+    writer_clarification_rounds: int = 0
     ambiguity_schema_chars: int = 0
     ambiguity_schema_sha256: str = ""
     ambiguity_response_sha256: str = ""

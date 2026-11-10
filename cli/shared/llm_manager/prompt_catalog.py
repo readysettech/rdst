@@ -90,6 +90,12 @@ def _correction_intent_formats():
                         module._response_schema(module.CORRECTION_INTENTS)),)
 
 
+def _clarification_formats():
+    from features.ask.ambiguity_detection import _detection_response_format
+
+    return (_detection_response_format(False), _detection_response_format(True))
+
+
 def _alternate_prompts():
     from features.ask.dual_candidate import ALTERNATE_SYSTEM_PROMPT
 
@@ -234,7 +240,8 @@ OPERATIONS: dict[str, Operation] = {
     "sql_validation_repair": Operation(4000, legacy_prompts=_RELEASED_DEFAULT),
     "sql_refinement": Operation(2000, legacy_prompts=_RELEASED_DEFAULT),
     "sql_recovery": Operation(2000, legacy_prompts=_RELEASED_DEFAULT),
-    "clarification": Operation(1600, schema_context=True, prompts=lambda: ("",)),
+    "clarification": Operation(2400, schema_context=True, prompts=lambda: ("",),
+                               response_formats=_clarification_formats),
     "correction_intent_routing": Operation(800, response_formats=_correction_intent_formats),
     "example_questions": Operation(300, max_user_bytes=64 * 1024),
     "declared_entity_count_request": Operation(

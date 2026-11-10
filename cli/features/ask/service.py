@@ -11,7 +11,7 @@ import logging
 import threading
 import uuid
 from collections.abc import AsyncGenerator, Callable, Collection, MutableMapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from shared.config.targets import create_targets_config
@@ -23,6 +23,7 @@ from .aggregate_domain_normalization import (
     normalize_context as normalize_all_rows_aggregate_context,
 )
 from .ambiguity_detection import (
+    CHOICE_ANSWER,
     NON_INTERACTIVE_CLARIFICATION_POLICY,
     RANKED_RESOLVER_POLICY,
     detect_ambiguities,
@@ -79,6 +80,7 @@ from .encoded_identifier_storage import (
 from .engine.ask3.phases.generate import repair_validation_error
 from . import execution_error_repair
 from . import result_check
+from .defined_terms import defined_term_feedback
 from .engine.ask3.phases.validate import build_error_message
 from .engine.ask3.types import StatementCancel
 from .events import (
@@ -323,6 +325,9 @@ class _PendingAskSession:
     surface: str = "unknown"
     raise_unexpected_errors: bool = False
     clarification_context: dict[str, dict[str, str]] = field(default_factory=dict)
+    # The SQL writer's refusal that the pending questions came from; it stands when they go
+    # unanswered.
+    writer_error: AskErrorEvent | None = None
 
 
 _sessions: dict[str, _PendingAskSession] = {}
@@ -380,6 +385,14 @@ _DEFERRED_CORRECTION_INTENTS = frozenset(
 )
 
 
+# Ask the user about concepts the SQL writer could not find at most once per question, and
+# about no more than a few of them.
+# Keyservice's codes for a request its prompt registry does not admit.
+_HOSTED_POLICY_REJECTIONS = frozenset({"PROMPT_NOT_ALLOWED", "OPERATION_LIMIT_EXCEEDED"})
+WRITER_CLARIFICATION_ROUNDS = 1
+WRITER_CLARIFICATION_TERMS = 3
+WRITER_CLARIFICATION_CATEGORIES = frozenset({"missing_schema", "ambiguous"})
+
 # Slack past the statement timeout before Ask stops waiting on the database.
 _EXECUTION_GRACE_SECONDS = 5
 # Upper bound on waiting for a server-side cancel before aborting the connection.
@@ -391,6 +404,23 @@ def _execution_deadline(ctx: Any) -> float | None:
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
         return None
     return timeout + _EXECUTION_GRACE_SECONDS
+
+
+def _writer_missing_terms(ctx: Any) -> list[str]:
+    """The first few distinct concepts the SQL writer reported missing."""
+    terms: list[str] = []
+    for term in ctx.missing_schema or []:
+        term = str(term).strip()
+        if term and term.casefold() not in {seen.casefold() for seen in terms}:
+            terms.append(term)
+    return terms[:WRITER_CLARIFICATION_TERMS]
+
+
+def _english_list(items: list[str]) -> str:
+    """'a', 'a or b', 'a, b or c'."""
+    if len(items) < 3:
+        return " or ".join(items)
+    return ", ".join(items[:-1]) + " or " + items[-1]
 
 
 def _stop_statements_in_background(statement_cancel: StatementCancel) -> None:
@@ -562,6 +592,8 @@ class AskService:
         declared_count_enabled: bool = False,
         execution_error_repair_enabled: bool = False,
         result_check_repair_enabled: bool = False,
+        compact_clarification_enabled: bool = False,
+        clarification_confidence_ceiling: float | None = None,
     ):
         self._llm_manager = llm_manager
         self._period_literal_enabled = period_literal_enabled
@@ -596,6 +628,8 @@ class AskService:
         self._declared_count_enabled = declared_count_enabled
         self._execution_error_repair_enabled = execution_error_repair_enabled
         self._result_check_repair_enabled = result_check_repair_enabled
+        self._compact_clarification_enabled = compact_clarification_enabled
+        self._clarification_confidence_ceiling = clarification_confidence_ceiling
         self._semantic_manager = semantic_manager
         self._db_executor = db_executor
         self._targets_config_factory = targets_config_factory
@@ -929,38 +963,34 @@ class AskService:
                             "ambiguity_id": ambiguity.id,
                             "term": ambiguity.term,
                             "question": ambiguity.clarifying_question,
+                            "answer_type": ambiguity.answer_type,
+                            "origin": "detector",
                         }
                         for question, ambiguity in zip(questions, ambiguities)
                     }
-                    session_id = str(uuid.uuid4())
-                    self._session_store[session_id] = _PendingAskSession(
-                        context=ctx,
-                        persist_query=options.persist_query,
-                        workflow_id=workflow_id,
-                        surface=input.source,
-                        raise_unexpected_errors=options.raise_unexpected_errors,
-                        clarification_context=clarification_context,
-                    )
-                    yield AskClarificationNeededEvent(
-                        type="clarification_needed",
-                        session_id=session_id,
-                        interpretations=[
-                            AskInterpretation(
-                                id=interp.id,
-                                description=interp.description,
-                                likelihood=interp.likelihood,
-                                assumptions=interp.assumptions,
-                            )
-                            for interp in interpretations
-                        ],
-                        questions=questions,
+                    yield self._open_clarification(
+                        _PendingAskSession(
+                            context=ctx,
+                            persist_query=options.persist_query,
+                            workflow_id=workflow_id,
+                            surface=input.source,
+                            raise_unexpected_errors=options.raise_unexpected_errors,
+                            clarification_context=clarification_context,
+                        ),
+                        questions,
+                        interpretations,
                     )
                     return
 
+            session = _PendingAskSession(
+                context=ctx,
+                persist_query=options.persist_query,
+                workflow_id=workflow_id,
+                surface=input.source,
+                raise_unexpected_errors=options.raise_unexpected_errors,
+            )
             with inference_workflow("ask", input.source, workflow_id):
-                async for event in self._run_from_generate(
-                    ctx, persist_query=options.persist_query
-                ):
+                async for event in self._run_with_writer_clarification(session):
                     yield event
 
         except Exception as exc:
@@ -1030,11 +1060,16 @@ class AskService:
         self._session_store.pop(session_id, None)
         ctx = pending.context
         self._apply_user_clarifications(ctx, answers, pending.clarification_context)
+        if pending.writer_error is not None and not answers:
+            yield pending.writer_error
+            return
+        if ctx.status == get_status_enum().ERROR:
+            # The writer's refusal is answered now; generation starts over.
+            ctx.status = get_status_enum().PENDING
+            ctx.error_message = ctx.error_code = ctx.error_category = None
         try:
             with inference_workflow("ask", pending.surface, pending.workflow_id):
-                async for event in self._run_from_generate(
-                    ctx, persist_query=pending.persist_query
-                ):
+                async for event in self._run_with_writer_clarification(pending):
                     yield event
         except Exception as exc:
             if pending.raise_unexpected_errors:
@@ -1057,6 +1092,8 @@ class AskService:
                     "question": context["question"],
                     "action": "answer" if answer else "skip",
                     "answer": answer,
+                    "answer_type": context.get("answer_type", CHOICE_ANSWER),
+                    "origin": context.get("origin", "detector"),
                     "source": "user",
                     "applied": bool(answer),
                 }
@@ -1064,7 +1101,7 @@ class AskService:
         if answers:
             ctx.clarifications.update(answers)
             ctx.refined_question = self._build_refined_question(
-                ctx.question,
+                ctx.refined_question or ctx.question,
                 answers,
                 clarification_context,
             )
@@ -1091,6 +1128,90 @@ class AskService:
     def abandon(self, session_id: str) -> bool:
         """Discard a pending clarification session."""
         return self._session_store.pop(session_id, None) is not None
+
+    def _open_clarification(
+        self,
+        session: _PendingAskSession,
+        questions: list[AskClarificationQuestion],
+        interpretations: Collection[Any] = (),
+    ) -> AskClarificationNeededEvent:
+        session_id = str(uuid.uuid4())
+        self._session_store[session_id] = session
+        return AskClarificationNeededEvent(
+            type="clarification_needed",
+            session_id=session_id,
+            interpretations=[
+                AskInterpretation(
+                    id=interp.id,
+                    description=interp.description,
+                    likelihood=interp.likelihood,
+                    assumptions=interp.assumptions,
+                )
+                for interp in interpretations
+            ],
+            questions=questions,
+        )
+
+    async def _run_with_writer_clarification(
+        self, session: _PendingAskSession
+    ) -> AsyncGenerator[AskEvent, None]:
+        """Generate and execute; a refusal naming missing concepts becomes one question
+        round instead of an error."""
+        ctx = session.context
+        async for event in self._run_from_generate(
+            ctx, persist_query=session.persist_query
+        ):
+            if isinstance(event, AskErrorEvent):
+                questions = self._writer_clarification_questions(ctx)
+                if questions:
+                    ctx.writer_clarification_rounds += 1
+                    yield self._open_clarification(
+                        replace(
+                            session,
+                            writer_error=event,
+                            clarification_context={
+                                question.id: {
+                                    "ambiguity_id": question.id,
+                                    "term": _english_list(_writer_missing_terms(ctx)),
+                                    "question": question.question,
+                                    "answer_type": "definition",
+                                    "origin": "writer",
+                                }
+                                for question in questions
+                            },
+                        ),
+                        questions,
+                    )
+                    return
+            yield event
+
+    @staticmethod
+    def _writer_clarification_questions(ctx: Any) -> list[AskClarificationQuestion]:
+        """One open question, asked once, naming the concepts the SQL writer could not
+        find; a writer often lists one missing thing several ways."""
+        if (
+            ctx.no_interactive
+            or ctx.writer_clarification_rounds >= WRITER_CLARIFICATION_ROUNDS
+            or ctx.error_code != "ask_cannot_answer"
+            or ctx.error_category not in WRITER_CLARIFICATION_CATEGORIES
+        ):
+            return []
+        terms = _writer_missing_terms(ctx)
+        if not terms:
+            return []
+        pronoun = "it" if len(terms) == 1 else "them"
+        verb = "holds" if len(terms) == 1 else "hold"
+        return [
+            AskClarificationQuestion(
+                id="missing-1",
+                question=(
+                    f"I couldn't find {_english_list(terms)} in this database. Which "
+                    f"table, column or JSON key {verb} {pronoun}, or how should I work "
+                    f"{pronoun} out?"
+                ),
+                options=[],
+            )
+        ]
 
     async def _run_from_generate(
         self,
@@ -1170,6 +1291,18 @@ class AskService:
         if ctx.has_validation_errors():
             failed_sql = ctx.sql
             validation_message = build_error_message(ctx.validation_errors)
+            # Definitions come from the provided context and from the user's answers, never
+            # from the question itself, whose filters ("category = 'toys'") are not
+            # definitions.
+            answers = "\n".join(
+                f"- {item.get('term', '')}: {item['answer']}"
+                for item in ctx.clarification_resolutions
+                if item.get("source") == "user" and item.get("answer")
+            )
+            validation_message += defined_term_feedback(
+                ctx.validation_errors,
+                "\n".join(part for part in (ctx.provided_context, answers) if part),
+            )
             ctx.increment_retry()
             yield AskStatusEvent(
                 type="status",
@@ -4242,11 +4375,37 @@ class AskService:
             provided_context=ctx.provided_context,
             matched_database_values=ctx.matched_database_values,
             callback=lambda **kw: ctx.add_llm_call(phase="clarify", **kw),
+            compact=self._compact_clarification_enabled,
         )
         raw_response = str(result.get("raw_response", ""))
         ctx.ambiguity_response_sha256 = hashlib.sha256(
             raw_response.encode("utf-8")
         ).hexdigest()
+        if not result.get("success") and (
+            result.get("error_code") in _HOSTED_POLICY_REJECTIONS
+        ):
+            # A Keyservice that does not admit this detector request yet (an older prompt
+            # registry) is treated as finding no ambiguity, so the question is still answered.
+            logging.getLogger(__name__).warning(
+                "Clarification detector request was not admitted: %s", result.get("error")
+            )
+            ctx.ambiguity_report = {
+                "error": result.get("error", "unknown"),
+                "error_code": result.get("error_code"),
+                "fallback": "proceed_without_clarification",
+            }
+            return ctx, [], []
+        if not result.get("success") and result.get("parse_failure"):
+            # A reply that does not parse is treated as finding no ambiguity.
+            logging.getLogger(__name__).warning(
+                "Clarification detector reply did not parse: %s", result.get("error")
+            )
+            ctx.ambiguity_report = {
+                "error": result.get("error", "unknown"),
+                "error_code": None,
+                "fallback": "proceed_without_clarification",
+            }
+            return ctx, [], []
         if not result.get("success"):
             error_code = result.get("error_code")
             ctx.ambiguity_report = {
@@ -4274,6 +4433,11 @@ class AskService:
         if not report or not report.requires_clarification:
             return ctx, [], []
         if not report.ambiguities:
+            return ctx, [], []
+        ceiling = self._clarification_confidence_ceiling
+        if ceiling is not None and report.overall_confidence > ceiling:
+            # The detector is confident enough to proceed; the SQL writer can still ask.
+            ctx.ambiguity_report["confidence_ceiling_proceeded"] = ceiling
             return ctx, [], []
 
         ambiguities = report.ambiguities

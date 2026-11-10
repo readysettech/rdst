@@ -111,16 +111,19 @@ def clarify_question(
     interpretations = _build_interpretations(report.ambiguities)
     ctx.interpretations = interpretations
 
-    # In non-interactive mode, only apply options that pass the ranked gate.
+    # In non-interactive mode, only apply options that pass the ranked gate. An open
+    # question (a value or definition with no options) needs a person, so without one it
+    # is left out, and with only open questions the question is answered as asked.
     if ctx.no_interactive:
-        resolutions = [
-            resolve_ranked_ambiguity(ambiguity) for ambiguity in report.ambiguities
-        ]
+        choices = [ambiguity for ambiguity in report.ambiguities if not ambiguity.is_open]
+        if not choices:
+            return ctx
+        resolutions = [resolve_ranked_ambiguity(ambiguity) for ambiguity in choices]
         apply_selections = bool(resolutions) and all(
             resolution.action == "select" for resolution in resolutions
         )
         answers = {}
-        for ambiguity, resolution in zip(report.ambiguities, resolutions):
+        for ambiguity, resolution in zip(choices, resolutions):
             resolution_data = resolution.to_dict()
             resolution_data["applied"] = apply_selections
             ctx.clarification_resolutions.append(resolution_data)

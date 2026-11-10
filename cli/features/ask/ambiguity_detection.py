@@ -29,6 +29,8 @@ from .prompts.ask_prompts import (
 from .prompts.ask_prompts_v2 import (
     AMBIGUITY_DETECTION_PROMPT,
     AMBIGUITY_DETECTION_RESPONSE_SCHEMA,
+    COMPACT_AMBIGUITY_DETECTION_PROMPT,
+    COMPACT_AMBIGUITY_DETECTION_RESPONSE_SCHEMA,
     format_preference_tree_for_prompt,
 )
 from features.schema.inference_context import (
@@ -45,8 +47,8 @@ CUMULATIVE_MEDIUM_AMBIGUITY_COUNT = 2
 CUMULATIVE_AMBIGUITY_CONFIDENCE_CEILING = 0.85
 MEDIUM_AMBIGUITY_MIN_PROCEED_SCORE = 0.70
 MEDIUM_AMBIGUITY_MIN_PROCEED_MARGIN = 0.20
-AMBIGUITY_RESPONSE_MAX_TOKENS = 1600
-MAX_MATERIAL_AMBIGUITIES = 3
+AMBIGUITY_RESPONSE_MAX_TOKENS = 2400
+MAX_MATERIAL_AMBIGUITIES = 4
 
 _UNDIRECTED_SORT_PATTERN = re.compile(
     r"\b(?P<verb>sort(?:ed)?|order(?:ed)?)\s+by\s+"
@@ -58,13 +60,6 @@ _SORT_DIRECTION_PATTERN = re.compile(
     r"highest|lowest|latest|earliest|newest|oldest|most|least|top|bottom|"
     r"high(?:est)?\s+to\s+low(?:est)?|low(?:est)?\s+to\s+high(?:est)?|"
     r"reverse\s+chronological(?:ly)?)\b",
-    re.IGNORECASE,
-)
-_IMPLEMENTATION_FACING_QUESTION_PATTERN = re.compile(
-    r"\b(?:which|what)\s+(?:database\s+)?"
-    r"(?:tables?|columns?|fields?|joins?|schemas?|sql)\b"
-    r"|\b(?:choose|select)\s+(?:a|the|which)?\s*"
-    r"(?:tables?|columns?|fields?|joins?|schemas?|sql)\b",
     re.IGNORECASE,
 )
 # Ask answers each question on its own, so a choice that leans on an earlier exchange
@@ -143,9 +138,18 @@ class AmbiguityOption:
         )
 
 
+CHOICE_ANSWER = "choice"
+OPEN_ANSWER_TYPES = frozenset({"value", "definition"})
+ANSWER_TYPES = frozenset({CHOICE_ANSWER, *OPEN_ANSWER_TYPES})
+
+
 @dataclass
 class Ambiguity:
-    """Single detected ambiguity."""
+    """Single detected ambiguity.
+
+    A ``choice`` ambiguity lists the readings to pick from; a ``value`` or
+    ``definition`` ambiguity asks the user to state a fact and has no options.
+    """
 
     id: str
     category: str
@@ -154,6 +158,11 @@ class Ambiguity:
     possible_interpretations: List[AmbiguityOption]
     clarifying_question: str
     priority: str = "medium"
+    answer_type: str = CHOICE_ANSWER
+
+    @property
+    def is_open(self) -> bool:
+        return self.answer_type in OPEN_ANSWER_TYPES
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -166,6 +175,7 @@ class Ambiguity:
             ],
             "clarifying_question": self.clarifying_question,
             "priority": self.priority,
+            "answer_type": self.answer_type,
         }
 
     @classmethod
@@ -184,17 +194,24 @@ class Ambiguity:
             raise ValueError("ambiguity text fields must be strings")
         if not isinstance(data["possible_interpretations"], list):
             raise ValueError("possible_interpretations must be an array")
+        answer_type = data.get("answer_type", CHOICE_ANSWER)
+        if answer_type not in ANSWER_TYPES:
+            raise ValueError(f"unknown answer_type: {answer_type!r}")
         return cls(
             id=data["id"],
             category=data["category"],
             term=data["term"],
             reason=data["reason"],
-            possible_interpretations=[
+            clarifying_question=data["clarifying_question"],
+            priority=data.get("priority", "medium"),
+            # Open questions ask the user for the fact itself, so any options are dropped.
+            possible_interpretations=[]
+            if answer_type in OPEN_ANSWER_TYPES
+            else [
                 AmbiguityOption.from_dict(option)
                 for option in data["possible_interpretations"]
             ],
-            clarifying_question=data["clarifying_question"],
-            priority=data.get("priority", "medium"),
+            answer_type=answer_type,
         )
 
 
@@ -453,14 +470,14 @@ def _normalize_material_ambiguities(
 def _unusable_ambiguity_reason(ambiguity: Ambiguity) -> str | None:
     if ambiguity.category == "schema_insufficient":
         return "schema_insufficiency_is_not_user_intent"
+    if not ambiguity.clarifying_question.strip():
+        return "blank_question"
     if any(
         _DATA_CHANGE_PATTERN.search(text)
         for option in ambiguity.possible_interpretations
         for text in (option.text, option.sql_effect)
     ):
         return "offers_a_data_change"
-    if _IMPLEMENTATION_FACING_QUESTION_PATTERN.search(ambiguity.clarifying_question):
-        return "implementation_facing_question"
     if any(
         _EARLIER_EXCHANGE_PATTERN.search(text)
         for text in (
@@ -469,6 +486,10 @@ def _unusable_ambiguity_reason(ambiguity: Ambiguity) -> str | None:
         )
     ):
         return "refers_to_an_earlier_exchange"
+    if ambiguity.is_open:
+        return None
+    if len(ambiguity.possible_interpretations) < 2:
+        return "fewer_than_two_options"
 
     option_texts = {
         _normalized_choice_text(option.text)
@@ -501,7 +522,13 @@ def detect_ambiguities(
     provided_context: str = "",
     matched_database_values: str = "",
     target_database: str = "",
+    compact: bool = False,
 ) -> Dict[str, Any]:
+    """Ask the model whether the question needs clarification.
+
+    ``compact`` requests the shorter reply of COMPACT_AMBIGUITY_DETECTION_PROMPT, which is
+    mapped into the same report.
+    """
     try:
         pref_context = format_preference_tree_for_prompt(preference_tree)
         provided_context_block = format_provided_context_block(provided_context)
@@ -515,7 +542,10 @@ def detect_ambiguities(
                 "a concept.\n"
                 "- The context may be partial; do not extrapolate beyond what it states."
             )
-        prompt = AMBIGUITY_DETECTION_PROMPT.format(
+        template = (
+            COMPACT_AMBIGUITY_DETECTION_PROMPT if compact else AMBIGUITY_DETECTION_PROMPT
+        )
+        prompt = template.format(
             nl_question=nl_question,
             database_engine=database_engine,
             filtered_schema=SCHEMA_CONTEXT_REFERENCE,
@@ -538,14 +568,7 @@ def detect_ambiguities(
                 "_rdst_schema_cache_key": schema_cache_key(
                     filtered_schema, database_engine, target_database
                 ),
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "ambiguity_detection",
-                        "strict": True,
-                        "schema": AMBIGUITY_DETECTION_RESPONSE_SCHEMA,
-                    },
-                }
+                "response_format": _detection_response_format(compact),
             },
         )
 
@@ -569,7 +592,7 @@ def detect_ambiguities(
                 "raw_response": str(response),
             }
 
-        raw_text = response.get("response", "{}")
+        raw_text = response.get("response") or ""
         json_text = raw_text
 
         if "```" in raw_text:
@@ -589,12 +612,17 @@ def detect_ambiguities(
 
         try:
             parsed = json.loads(json_text)
+            if not isinstance(parsed, dict):
+                raise json.JSONDecodeError("expected a JSON object", json_text, 0)
+            if compact:
+                parsed = _expand_compact_report(parsed)
         except json.JSONDecodeError as exc:
             logger.error("JSON parse error: %s", exc)
             logger.error("Raw response: %s", raw_text[:500])
             return {
                 "success": False,
                 "error": f"Invalid JSON from LLM: {str(exc)}",
+                "parse_failure": True,
                 "raw_response": raw_text,
             }
 
@@ -611,12 +639,14 @@ def detect_ambiguities(
                 "success": False,
                 "error": "LLM response missing fields: "
                 + ", ".join(sorted(missing_report_fields)),
+                "parse_failure": True,
                 "raw_response": raw_text,
             }
         if set(parsed) != set(AMBIGUITY_DETECTION_RESPONSE_SCHEMA["properties"]):
             return {
                 "success": False,
                 "error": "LLM ambiguity response has unexpected fields",
+                "parse_failure": True,
                 "raw_response": raw_text,
             }
         if not isinstance(parsed["ambiguities"], list):
@@ -651,7 +681,7 @@ def detect_ambiguities(
                 ]
                 if missing:
                     raise ValueError(f"ambiguity missing fields: {missing}")
-                if set(ambiguity_data) != {
+                if set(ambiguity_data) - {"answer_type"} != {
                     "id",
                     "category",
                     "term",
@@ -677,6 +707,7 @@ def detect_ambiguities(
                 return {
                     "success": False,
                     "error": f"Invalid ambiguity response: {exc}",
+                    "parse_failure": True,
                     "raw_response": raw_text,
                 }
 
@@ -742,6 +773,7 @@ def detect_ambiguities(
         return {
             "success": False,
             "error": f"Invalid ambiguity response: {exc}",
+            "parse_failure": "raw_text" in locals(),
             "raw_response": locals().get("raw_text", ""),
         }
     except LLMError as exc:
@@ -764,6 +796,75 @@ def detect_ambiguities(
             "error": f"Unexpected error: {str(exc)}",
             "raw_response": "",
         }
+
+
+def _detection_response_format(compact: bool) -> Dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "ambiguity_detection_compact" if compact else "ambiguity_detection",
+            "strict": True,
+            "schema": COMPACT_AMBIGUITY_DETECTION_RESPONSE_SCHEMA
+            if compact
+            else AMBIGUITY_DETECTION_RESPONSE_SCHEMA,
+        },
+    }
+
+
+def _expand_compact_report(parsed: Any) -> Dict[str, Any]:
+    """Map a compact detector reply into the full report shape.
+
+    A compact ambiguity has no category, priority or scores: it gets one fixed category,
+    is high priority when the reply requires clarification and low otherwise, and its
+    options score equally, so no option is chosen for the user. Replies beyond the
+    schema's item limits are cut to them.
+    """
+    schema = COMPACT_AMBIGUITY_DETECTION_RESPONSE_SCHEMA
+    items = schema["properties"]["ambiguities"]
+    item_fields = set(items["items"]["properties"])
+    max_options = items["items"]["properties"]["options"]["maxItems"]
+    if not isinstance(parsed, dict) or set(parsed) != set(schema["properties"]):
+        raise ValueError("compact ambiguity response has unexpected fields")
+    requires = parsed["requires_clarification"]
+    if not isinstance(requires, bool) or not isinstance(parsed["ambiguities"], list):
+        raise ValueError("compact ambiguity response has invalid field types")
+    ambiguities = []
+    for index, item in enumerate(parsed["ambiguities"][: items["maxItems"]], 1):
+        if not isinstance(item, dict) or set(item) != item_fields:
+            raise ValueError("compact ambiguity has unexpected fields")
+        options = item["options"]
+        if not isinstance(options, list) or not all(isinstance(o, str) for o in options):
+            raise ValueError("compact ambiguity options must be strings")
+        options = [text for text in options if text.strip()][:max_options]
+        ambiguity_id = f"ambiguity-{index}"
+        ambiguities.append(
+            {
+                "id": ambiguity_id,
+                "category": "insufficient_reasoning_context",
+                "term": item["term"],
+                "reason": "",
+                "answer_type": item["answer_type"],
+                "possible_interpretations": [
+                    {
+                        "id": f"{ambiguity_id}-option-{number}",
+                        "text": text,
+                        "score": 1.0 / len(options),
+                        "evidence": [],
+                        "sql_effect": "",
+                    }
+                    for number, text in enumerate(options, 1)
+                ],
+                "clarifying_question": item["clarifying_question"],
+                "priority": "high" if requires else "low",
+            }
+        )
+    return {
+        "ambiguities": ambiguities,
+        "total_ambiguities": len(ambiguities),
+        "requires_clarification": requires,
+        "can_proceed_with_assumptions": not requires,
+        "overall_confidence": parsed["overall_confidence"],
+    }
 
 
 def collect_clarifications(

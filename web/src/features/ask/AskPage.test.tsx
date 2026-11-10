@@ -338,6 +338,42 @@ describe('answering', () => {
       top: 'Accepted answers',
     })
   })
+
+  it('asks for a value in a text box when the question has no options', () => {
+    const ask = askState({
+      state: 'clarification_needed',
+      clarification: {
+        type: 'clarification_needed',
+        session_id: 's2',
+        questions: [
+          {
+            id: 'cutoff',
+            question: 'What glucose level counts as high?',
+            options: [],
+          },
+        ],
+        interpretations: [],
+      },
+    })
+    vi.mocked(useAsk).mockReturnValue(ask)
+    renderAsk({ initialQuestion: 'How many patients have high glucose?' })
+    expect(screen.queryAllByRole('radio')).toHaveLength(0)
+    // Left blank, the question can be skipped.
+    const skip = screen.getByRole('button', {
+      name: 'Skip',
+    }) as HTMLButtonElement
+    expect(skip.disabled).toBe(false)
+    fireEvent.change(
+      screen.getByRole('textbox', {
+        name: 'What glucose level counts as high?',
+      }),
+      { target: { value: ' Above 180 mg/dL ' } }
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+    expect(ask.resumeWithAnswers).toHaveBeenCalledWith({
+      cutoff: 'Above 180 mg/dL',
+    })
+  })
 })
 
 describe('the answer', () => {

@@ -69,6 +69,40 @@ def test_detector_preserves_provider_error_code() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "I think the question is clear.",
+        "[]",
+        "null",
+        '"clear"',
+        "",
+        json.dumps({"ambiguities": []}),
+        json.dumps({
+            "ambiguities": [{"id": "a"}],
+            "total_ambiguities": 1,
+            "requires_clarification": True,
+            "can_proceed_with_assumptions": False,
+            "overall_confidence": 0.5,
+        }),
+    ],
+)
+def test_detector_marks_a_reply_that_does_not_parse(reply) -> None:
+    manager = RecordingLLMManager()
+    manager.generate_response = lambda **_kwargs: {"response": reply}
+
+    result = detect_ambiguities(
+        nl_question="Show monthly revenue",
+        filtered_schema="sales(amount, sold_at)",
+        database_engine="postgresql",
+        llm_manager=manager,
+    )
+
+    assert result["success"] is False
+    assert result["parse_failure"] is True
+    assert result["raw_response"] == reply
+
+
 def _ambiguity_response(
     *,
     question: str = "Which meaning of active should be used?",
@@ -142,7 +176,7 @@ def test_detect_ambiguities_includes_complete_filtered_schema() -> None:
     assert manager.kwargs["max_tokens"] == AMBIGUITY_RESPONSE_MAX_TOKENS
 
 
-def test_detector_prompt_distinguishes_missing_intent_from_implementation() -> None:
+def test_detector_prompt_asks_for_missing_parameters_and_identifiers() -> None:
     manager = RecordingLLMManager()
 
     result = detect_ambiguities(
@@ -154,22 +188,17 @@ def test_detector_prompt_distinguishes_missing_intent_from_implementation() -> N
 
     assert result["success"] is True
     assert manager.prompt is not None
-    assert '"sorted by score" needs ascending versus' in manager.prompt
-    assert '"top products" needs a result count' in manager.prompt
-    assert "Do not ask the user to\n  choose tables, columns, joins" in manager.prompt
+    assert "Ask for sort direction only when the question asks for an order" in manager.prompt
+    assert '"the best ones" need a result count' in manager.prompt
+    assert "needs its threshold or qualifying values" in manager.prompt
+    assert "Treat a vague output request as a genuine ambiguity" in manager.prompt
+    assert "The user knows this database." in manager.prompt
     assert "A safety row cap is\n  not a semantic default" in manager.prompt
-    assert (
-        "Never mention tables, columns, fields, joins, schemas, SQL" in manager.prompt
-    )
 
 
 @pytest.mark.parametrize(
     ("response", "reason"),
     [
-        (
-            _ambiguity_response(question="Which column should represent active users?"),
-            "implementation_facing_question",
-        ),
         (
             _ambiguity_response(
                 first_effect="Filter enabled = true.",
@@ -188,6 +217,7 @@ def test_detector_prompt_distinguishes_missing_intent_from_implementation() -> N
             _ambiguity_response(category="schema_insufficient"),
             "schema_insufficiency_is_not_user_intent",
         ),
+        (_ambiguity_response(question="  "), "blank_question"),
         (
             _ambiguity_response(
                 first_text="One year earlier than the year from the previous result.",
@@ -252,6 +282,49 @@ def test_detector_drops_questions_users_cannot_use(response, reason) -> None:
         for item in result["normalizations"]
         if item.get("action") == "drop_unusable_clarification"
     } == {reason}
+
+
+def test_detector_keeps_four_questions() -> None:
+    response = _ambiguity_response()
+    body = json.loads(response["response"])
+    [template] = body["ambiguities"]
+    body["ambiguities"] = [
+        {**template, "id": f"term-{index}", "term": f"term {index}"} for index in range(4)
+    ]
+    body["total_ambiguities"] = 4
+    manager = RecordingLLMManager()
+    manager.generate_response = lambda **_kwargs: {**response, "response": json.dumps(body)}
+
+    result = detect_ambiguities(
+        nl_question="Show active users",
+        filtered_schema="users(enabled, last_seen)",
+        database_engine="postgresql",
+        llm_manager=manager,
+    )
+
+    assert [item.id for item in result["report"].ambiguities] == [
+        f"term-{index}" for index in range(4)
+    ]
+
+
+def test_detector_keeps_questions_that_name_database_identifiers() -> None:
+    manager = RecordingLLMManager()
+    manager.generate_response = lambda **_kwargs: _ambiguity_response(
+        question="Which column should represent active users?",
+        first_text="Use users.enabled.",
+        second_text="Use users.last_seen within the last 30 days.",
+    )
+
+    result = detect_ambiguities(
+        nl_question="Show active users",
+        filtered_schema="users(enabled, last_seen)",
+        database_engine="postgresql",
+        llm_manager=manager,
+    )
+
+    assert result["success"] is True
+    assert [item.id for item in result["report"].ambiguities] == ["active-meaning"]
+    assert result["report"].requires_clarification is True
 
 
 @pytest.mark.parametrize(
@@ -548,3 +621,234 @@ def test_option_accepts_single_evidence_string():
         }
     )
     assert option.evidence == ["\"top\" often implies a short list"]
+
+
+def _open_response(*, answer_type: str, options: list | None = None) -> dict:
+    return {
+        "response": json.dumps(
+            {
+                "ambiguities": [
+                    {
+                        "id": "glucose-cutoff",
+                        "category": "unclear_value_reference",
+                        "term": "high glucose",
+                        "reason": "No stated cutoff defines high glucose.",
+                        "answer_type": answer_type,
+                        "possible_interpretations": options or [],
+                        "clarifying_question": "What glucose level counts as high?",
+                        "priority": "medium",
+                    }
+                ],
+                "total_ambiguities": 1,
+                "requires_clarification": True,
+                "can_proceed_with_assumptions": False,
+                "overall_confidence": 0.6,
+            }
+        ),
+        "usage": {"total_tokens": 1},
+        "model": "test-model",
+    }
+
+
+@pytest.mark.parametrize("answer_type", ["value", "definition"])
+def test_detector_asks_an_open_question_for_an_unstated_fact(answer_type) -> None:
+    manager = RecordingLLMManager()
+    # Options a model attaches to an open question are dropped: the user states the fact.
+    option = {
+        "id": "a",
+        "text": "Above 180",
+        "score": 0.5,
+        "evidence": [],
+        "sql_effect": "GLU > 180",
+    }
+    manager.generate_response = lambda **_kwargs: _open_response(
+        answer_type=answer_type, options=[option]
+    )
+
+    report = detect_ambiguities(
+        nl_question="How many patients have high glucose?",
+        filtered_schema="lab(glu)",
+        database_engine="mysql",
+        llm_manager=manager,
+    )["report"]
+
+    [ambiguity] = report.ambiguities
+    assert ambiguity.is_open
+    assert ambiguity.answer_type == answer_type
+    assert ambiguity.possible_interpretations == []
+    assert ambiguity.to_dict()["answer_type"] == answer_type
+    assert report.requires_clarification is True
+
+
+def test_detector_drops_a_choice_question_with_one_option() -> None:
+    manager = RecordingLLMManager()
+    option = {
+        "id": "a",
+        "text": "Above 180",
+        "score": 0.9,
+        "evidence": [],
+        "sql_effect": "GLU > 180",
+    }
+    manager.generate_response = lambda **_kwargs: _open_response(
+        answer_type="choice", options=[option]
+    )
+
+    result = detect_ambiguities(
+        nl_question="How many patients have high glucose?",
+        filtered_schema="lab(glu)",
+        database_engine="mysql",
+        llm_manager=manager,
+    )
+
+    assert result["report"].ambiguities == []
+    assert {
+        item.get("reason")
+        for item in result["normalizations"]
+        if item.get("action") == "drop_unusable_clarification"
+    } == {"fewer_than_two_options"}
+
+
+def test_ambiguity_without_answer_type_is_a_choice() -> None:
+    ambiguity = Ambiguity.from_dict(
+        json.loads(_ambiguity_response()["response"])["ambiguities"][0]
+    )
+    assert ambiguity.answer_type == "choice"
+    assert not ambiguity.is_open
+    assert len(ambiguity.possible_interpretations) == 2
+
+
+def test_detector_prompt_offers_open_answer_types() -> None:
+    manager = RecordingLLMManager()
+    detect_ambiguities(
+        nl_question="How many patients have high glucose?",
+        filtered_schema="lab(glu)",
+        database_engine="mysql",
+        llm_manager=manager,
+    )
+    schema = manager.kwargs["extra"]["response_format"]["json_schema"]["schema"]
+    item = schema["properties"]["ambiguities"]["items"]
+    assert item["properties"]["answer_type"]["enum"] == ["choice", "value", "definition"]
+    assert item["properties"]["possible_interpretations"]["minItems"] == 0
+    assert "Prefer `value` or `definition` over inventing options" in manager.prompt
+
+
+class ReplyingLLMManager(RecordingLLMManager):
+    """Return a fixed reply while retaining the request."""
+
+    def __init__(self, reply: dict) -> None:
+        super().__init__()
+        self.reply = reply
+
+    def generate_response(self, *, prompt: str, **kwargs) -> dict:
+        super().generate_response(prompt=prompt, **kwargs)
+        return {"response": json.dumps(self.reply)}
+
+
+def _compact_detection(reply: dict) -> tuple[dict, ReplyingLLMManager]:
+    manager = ReplyingLLMManager(reply)
+    result = detect_ambiguities(
+        nl_question="Top devices by rating",
+        filtered_schema="devices(id, range_m, signal)",
+        database_engine="postgresql",
+        llm_manager=manager,
+        compact=True,
+    )
+    return result, manager
+
+
+def test_compact_detector_reply_maps_into_the_report() -> None:
+    result, manager = _compact_detection(
+        {
+            "requires_clarification": True,
+            "overall_confidence": 0.4,
+            "ambiguities": [
+                {
+                    "term": "rating",
+                    "clarifying_question": "Which rating should rank the devices?",
+                    "answer_type": "choice",
+                    "options": ["Wireless range", "Signal strength", " "],
+                },
+                {
+                    "term": "top",
+                    "clarifying_question": "How is the wireless rating calculated?",
+                    "answer_type": "definition",
+                    "options": [],
+                },
+            ],
+        }
+    )
+
+    schema = manager.kwargs["extra"]["response_format"]["json_schema"]
+    assert schema["name"] == "ambiguity_detection_compact"
+    assert "evidence" not in json.dumps(schema["schema"])
+    assert "SQL effect" not in manager.prompt
+    assert result["success"] is True
+    report = result["report"]
+    assert report.requires_clarification is True
+    assert report.overall_confidence == 0.4
+    choice, definition = report.ambiguities
+    assert (choice.term, choice.priority, choice.answer_type) == ("rating", "high", "choice")
+    assert [o.text for o in choice.possible_interpretations] == [
+        "Wireless range",
+        "Signal strength",
+    ]
+    assert {o.score for o in choice.possible_interpretations} == {0.5}
+    assert resolve_ranked_ambiguity(choice).action == "abstain"
+    assert definition.is_open and definition.possible_interpretations == []
+
+
+def test_compact_detector_reply_without_clarification_asks_nothing() -> None:
+    result, _ = _compact_detection(
+        {"requires_clarification": False, "overall_confidence": 0.95, "ambiguities": []}
+    )
+
+    assert result["success"] is True
+    assert result["report"].requires_clarification is False
+    assert result["report"].ambiguities == []
+
+
+def test_compact_detector_reply_is_cut_to_its_limits() -> None:
+    question = {
+        "term": "rating",
+        "clarifying_question": "Which rating?",
+        "answer_type": "choice",
+        "options": ["Range", "Signal", "Latency", "Battery"],
+    }
+    result, _ = _compact_detection(
+        {
+            "requires_clarification": True,
+            "overall_confidence": 0.3,
+            "ambiguities": [
+                {**question, "term": term, "clarifying_question": f"Which {term}?"}
+                for term in ("rating", "device", "period")
+            ],
+        }
+    )
+
+    assert [a.term for a in result["report"].ambiguities] == ["rating", "device"]
+    assert [o.text for o in result["report"].ambiguities[0].possible_interpretations] == [
+        "Range",
+        "Signal",
+        "Latency",
+    ]
+
+
+def test_compact_detector_rejects_a_full_report() -> None:
+    result, _ = _compact_detection(json.loads(_ambiguity_response()["response"]))
+
+    assert result["success"] is False
+    assert result["parse_failure"] is True
+
+
+def test_full_detector_reply_is_the_default() -> None:
+    manager = RecordingLLMManager()
+    detect_ambiguities(
+        nl_question="Show monthly revenue",
+        filtered_schema="sales(amount, sold_at)",
+        database_engine="postgresql",
+        llm_manager=manager,
+    )
+
+    schema = manager.kwargs["extra"]["response_format"]["json_schema"]
+    assert schema["name"] == "ambiguity_detection"
+    assert "State the SQL effect" in manager.prompt

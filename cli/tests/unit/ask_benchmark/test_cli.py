@@ -88,6 +88,40 @@ def test_run_parser_defaults_to_the_non_interactive_ask_path(flags, expected):
     assert args.interaction_mode == expected
 
 
+@pytest.mark.parametrize(("flags", "expected"), [([], False), (["--compact-clarification"], True)])
+def test_run_parser_selects_the_compact_clarification_reply(flags, expected):
+    args = cli.build_parser().parse_args(
+        ["run", "--models", "claude-sonnet-4.6-anthropic-sdk", *flags]
+    )
+
+    assert args.compact_clarification is expected
+
+
+@pytest.mark.parametrize(
+    ("flags", "expected"),
+    [([], None), (["--clarification-confidence-ceiling", "0.55"], 0.55)],
+)
+def test_run_parser_reads_the_clarification_confidence_ceiling(flags, expected):
+    args = cli.build_parser().parse_args(
+        ["run", "--models", "claude-sonnet-4.6-anthropic-sdk", *flags]
+    )
+
+    assert args.clarification_confidence_ceiling == expected
+
+
+def test_run_parser_rejects_a_confidence_ceiling_above_one():
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(
+            [
+                "run",
+                "--models",
+                "claude-sonnet-4.6-anthropic-sdk",
+                "--clarification-confidence-ceiling",
+                "1.5",
+            ]
+        )
+
+
 def test_run_parser_accepts_candidate_ask_accuracy_profile():
     args = cli.build_parser().parse_args(
         [

@@ -640,3 +640,16 @@ def test_generation_names_the_database_not_the_target_label() -> None:
 
     assert generate.call_args.kwargs["target_database"] == "cf2"
     assert Ask3Context(question="q", target="cfmy").database_name() == "cfmy"
+
+
+def test_writer_refuses_only_for_missing_values_or_data_changes():
+    from features.ask.prompts.ask_prompts import COMPREHENSIVE_ASK_PROMPT
+
+    assert "`missing_schema` only when\n  a value the answer needs is in neither" in (
+        COMPREHENSIVE_ASK_PROMPT
+    )
+    assert "`unsupported_request` only when the request asks to change\n  data" in (
+        COMPREHENSIVE_ASK_PROMPT
+    )
+    assert "A clarification answer that declines" in COMPREHENSIVE_ASK_PROMPT
+    assert "list the unsettled\n  terms in `missing_schema`" in COMPREHENSIVE_ASK_PROMPT

@@ -1,7 +1,9 @@
 // An ambiguous question: the clarifying question, the interpretations as radio rows with a
 // caption where it says more than the label, and one solid "Run with <choice>", inline
-// under the box.
+// under the box. A question without options asks for a value or definition in a text box;
+// left blank it is skipped, as the CLI skips one on Enter.
 import { BaseInputRadioGroup } from '@rs/ui-new/base-input-radio-group'
+import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import { Text } from '@rs/ui-new/text'
 import { useState } from 'react'
@@ -35,6 +37,7 @@ export function AskChoice({
           : undefined,
     }
   })
+  const open = question.options.length === 0
   const chosen = answers[question.id] ?? question.options[0] ?? ''
   const last = index === clarification.questions.length - 1
   return (
@@ -42,25 +45,49 @@ export function AskChoice({
       <Text as="p" level="body-small" className="text-content-layout-2">
         {question.question}
       </Text>
-      <BaseInputRadioGroup
-        aria-label={question.question}
-        className="mt-1.5"
-        options={options}
-        value={chosen}
-        disabled={disabled}
-        onValueChange={(value) =>
-          setAnswers((current) => ({ ...current, [question.id]: value }))
-        }
-      />
+      {open ? (
+        <BaseInputText
+          aria-label={question.question}
+          className="mt-1.5"
+          value={chosen}
+          disabled={disabled}
+          autoComplete="off"
+          placeholder="Your answer"
+          onChange={(event) => {
+            const value = event.target.value
+            setAnswers((current) => ({ ...current, [question.id]: value }))
+          }}
+        />
+      ) : (
+        <BaseInputRadioGroup
+          aria-label={question.question}
+          className="mt-1.5"
+          options={options}
+          value={chosen}
+          disabled={disabled}
+          onValueChange={(value) =>
+            setAnswers((current) => ({ ...current, [question.id]: value }))
+          }
+        />
+      )}
       <div className="mt-3.5 flex justify-end">
         <Button
           variant="primary"
           modifier="solid"
           size="small"
-          label={`Run with ${chosen.toLowerCase()}`}
-          disabled={disabled || !chosen}
+          label={
+            open
+              ? chosen.trim()
+                ? 'Run'
+                : 'Skip'
+              : `Run with ${chosen.toLowerCase()}`
+          }
+          disabled={disabled || (!open && !chosen.trim())}
           onClick={() => {
-            const next = { ...answers, [question.id]: chosen }
+            const { [question.id]: _, ...rest } = answers
+            const next = chosen.trim()
+              ? { ...rest, [question.id]: chosen.trim() }
+              : rest
             if (last) onRun(next)
             else {
               setAnswers(next)

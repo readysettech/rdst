@@ -61,13 +61,20 @@ class AskInputHandler:
 
     def _prompt_clarification(self, question: "AskClarificationQuestion") -> str:
         """Prompt user for a single clarification question."""
-        # Extract just the question part (before colon or bracket where options start)
-        question_text = question.question.split(":")[0].split("[")[0].strip()
+        question_text = question.question.strip()
         if not question_text.endswith("?"):
             question_text += "?"
 
         # Display the question (without inline options - we show them separately)
         self._console.print(MessagePanel(question_text, variant="info"))
+
+        # An open question asks for a value or definition; there is nothing to pick. With
+        # no input left (stdin closed), it is skipped like an empty answer.
+        if not question.options:
+            try:
+                return input("Your answer: ").strip()
+            except EOFError:
+                return ""
 
         # Display options with "Other" escape hatch for free-text input
         all_options = list(question.options) + ["Other (type your own answer)"]
@@ -103,8 +110,9 @@ class AskInputHandler:
                 self._console.print(
                     f"[{StyleTokens.WARNING}]Please enter a valid number[/{StyleTokens.WARNING}]"
                 )
-            except (EOFError, KeyboardInterrupt):
-                raise
+            except EOFError:
+                # No input left (stdin closed): skipped like an open question.
+                return ""
 
     def prompt_choice(self, prompt_text: str, choices: List[str]) -> str:
         """Prompt user to make a choice from list."""

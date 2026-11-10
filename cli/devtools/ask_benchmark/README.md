@@ -530,6 +530,16 @@ stop to ask. When it stops, the benchmark answers every question with its first
 option, which is what the CLI prompt's default choice and the web's preselected "Run
 with" button submit, then scores the resumed answer. Reports state the stop rate,
 accuracy on stopped questions, and the detector's call count, latency, and cost.
+`--compact-clarification` asks the detector for its compact reply (at most two
+questions with up to three short options, no evidence or SQL effects), which Ask maps
+into the same report. It is off by default and is part of the configuration
+fingerprint; a script that builds `BenchmarkRunner` itself passes
+`compact_clarification=True`.
+`--clarification-confidence-ceiling T` stops to ask only when the detector's
+`overall_confidence` is at most T; a more confident detector proceeds as if it had
+found nothing, and the SQL writer can still ask when it is stuck. It is unset by
+default (every detector request to ask is asked) and, when set, is part of the
+configuration fingerprint.
 
 The 50-case canary is the fixed development partition. The 450-case complement was
 subsequently included in the opened 496-case transfer replay, so it is no longer an

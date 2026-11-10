@@ -138,6 +138,11 @@ def generate_sql(
         assumptions = result.get("assumptions", [])
         reason = result.get("cannot_answer_reason") or "unspecified"
         missing_schema = result.get("missing_schema", [])
+        ctx.missing_schema = [
+            item.strip()
+            for item in missing_schema
+            if isinstance(item, str) and item.strip()
+        ]
         ctx.mark_error(
             cannot_answer_message(reason, missing_schema, assumptions),
             code="ask_cannot_answer",

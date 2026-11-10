@@ -57,6 +57,8 @@ Requirements:
   to express the result.
 - Do not add filters, joins, limits, ordering, or assumptions that are not supported by
   the question, supplied clarification, or schema.
+- When the question lists rows by a computed measure without stating an order, order by
+  that measure, highest first.
 - Before emitting the response, silently audit the SQL for exact use of authoritative
   mappings and complete literals, the minimum sufficient table set, the requested
   output columns and cardinality, and dialect-correct non-integer arithmetic. Remove
@@ -69,11 +71,27 @@ Requirements:
 - Keep `explanation` to one short sentence.
 - Put every unavoidable interpretation in `assumptions`; do not encode a hedge as an
   invented SQL predicate.
-- If the filtered schema cannot answer the question, set `cannot_answer` to true,
-  leave `sql` empty, set `cannot_answer_reason` to `missing_schema`, and identify the
-  missing concepts in `missing_schema`.
-- If the request cannot safely be expressed as a read-only query, use
-  `cannot_answer_reason` = `unsupported_request`.
+- Set `cannot_answer` to true with `cannot_answer_reason` = `missing_schema` only when
+  a value the answer needs is in neither the schema nor the provided context; leave
+  `sql` empty and identify the missing concepts in `missing_schema`. Tables that
+  reference a shared parent (for example both carry a key of the same site or plant)
+  are joinable through that parent: join through it and state the approximation in
+  `assumptions`. A formula or term the provided context defines is computable from the
+  columns it names.
+- Use `cannot_answer_reason` = `ambiguous` only when several readings change the result
+  and neither the question nor the provided context settles them, and list the unsettled
+  terms in `missing_schema`; otherwise take the reading they support and record it in
+  `assumptions`.
+- Use `cannot_answer_reason` = `unsupported_request` only when the request asks to change
+  data or asks for something a read-only query cannot do.
+- A clarification answer that declines (the question is out of scope, unknown or does not
+  matter) settles nothing: take the reading the question and context support.
+- When the question or a clarification answer uses a term the provided context defines,
+  apply the whole definition, every condition it states.
+- When a clarification answer explains what a stored column means, select that column;
+  do not recompute it from other columns.
+- Use labels and category values exactly as the question, the answers or the context
+  give them, without added prefixes or decoration.
 - `confidence` is diagnostic only. It does not override `cannot_answer`.
 - Treat matched database values as storage candidates for phrases already present in
   the question. Do not turn an incidental match into a new filter or assumption.
@@ -100,8 +118,10 @@ Requirements:
 - Do not add filters, joins, limits, ordering, or assumptions that are not supported by
   the question, supplied clarification, or schema.
 - Use only tables and columns present in the schema and the requested database dialect.
-- If the schema cannot answer the question, return `CANNOT_ANSWER:` followed by one
-  short reason instead of inventing a query.
+- Return `CANNOT_ANSWER:` followed by one short reason only when a value the answer
+  needs is in neither the schema nor the provided context. Tables that reference a
+  shared parent are joinable through that parent, and a formula or term the provided
+  context defines is computable from the columns it names.
 - Treat matched database values as storage candidates for phrases already present in
   the question. Do not turn an incidental match into a new filter or assumption.
 - Return only SQL with no explanation, JSON, markdown, or commentary when answerable."""

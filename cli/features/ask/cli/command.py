@@ -209,35 +209,32 @@ class AskCommand:
             async def _run_ask():
                 nonlocal result_event, error_event
 
-                async for event in service.ask(input_data, options_data):
-                    renderer.render(event)
+                # A resumed run can raise follow-up questions of its own.
+                events = service.ask(input_data, options_data)
+                while events is not None:
+                    stream, events = events, None
+                    async for event in stream:
+                        renderer.render(event)
 
-                    if isinstance(event, AskClarificationNeededEvent):
-                        try:
-                            answers = input_handler.collect_clarifications(event)
-                            async for resume_event in service.resume(
-                                event.session_id, answers
-                            ):
-                                renderer.render(resume_event)
-                                if isinstance(resume_event, AskResultEvent):
-                                    result_event = resume_event
-                                elif isinstance(resume_event, AskErrorEvent):
-                                    error_event = resume_event
-                        except (EOFError, KeyboardInterrupt):
-                            service.abandon(event.session_id)
-                            error_event = AskErrorEvent(
-                                type="error",
-                                message="Cancelled by user",
-                                phase="clarify",
-                            )
-                            renderer.render(error_event)
-                            return
+                        if isinstance(event, AskClarificationNeededEvent):
+                            try:
+                                answers = input_handler.collect_clarifications(event)
+                            except (EOFError, KeyboardInterrupt):
+                                service.abandon(event.session_id)
+                                error_event = AskErrorEvent(
+                                    type="error",
+                                    message="Cancelled by user",
+                                    phase="clarify",
+                                )
+                                renderer.render(error_event)
+                                return
+                            events = service.resume(event.session_id, answers)
 
-                    elif isinstance(event, AskResultEvent):
-                        result_event = event
+                        elif isinstance(event, AskResultEvent):
+                            result_event = event
 
-                    elif isinstance(event, AskErrorEvent):
-                        error_event = event
+                        elif isinstance(event, AskErrorEvent):
+                            error_event = event
 
             asyncio.run(_run_ask())
 

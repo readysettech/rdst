@@ -416,6 +416,22 @@ def build_parser() -> argparse.ArgumentParser:
             " only reshape a correct answer."
         ),
     )
+    run.add_argument(
+        "--compact-clarification",
+        action="store_true",
+        help=(
+            "Ask the clarification detector for its compact reply: at most two "
+            "questions with short options and no evidence or SQL effects"
+        ),
+    )
+    run.add_argument(
+        "--clarification-confidence-ceiling",
+        type=_probability,
+        help=(
+            "Ask the user only when the clarification detector's overall confidence is "
+            "at most this value (0 to 1); above it Ask proceeds without asking"
+        ),
+    )
     run.add_argument("--max-cases", type=_positive_int)
     run.add_argument(
         "--max-provider-calls",
@@ -1625,6 +1641,8 @@ def _run_database_locked(
         semantic_schema_format=args.schema_format,
         ask_accuracy_profile=args.ask_accuracy_profile,
         oracle_user=oracle_user,
+        compact_clarification=args.compact_clarification,
+        clarification_confidence_ceiling=args.clarification_confidence_ceiling,
     )
     cases, gold_failures = runner.preflight_gold(cases)
     if gold_failures:
@@ -1688,6 +1706,8 @@ def _run_database_locked(
         "oracle_user": oracle_user.describe() if oracle_user else None,
         "semantic_schema_format": args.schema_format,
         "ask_accuracy_profile": args.ask_accuracy_profile,
+        "compact_clarification": args.compact_clarification,
+        "clarification_confidence_ceiling": args.clarification_confidence_ceiling,
         "ask_accuracy_features": {
             key.removesuffix("_enabled"): value
             for key, value in ask_profile_service_flags(args.ask_accuracy_profile).items()
@@ -2093,6 +2113,13 @@ def _positive_float(value: str) -> float:
     parsed = float(value)
     if parsed <= 0:
         raise argparse.ArgumentTypeError("value must be positive")
+    return parsed
+
+
+def _probability(value: str) -> float:
+    parsed = float(value)
+    if not 0.0 <= parsed <= 1.0:
+        raise argparse.ArgumentTypeError("value must be between 0 and 1")
     return parsed
 
 
