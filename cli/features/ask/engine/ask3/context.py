@@ -162,6 +162,15 @@ class Ask3Context:
     # them once before giving up.
     missing_schema: list[str] = field(default_factory=list)
     writer_clarification_rounds: int = 0
+    # The question before the user's latest answers. When set, generation first drafts SQL
+    # from it and then asks for only the changes the answers require.
+    clarification_draft_question: str = ""
+    clarification_draft_sql: str = ""
+    # clarification_draft_sql answers the current question as it stands: generation reuses
+    # it while no answer has changed the question.
+    clarification_draft_ready: bool = False
+    # The draft for the unclarified question already failed, so it is not requested again.
+    clarification_draft_failed: bool = False
     ambiguity_schema_chars: int = 0
     ambiguity_schema_sha256: str = ""
     ambiguity_response_sha256: str = ""

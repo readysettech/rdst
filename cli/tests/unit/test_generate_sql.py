@@ -642,6 +642,108 @@ def test_generation_names_the_database_not_the_target_label() -> None:
     assert Ask3Context(question="q", target="cfmy").database_name() == "cfmy"
 
 
+@pytest.mark.parametrize("draft_succeeds", [True, False])
+def test_answered_question_revises_the_pre_answer_draft(draft_succeeds) -> None:
+    from features.ask.engine.ask3.phases.generate import generate_sql
+
+    ctx = Ask3Context(question="Flights from Oklahoma City", target="t", db_type="mysql",
+                      provided_context="Origin is a code.",
+                      refined_question="Flights from Oklahoma City\n\nResolved: codes",
+                      clarification_draft_question="Flights from Oklahoma City")
+    draft = {"success": draft_succeeds, "sql": "SELECT * FROM f WHERE origin = 'OKC'",
+             "cannot_answer": False}
+    final = {"success": True, "sql": "SELECT * FROM f WHERE origin = 'OKC'", "explanation": "",
+             "confidence": 1.0, "cannot_answer": False, "raw_response": {}}
+    with patch("features.ask.sql_generation.generate_sql_from_nl",
+               side_effect=[draft, final]) as generate:
+        generate_sql(ctx, MagicMock(), llm_manager=MagicMock())
+
+    first, second = (call.kwargs for call in generate.call_args_list)
+    assert first["nl_question"] == "Flights from Oklahoma City"
+    assert first["provided_context"] == "Origin is a code."
+    assert second["nl_question"] == ctx.refined_question
+    assert ("WHERE origin = 'OKC'" in second["provided_context"]) is draft_succeeds
+    assert second["provided_context"].startswith("Origin is a code.")
+    assert ctx.clarification_draft_sql == (draft["sql"] if draft_succeeds else "")
+    assert ctx.clarification_draft_question == ""
+
+
+def test_generation_without_answers_writes_no_draft() -> None:
+    from features.ask.engine.ask3.phases.generate import generate_sql
+
+    ctx = Ask3Context(question="Flights", target="t", db_type="mysql")
+    final = {"success": True, "sql": "SELECT 1", "explanation": "", "confidence": 1.0,
+             "cannot_answer": False, "raw_response": {}}
+    with patch("features.ask.sql_generation.generate_sql_from_nl",
+               return_value=final) as generate:
+        generate_sql(ctx, MagicMock(), llm_manager=MagicMock())
+
+    assert generate.call_count == 1
+    assert generate.call_args.kwargs["provided_context"] == ""
+
+
+def test_generation_reuses_the_reviewed_draft_while_the_question_is_unchanged() -> None:
+    from features.ask.engine.ask3.phases.generate import generate_sql
+
+    ctx = Ask3Context(question="Flights", target="t", db_type="mysql",
+                      clarification_draft_sql="SELECT 1", clarification_draft_ready=True)
+    with patch("features.ask.sql_generation.generate_sql_from_nl") as generate:
+        generate_sql(ctx, MagicMock(), llm_manager=MagicMock())
+
+    generate.assert_not_called()
+    assert (ctx.sql, ctx.generated_sql, ctx.clarification_draft_ready) == (
+        "SELECT 1", "SELECT 1", False)
+
+
+def test_answers_revise_the_reviewed_draft_without_drafting_again() -> None:
+    from features.ask.engine.ask3.phases.generate import generate_sql
+
+    ctx = Ask3Context(question="Flights", target="t", db_type="mysql",
+                      refined_question="Flights\n\nResolved: codes",
+                      clarification_draft_question="Flights",
+                      clarification_draft_sql="SELECT 1", clarification_draft_ready=True)
+    final = {"success": True, "sql": "SELECT 2", "explanation": "", "confidence": 1.0,
+             "cannot_answer": False, "raw_response": {}}
+    with patch("features.ask.sql_generation.generate_sql_from_nl",
+               return_value=final) as generate:
+        generate_sql(ctx, MagicMock(), llm_manager=MagicMock())
+
+    assert generate.call_count == 1
+    assert "SELECT 1" in generate.call_args.kwargs["provided_context"]
+    assert ctx.sql == "SELECT 2"
+
+
+def test_a_draft_that_already_failed_is_not_requested_again() -> None:
+    from features.ask.engine.ask3.phases.generate import generate_sql
+
+    ctx = Ask3Context(question="Flights", target="t", db_type="mysql",
+                      refined_question="Flights\n\nResolved: codes",
+                      clarification_draft_question="Flights", clarification_draft_failed=True)
+    final = {"success": True, "sql": "SELECT 2", "explanation": "", "confidence": 1.0,
+             "cannot_answer": False, "raw_response": {}}
+    with patch("features.ask.sql_generation.generate_sql_from_nl",
+               return_value=final) as generate:
+        generate_sql(ctx, MagicMock(), llm_manager=MagicMock())
+
+    assert generate.call_count == 1
+    assert generate.call_args.kwargs["nl_question"] == ctx.refined_question
+
+
+def test_a_failed_revision_does_not_leave_the_reviewed_draft_as_the_sql() -> None:
+    from features.ask.engine.ask3.phases.generate import generate_sql
+
+    ctx = Ask3Context(question="Flights", target="t", db_type="mysql",
+                      refined_question="Flights\n\nResolved: codes",
+                      sql="SELECT 1", generated_sql="SELECT 1",
+                      clarification_draft_question="Flights",
+                      clarification_draft_sql="SELECT 1", clarification_draft_ready=True)
+    failed = {"success": False, "error": "provider unavailable", "sql": ""}
+    with patch("features.ask.sql_generation.generate_sql_from_nl", return_value=failed):
+        generate_sql(ctx, MagicMock(), llm_manager=MagicMock())
+
+    assert ctx.sql is None and ctx.generated_sql is None
+
+
 def test_writer_refuses_only_for_missing_values_or_data_changes():
     from features.ask.prompts.ask_prompts import COMPREHENSIVE_ASK_PROMPT
 

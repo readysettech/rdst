@@ -70,6 +70,7 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
         validate_columns_against_schema,
         validate_resolved_columns_against_schema,
         validate_filter_literal_provenance,
+        validate_join_column_types,
         validate_sql_for_ask,
         validate_tables_against_schema,
     )
@@ -204,6 +205,15 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
                 }
             else:
                 ctx.validation_resolution = {"status": "validated"}
+
+        if not ctx.validation_errors:
+            join_validation = validate_join_column_types(
+                ctx.sql, schema_formatted=ctx.schema_formatted, dialect=ctx.db_type
+            )
+            for issue in join_validation["issues"]:
+                ctx.validation_errors.append(ValidationError(**issue))
+            if ctx.validation_errors:
+                presenter.validation_error(ctx.validation_errors)
 
         if not ctx.validation_errors:
             literal_validation = validate_filter_literal_provenance(

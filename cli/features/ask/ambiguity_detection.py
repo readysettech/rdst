@@ -23,6 +23,7 @@ from shared.ui import (
 )
 
 from .prompts.ask_prompts import (
+    format_detection_draft_block,
     format_matched_database_values_block,
     format_provided_context_block,
 )
@@ -523,11 +524,13 @@ def detect_ambiguities(
     matched_database_values: str = "",
     target_database: str = "",
     compact: bool = False,
+    draft_sql: str = "",
 ) -> Dict[str, Any]:
     """Ask the model whether the question needs clarification.
 
     ``compact`` requests the shorter reply of COMPACT_AMBIGUITY_DETECTION_PROMPT, which is
-    mapped into the same report.
+    mapped into the same report. ``draft_sql``, the SQL written for the question before any
+    clarification, turns the decision into a review of that draft.
     """
     try:
         pref_context = format_preference_tree_for_prompt(preference_tree)
@@ -553,7 +556,8 @@ def detect_ambiguities(
             provided_context_block=provided_context_block,
             matched_database_values_block=format_matched_database_values_block(
                 matched_database_values
-            ),
+            )
+            + format_detection_draft_block(draft_sql),
         )
 
         logger.info("Detecting ambiguities in: %s", nl_question)

@@ -594,6 +594,8 @@ class AskService:
         result_check_repair_enabled: bool = False,
         compact_clarification_enabled: bool = False,
         clarification_confidence_ceiling: float | None = None,
+        clarification_draft_edit_enabled: bool = False,
+        clarification_after_draft_enabled: bool = False,
     ):
         self._llm_manager = llm_manager
         self._period_literal_enabled = period_literal_enabled
@@ -630,6 +632,11 @@ class AskService:
         self._result_check_repair_enabled = result_check_repair_enabled
         self._compact_clarification_enabled = compact_clarification_enabled
         self._clarification_confidence_ceiling = clarification_confidence_ceiling
+        self._clarification_after_draft_enabled = clarification_after_draft_enabled
+        # A draft judged before asking is also the one the answers revise.
+        self._clarification_draft_edit_enabled = (
+            clarification_draft_edit_enabled or clarification_after_draft_enabled
+        )
         self._semantic_manager = semantic_manager
         self._db_executor = db_executor
         self._targets_config_factory = targets_config_factory
@@ -942,6 +949,8 @@ class AskService:
                     return
             else:
                 with inference_workflow("ask", input.source, workflow_id):
+                    if self._clarification_after_draft_enabled:
+                        await asyncio.to_thread(self._write_clarification_draft, ctx)
                     ctx, interpretations, ambiguities = await asyncio.to_thread(
                         self._detect_ambiguities, ctx
                     )
@@ -1059,6 +1068,10 @@ class AskService:
 
         self._session_store.pop(session_id, None)
         ctx = pending.context
+        if self._clarification_draft_edit_enabled and pending.writer_error is None and answers:
+            # Generation drafts from the question as it stood before these answers, then
+            # changes only what the answers require.
+            ctx.clarification_draft_question = ctx.refined_question or ctx.question
         self._apply_user_clarifications(ctx, answers, pending.clarification_context)
         if pending.writer_error is not None and not answers:
             yield pending.writer_error
@@ -4376,6 +4389,7 @@ class AskService:
             matched_database_values=ctx.matched_database_values,
             callback=lambda **kw: ctx.add_llm_call(phase="clarify", **kw),
             compact=self._compact_clarification_enabled,
+            draft_sql=ctx.clarification_draft_sql if ctx.clarification_draft_ready else "",
         )
         raw_response = str(result.get("raw_response", ""))
         ctx.ambiguity_response_sha256 = hashlib.sha256(
@@ -4466,6 +4480,28 @@ class AskService:
 
         ctx.interpretations = interpretations
         return ctx, interpretations, ambiguities
+
+    def _write_clarification_draft(self, ctx: Any) -> None:
+        """Write the SQL for the unclarified question, for the detector to judge.
+
+        A draft that fails or refuses is dropped, and generation runs as usual after the
+        detector.
+        """
+        compact_fallback = ctx.schema_compact_fallback
+        generate_sql(ctx, _NullPresenter(), self._llm_manager)
+        if not ctx.schema_context_fallback_used:
+            # The revision after the answers is longer than the draft; it keeps the compact
+            # schema to fall back to.
+            ctx.schema_compact_fallback = compact_fallback
+        if ctx.status == get_status_enum().ERROR or not ctx.sql:
+            ctx.status = get_status_enum().PENDING
+            ctx.error_message = ctx.error_code = ctx.error_category = None
+            ctx.sql = ctx.generated_sql = None
+            ctx.missing_schema = []
+            ctx.clarification_draft_failed = True
+            return
+        ctx.clarification_draft_sql = ctx.sql
+        ctx.clarification_draft_ready = True
 
     def _check_non_interactive_intent(self, ctx: Any) -> list[Any]:
         """Apply deterministic blockers without invoking the ambiguity model."""

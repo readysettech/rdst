@@ -986,6 +986,39 @@ def test_rdst_runner_scores_unnecessary_clarification_and_abandons_session(
     assert abandoned == ["session-1"]
 
 
+def test_a_stopped_attempt_keeps_an_unvalidated_draft_out_of_its_sql(tmp_path: Path):
+    ctx = _rdst_context()
+    ctx.sql = ctx.generated_sql = ctx.clarification_draft_sql = "SELECT 1"
+    ctx.clarification_draft_ready = True
+
+    class FakeAskService:
+        def __init__(self, **kwargs):
+            self.observer = kwargs["phase_observer"]
+
+        async def ask(self, _input, _options):
+            self.observer("clarify", ctx)
+            yield AskClarificationNeededEvent(
+                type="clarification_needed",
+                session_id="session-1",
+                interpretations=[],
+                questions=[
+                    AskClarificationQuestion(id="period", question="Which period?",
+                                             options=["2024", "2025"])
+                ],
+            )
+
+        def abandon(self, _session_id):
+            return True
+
+    runner = _rdst_runner(tmp_path)
+    with patch("devtools.ask_benchmark.runner.AskService", FakeAskService):
+        result = runner._run_rdst(_case(), _Adapter(_spec()))
+
+    assert result["outcome"] == "clarification_required"
+    assert (result["generated_sql"], result["validated_sql"]) == (None, None)
+    assert result["diagnostics"]["clarification_draft_sql"] == "SELECT 1"
+
+
 def test_rdst_runner_continues_a_clarification_with_default_options(
     tmp_path: Path,
 ):

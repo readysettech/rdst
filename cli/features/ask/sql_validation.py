@@ -18,6 +18,7 @@ import sqlglot
 import sqlparse
 from sqlglot import exp
 from sqlglot.optimizer.qualify import qualify
+from sqlglot.optimizer.scope import traverse_scope
 from sqlglot.schema import MappingSchema
 from sqlparse.sql import Parenthesis, Statement, TokenList
 from sqlparse.tokens import DML, Keyword
@@ -385,6 +386,94 @@ def validate_filter_literal_provenance(
             )
 
     return {"is_valid": not issues, "issues": issues, "warnings": warnings}
+
+
+_TEXT_TYPE = re.compile(r"char|text|string")
+_NUMBER_TYPE = re.compile(
+    r"\b(?:tiny|small|medium|big)?int(?:eger)?\b|decimal|numeric|float|double|real|serial"
+)
+
+
+def validate_join_column_types(
+    sql: str, *, schema_formatted: str, dialect: str = ""
+) -> Dict[str, Any]:
+    """Flag equality conditions between a text column and a numeric column.
+
+    A text code such as 'JFK' never equals an integer id, so such a join silently returns
+    no rows (or, after MySQL's implicit cast, the wrong ones).
+    """
+    read = "postgres" if dialect == "postgresql" else dialect or None
+    try:
+        tree = sqlglot.parse_one(sql, dialect=read)
+    except Exception:
+        return {"is_valid": True, "issues": []}
+
+    column_types, _ = _parse_formatted_schema_metadata(schema_formatted)
+
+    def source_table(scope: Any, qualifier: str) -> str:
+        """The base table a column's qualifier names, looking outward for a correlated
+        reference; empty for a subquery, a CTE or an unknown name."""
+        while scope is not None:
+            sources = scope.sources
+            if qualifier in sources:
+                source = sources[qualifier]
+                return source.name.lower() if isinstance(source, exp.Table) else ""
+            if not qualifier:
+                tables = [source for source in sources.values()]
+                if len(tables) == 1 and isinstance(tables[0], exp.Table):
+                    return tables[0].name.lower()
+                return ""
+            scope = scope.parent
+        return ""
+
+    def kind(scope: Any, column: exp.Column) -> tuple[str, str]:
+        table = source_table(scope, column.table)
+        qualified = f"{table}.{column.name.lower()}"
+        data_type = column_types.get(qualified, "") if table else ""
+        if _TEXT_TYPE.search(data_type):
+            return qualified, "text"
+        if _NUMBER_TYPE.search(data_type):
+            return qualified, "numeric"
+        return qualified, ""
+
+    try:
+        scopes = traverse_scope(tree)
+    except Exception:
+        return {"is_valid": True, "issues": []}
+
+    issues = []
+    for scope in scopes:
+        for node in scope.expression.find_all(exp.EQ):
+            if node.find_ancestor(exp.Select, exp.Union) is not scope.expression:
+                continue
+            left, right = node.this, node.expression
+            if not (isinstance(left, exp.Column) and isinstance(right, exp.Column)):
+                continue
+            issues.extend(_text_number_issue(node, scope, kind, read))
+    return {"is_valid": not issues, "issues": issues}
+
+
+def _text_number_issue(node: exp.EQ, scope: Any, kind: Any, read: Any) -> list:
+    """The issue for one equality of a text column and a numeric column, if it is one."""
+    left, right = node.this, node.expression
+    (left_name, left_kind), (right_name, right_kind) = kind(scope, left), kind(scope, right)
+    if {left_kind, right_kind} != {"text", "numeric"}:
+        return []
+    text_name, number_name = (
+        (left_name, right_name) if left_kind == "text" else (right_name, left_name)
+    )
+    return [
+        {
+            "column": right.name if left_kind == "text" else left.name,
+            "table_alias": None,
+            "message": (
+                f"{node.sql(dialect=read)} compares text column "
+                f"{text_name!r} with numeric column {number_name!r}, so their values "
+                "cannot match. Join on columns that hold the same values."
+            ),
+            "suggestions": [],
+        }
+    ]
 
 
 def _filter_column_literal_pairs(tree: exp.Expression):

@@ -176,6 +176,17 @@ def test_detect_ambiguities_includes_complete_filtered_schema() -> None:
     assert manager.kwargs["max_tokens"] == AMBIGUITY_RESPONSE_MAX_TOKENS
 
 
+
+@pytest.mark.parametrize("draft_sql", ["", "SELECT COUNT(*) FROM flights"])
+def test_detector_reviews_the_draft_it_is_given(draft_sql) -> None:
+    manager = RecordingLLMManager()
+
+    detect_ambiguities(nl_question="How many flights?", filtered_schema="flights(id)",
+                       database_engine="mysql", llm_manager=manager, draft_sql=draft_sql)
+
+    assert ("SQL DRAFTED FOR THIS QUESTION" in manager.prompt) is bool(draft_sql)
+    assert ("SELECT COUNT(*) FROM flights" in manager.prompt) is bool(draft_sql)
+
 def test_detector_prompt_asks_for_missing_parameters_and_identifiers() -> None:
     manager = RecordingLLMManager()
 

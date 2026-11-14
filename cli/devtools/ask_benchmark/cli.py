@@ -432,6 +432,22 @@ def build_parser() -> argparse.ArgumentParser:
             "at most this value (0 to 1); above it Ask proceeds without asking"
         ),
     )
+    run.add_argument(
+        "--clarification-draft-edit",
+        action="store_true",
+        help=(
+            "After the user answers, draft SQL from the question as it stood before the "
+            "answers and change only what the answers require"
+        ),
+    )
+    run.add_argument(
+        "--clarification-after-draft",
+        action="store_true",
+        help=(
+            "Write SQL before deciding whether to ask, let the clarification detector review "
+            "it, and revise it with the answers (implies --clarification-draft-edit)"
+        ),
+    )
     run.add_argument("--max-cases", type=_positive_int)
     run.add_argument(
         "--max-provider-calls",
@@ -1643,6 +1659,8 @@ def _run_database_locked(
         oracle_user=oracle_user,
         compact_clarification=args.compact_clarification,
         clarification_confidence_ceiling=args.clarification_confidence_ceiling,
+        clarification_draft_edit=args.clarification_draft_edit,
+        clarification_after_draft=args.clarification_after_draft,
     )
     cases, gold_failures = runner.preflight_gold(cases)
     if gold_failures:
@@ -1708,6 +1726,10 @@ def _run_database_locked(
         "ask_accuracy_profile": args.ask_accuracy_profile,
         "compact_clarification": args.compact_clarification,
         "clarification_confidence_ceiling": args.clarification_confidence_ceiling,
+        # Clarification after a draft also edits the draft with the answers.
+        "clarification_draft_edit": args.clarification_draft_edit
+        or args.clarification_after_draft,
+        "clarification_after_draft": args.clarification_after_draft,
         "ask_accuracy_features": {
             key.removesuffix("_enabled"): value
             for key, value in ask_profile_service_flags(args.ask_accuracy_profile).items()

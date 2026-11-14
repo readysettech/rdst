@@ -17,6 +17,33 @@ def format_provided_context_block(provided_context: str | None) -> str:
     return f"\n\nAUTHORITATIVE CALLER-PROVIDED CONTEXT:\n{value}"
 
 
+def format_clarification_draft(sql: str) -> str:
+    """The pre-clarification SQL, as context the answered question revises."""
+    return (
+        "SQL written for this question before the user answered the clarification "
+        "questions:\n"
+        f"{sql.strip()}\n"
+        "Start from this SQL. Change only what the user's answers require, and keep its "
+        "tables, joins, filters, output columns and LIMIT otherwise. If the answers agree "
+        "with it, return it unchanged."
+    )
+
+
+def format_detection_draft_block(sql: str) -> str:
+    """The SQL drafted for the question, for the clarification detector to review."""
+    if not sql.strip():
+        return ""
+    return (
+        "\n\nSQL DRAFTED FOR THIS QUESTION (before any clarification):\n"
+        f"{sql.strip()}\n"
+        "Review this draft. Report an ambiguity only for a fact the draft had to guess (a "
+        "code, stored value, threshold, formula, time range or scope that neither the "
+        "question nor the schema states) where another reading changes the result. Do not "
+        "ask about anything the question or schema already settles. Set overall_confidence "
+        "to how likely this draft returns exactly what the user asked for."
+    )
+
+
 def format_matched_database_values_block(value_context: str | None) -> str:
     """Render database-derived value matches without promoting them to user intent."""
     value = (value_context or "").strip()

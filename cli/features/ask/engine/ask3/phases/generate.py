@@ -72,33 +72,69 @@ def generate_sql(
     # Import here to avoid circular imports
     # Path: lib/engines/ask3/phases/generate.py -> lib/functions/, lib/llm_manager/
     from features.ask.engine.ask3.phases.schema import COMPACT_SCHEMA_FORMAT_VERSION
+    from features.ask.prompts.ask_prompts import format_clarification_draft
     from features.ask.sql_generation import generate_sql_from_nl
     from shared.llm_manager import LLMManager
 
     if llm_manager is None:
         llm_manager = LLMManager()
 
+    def with_conversation(question: str) -> str:
+        # Prepend conversation context if available (for follow-up questions)
+        if ctx.conversation_context:
+            return f"{ctx.conversation_context}\nCurrent question: {question}"
+        return question
+
+    def generate(question: str, provided_context: str, phase: str) -> dict:
+        return generate_sql_from_nl(
+            nl_question=with_conversation(question),
+            filtered_schema=ctx.schema_formatted,
+            database_engine=ctx.db_type,
+            target_database=ctx.database_name(),
+            llm_manager=llm_manager,
+            provided_context=provided_context,
+            schema_format=ctx.schema_format,
+            compact_fallback_schema=ctx.schema_compact_fallback,
+            compact_fallback_format=COMPACT_SCHEMA_FORMAT_VERSION,
+            matched_database_values=ctx.matched_database_values,
+            callback=lambda **kw: _track_llm_call(ctx, phase, **kw),
+        )
+
     # Use refined question if available
     question = ctx.refined_question or ctx.question
+    provided_context = ctx.provided_context
 
-    # Prepend conversation context if available (for follow-up questions)
-    if ctx.conversation_context:
-        question = f"{ctx.conversation_context}\nCurrent question: {question}"
+    draft_question = ctx.clarification_draft_question
+    ctx.clarification_draft_question = ""
+    draft_ready = ctx.clarification_draft_ready
+    ctx.clarification_draft_ready = False
+    if draft_ready and not draft_question:
+        # The draft written before clarification still answers the question as it stands.
+        ctx.sql = ctx.generated_sql = ctx.clarification_draft_sql
+        presenter.sql_generated(ctx.sql, ctx.sql_explanation)
+        return ctx
+    if draft_question and draft_question != question:
+        # The SQL Ask would have written without the answers; the answers then change only
+        # what they require, so a confirming answer keeps a correct draft intact.
+        draft_sql = ctx.clarification_draft_sql if draft_ready else ""
+        if not draft_sql and not ctx.clarification_draft_failed:
+            draft = generate(draft_question, ctx.provided_context, "clarification_draft")
+            if draft.get("success") and not draft.get("cannot_answer"):
+                draft_sql = (draft.get("sql") or "").strip()
+        if draft_sql:
+            ctx.clarification_draft_sql = draft_sql
+            provided_context = "\n\n".join(
+                part for part in (ctx.provided_context.strip(),
+                                  format_clarification_draft(draft_sql)) if part
+            )
+
+    if draft_ready:
+        # The reviewed draft sat in ctx.sql; a revision that fails must not leave it there
+        # as if it answered the question with the answers applied.
+        ctx.sql = ctx.generated_sql = None
 
     # Generate SQL
-    result = generate_sql_from_nl(
-        nl_question=question,
-        filtered_schema=ctx.schema_formatted,
-        database_engine=ctx.db_type,
-        target_database=ctx.database_name(),
-        llm_manager=llm_manager,
-        provided_context=ctx.provided_context,
-        schema_format=ctx.schema_format,
-        compact_fallback_schema=ctx.schema_compact_fallback,
-        compact_fallback_format=COMPACT_SCHEMA_FORMAT_VERSION,
-        matched_database_values=ctx.matched_database_values,
-        callback=lambda **kw: _track_llm_call(ctx, "generate", **kw),
-    )
+    result = generate(question, provided_context, "generate")
 
     ctx.schema_prompt_utf8_bytes = result.get("prompt_utf8_bytes", 0)
     ctx.schema_context_fallback_reason = result.get(

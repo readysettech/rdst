@@ -336,6 +336,8 @@ class BenchmarkRunner:
         oracle_user: OracleUserSimulator | None = None,
         compact_clarification: bool = False,
         clarification_confidence_ceiling: float | None = None,
+        clarification_draft_edit: bool = False,
+        clarification_after_draft: bool = False,
     ):
         self.run_id = run_id
         self.track = track
@@ -417,6 +419,12 @@ class BenchmarkRunner:
         ):
             raise ValueError("The clarification confidence ceiling must be between 0 and 1")
         self.clarification_confidence_ceiling = clarification_confidence_ceiling
+        if clarification_draft_edit and track != EvaluationTrack.RDST:
+            raise ValueError("Clarification draft editing applies only to the rdst-ask track")
+        self.clarification_draft_edit = clarification_draft_edit
+        if clarification_after_draft and track != EvaluationTrack.RDST:
+            raise ValueError("Clarification after a draft applies only to the rdst-ask track")
+        self.clarification_after_draft = clarification_after_draft
         self.budget_stop_reason: str | None = None
         self._gold_fingerprints: dict[int, str] = {}
         self._gold_results: dict[int, QueryResult] = {}
@@ -914,8 +922,7 @@ class BenchmarkRunner:
                     "clarification",
                     "Clear benchmark case triggered clarification",
                 ),
-                "generated_sql": getattr(ctx, "generated_sql", None),
-                "validated_sql": getattr(ctx, "sql", None),
+                **_stopped_sql(ctx, diagnostics),
                 "diagnostics": diagnostics,
             }
 
@@ -934,8 +941,7 @@ class BenchmarkRunner:
                         "clarification",
                         error_event.message,
                     ),
-                    "generated_sql": getattr(ctx, "generated_sql", None),
-                    "validated_sql": getattr(ctx, "sql", None),
+                    **_stopped_sql(ctx, diagnostics),
                     "diagnostics": diagnostics,
                 }
             if phase in {"config", "schema", "filter"}:
@@ -1142,6 +1148,16 @@ class BenchmarkRunner:
                 if self.clarification_confidence_ceiling is not None
                 else {}
             ),
+            **(
+                {"clarification_draft_edit_enabled": True}
+                if self.clarification_draft_edit
+                else {}
+            ),
+            **(
+                {"clarification_after_draft_enabled": True}
+                if self.clarification_after_draft
+                else {}
+            ),
         }
 
     def _matched_database_values(self, case: BenchmarkCase) -> ValueMatchResult:
@@ -1194,6 +1210,19 @@ def _spec_identity(spec: ModelSpec):
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _stopped_sql(ctx: Any, diagnostics: dict[str, Any]) -> dict[str, Any]:
+    """The SQL of an attempt that stopped to ask. A draft Ask wrote for the detector to
+    review never went through validation, so it goes in the diagnostics, not as the
+    attempt's SQL."""
+    if getattr(ctx, "clarification_draft_ready", False):
+        diagnostics["clarification_draft_sql"] = getattr(ctx, "clarification_draft_sql", "")
+        return {"generated_sql": None, "validated_sql": None}
+    return {
+        "generated_sql": getattr(ctx, "generated_sql", None),
+        "validated_sql": getattr(ctx, "sql", None),
+    }
 
 
 def _failed_attempt(outcome: Outcome, stage: str, error: str):

@@ -24,6 +24,7 @@ from features.ask.sql_validation import (
     describe_validation_issues,
     quote_case_sensitive_identifiers,
     validate_filter_literal_provenance,
+    validate_join_column_types,
     validate_resolved_columns_against_schema,
     validate_sql_for_ask,
     validate_tables_against_schema,
@@ -1261,3 +1262,50 @@ def test_validation_phase_casts_postgres_round_values():
     validate_sql(ctx, MagicMock())
     assert not ctx.validation_errors
     assert ctx.sql == "SELECT ROUND((AVG(score))::numeric, 2) FROM events"
+
+
+_FLIGHT_SCHEMA = (
+    "Table: airlines\n  origin (varchar)\n  origin_airport_id (int)\n\n"
+    "Table: airports\n  code (varchar)\n  description (varchar)\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("sql", "valid"),
+    [
+        ("SELECT COUNT(*) FROM airlines a JOIN airports p ON a.origin_airport_id = p.code", False),
+        ("SELECT COUNT(*) FROM airlines a JOIN airports p ON p.code = a.origin", True),
+        ("SELECT COUNT(*) FROM airlines WHERE origin_airport_id = 10397", True),
+        ("SELECT COUNT(*) FROM airlines a JOIN unknown u ON a.origin_airport_id = u.code", True),
+        # A correlated reference resolves in the enclosing query.
+        (
+            "SELECT p.code FROM airports p WHERE EXISTS "
+            "(SELECT 1 FROM airlines a WHERE a.origin_airport_id = p.code)",
+            False,
+        ),
+        # A derived table's column takes no base column's type.
+        (
+            "SELECT COUNT(*) FROM airports p JOIN (SELECT CAST(origin_airport_id AS CHAR) AS "
+            "code FROM airlines) x ON p.code = x.code",
+            True,
+        ),
+        (
+            "SELECT COUNT(*) FROM (SELECT CAST(origin AS SIGNED) AS origin, origin_airport_id "
+            "FROM airlines) t WHERE t.origin = t.origin_airport_id",
+            True,
+        ),
+        # An inner query's alias does not rename the outer one.
+        (
+            "SELECT COUNT(*) FROM airlines t JOIN airlines u ON u.origin_airport_id = "
+            "t.origin_airport_id WHERE EXISTS (SELECT 1 FROM airports t WHERE t.code = 'JFK')",
+            True,
+        ),
+    ],
+)
+def test_join_between_text_and_numeric_columns_is_invalid(sql, valid) -> None:
+    result = validate_join_column_types(sql, schema_formatted=_FLIGHT_SCHEMA, dialect="mysql")
+
+    assert result["is_valid"] is valid
+    if not valid:
+        assert "'airports.code'" in result["issues"][0]["message"]
+        assert "'airlines.origin_airport_id'" in result["issues"][0]["message"]

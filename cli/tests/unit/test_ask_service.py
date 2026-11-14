@@ -1124,6 +1124,38 @@ class TestAskServiceSessionManagement:
         assert sessions == {}
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("enabled", "answers", "draft_question"),
+        [(True, {"status": "enabled = 1"}, "Show active users"), (True, {}, ""),
+         (False, {"status": "enabled = 1"}, "")],
+    )
+    async def test_resume_drafts_from_the_question_before_the_answers(
+        self, enabled, answers, draft_question
+    ):
+        from features.ask.engine.ask3.context import Ask3Context
+        from features.ask.service import _PendingAskSession
+
+        ctx = Ask3Context(question="Show active users", target="test")
+        context = {"status": {"ambiguity_id": "status", "term": "active",
+                              "question": "What does active mean?"}}
+        service = AskService(
+            session_store={"pending": _PendingAskSession(
+                context=ctx, persist_query=False, clarification_context=context)},
+            clarification_draft_edit_enabled=enabled,
+        )
+        seen = []
+
+        async def fake_run(resumed_ctx, *, persist_query=True):
+            seen.append(resumed_ctx.clarification_draft_question)
+            if False:
+                yield None
+
+        with patch.object(service, "_run_from_generate", side_effect=fake_run):
+            _ = [event async for event in service.resume("pending", answers)]
+
+        assert seen == [draft_question]
+
+    @pytest.mark.asyncio
     async def test_resume_rejects_unknown_answer_key_without_consuming_session(self):
         from features.ask.engine.ask3.context import Ask3Context
         from features.ask.service import _PendingAskSession
@@ -1333,6 +1365,52 @@ class TestAskServiceDependencyInjection:
             service._detect_ambiguities(ctx)
 
         assert detect.call_args.kwargs["compact"] is compact
+
+    @pytest.mark.parametrize("refuses", [False, True])
+    def test_clarification_draft_is_reviewed_by_the_detector(self, refuses):
+        from features.ask.engine.ask3.context import Ask3Context
+        from features.ask.engine.ask3.types import Status
+
+        service = AskService(llm_manager=Mock(), clarification_after_draft_enabled=True)
+        ctx = Ask3Context(question="Which users?", target="t", schema_formatted="users")
+
+        def fake_generate(gen_ctx, presenter, llm_manager):
+            if refuses:
+                gen_ctx.mark_error("cannot answer", code="ask_cannot_answer")
+                gen_ctx.missing_schema = ["users"]
+            else:
+                gen_ctx.sql = gen_ctx.generated_sql = "SELECT * FROM users"
+            return gen_ctx
+
+        with patch("features.ask.service.generate_sql", side_effect=fake_generate):
+            service._write_clarification_draft(ctx)
+        with patch("features.ask.service.detect_ambiguities",
+                   return_value={"success": True, "report": None}) as detect:
+            service._detect_ambiguities(ctx)
+
+        assert ctx.clarification_draft_ready is not refuses
+        assert ctx.clarification_draft_failed is refuses
+        assert detect.call_args.kwargs["draft_sql"] == ("" if refuses else "SELECT * FROM users")
+        assert ctx.status != Status.ERROR
+        assert (ctx.sql, ctx.missing_schema) == (
+            (None, []) if refuses else ("SELECT * FROM users", []))
+
+    def test_the_draft_keeps_the_compact_schema_for_the_revision(self):
+        from features.ask.engine.ask3.context import Ask3Context
+
+        service = AskService(llm_manager=Mock(), clarification_after_draft_enabled=True)
+        ctx = Ask3Context(question="Which users?", target="t", schema_formatted="users",
+                          schema_compact_fallback="u")
+
+        def fake_generate(gen_ctx, presenter, llm_manager):
+            gen_ctx.sql = gen_ctx.generated_sql = "SELECT * FROM users"
+            gen_ctx.schema_compact_fallback = ""
+            return gen_ctx
+
+        with patch("features.ask.service.generate_sql", side_effect=fake_generate):
+            service._write_clarification_draft(ctx)
+
+        assert ctx.schema_compact_fallback == "u"
 
     @pytest.mark.parametrize(
         ("ceiling", "confidence", "asks"),
