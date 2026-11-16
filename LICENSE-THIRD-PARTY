@@ -27,10 +27,9 @@ Instanced at weights 400 and 500, subset to the Google Fonts latin range, and
 compressed to WOFF2. Outfit declares no Reserved Font Name, so instancing,
 subsetting and redistribution under the family name are permitted.
 
-Outfit is the UI face in builds from this repository. Readyset's official
-builds use a different, commercially licensed face; the metric descriptors in
-web/src/fonts.css retarget Outfit onto the same line box and x-height, so
-layout does not change between the two.
+Outfit is the UI face in builds from this repository and in Readyset's
+official builds; the metric descriptors in web/src/fonts.css retarget it onto
+the line box and x-height the type scale was designed against.
 
 
 2. IBM Plex Mono

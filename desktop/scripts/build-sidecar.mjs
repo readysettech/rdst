@@ -49,6 +49,8 @@ const PYINSTALLER_ARGS = [
   "--name=rdst",
   // Bundle the rdst dist-info so importlib.metadata can report the version.
   "--copy-metadata=rdst",
+  // Collects LGPL packages as source files instead of sealing them in the executable.
+  `--additional-hooks-dir=${path.resolve(appDir, "scripts/pyinstaller-hooks")}`,
   "--collect-all=keyring",
   "--collect-all=fastapi_ai_sdk",
   "--collect-all=psycopg2",
@@ -275,6 +277,13 @@ function buildWithPyInstaller() {
     cwd: rdstDir,
     env: { PYINSTALLER_CONFIG_DIR: path.resolve(buildRoot, "config") }
   });
+  // The third-party components the sidecar ships, which packaging renders into the notices.
+  run(python, [
+    path.resolve(appDir, "scripts/sidecar-notices.py"),
+    pyinstallerAppDir,
+    executableName,
+    path.resolve(rdstDir, "LICENSE")
+  ]);
   stageSidecarDir(pyinstallerAppDir);
 }
 

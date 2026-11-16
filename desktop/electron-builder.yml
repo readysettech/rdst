@@ -43,6 +43,8 @@ electronFuses:
   grantFileProtocolExtraPrivileges: false
   # Flipping fuses invalidates an arm64 signature; an unsigned build needs a fresh ad-hoc one.
   resetAdHocDarwinSignature: true
+# Writes THIRD-PARTY-NOTICES.txt for what the package holds. Packaging runs in this directory.
+afterPack: "./scripts/third-party-notices.mjs"
 # Tray state icons (problem, paused, offline) are drawn at runtime from these two.
 extraResources:
   - from: resources/tray.png

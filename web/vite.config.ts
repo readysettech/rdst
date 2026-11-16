@@ -5,6 +5,7 @@ import { tanstackRouter } from '@tanstack/router-plugin/vite'
 import viteReact, { reactCompilerPreset } from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { configDefaults } from 'vitest/config'
+import { thirdPartyRecord } from './scripts/third-party.mjs'
 
 export default defineConfig({
   server: {
@@ -28,6 +29,7 @@ export default defineConfig({
     }),
     viteReact(),
     babel({ presets: [reactCompilerPreset()] }),
+    thirdPartyRecord(),
   ],
   resolve: {
     alias: {

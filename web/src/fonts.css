@@ -1,5 +1,5 @@
 /* Public-mirror replacement for apps/rdst/src/fonts.css.
-   Outfit (SIL OFL 1.1) stands in for the licensed UI typeface. The family is
+   Outfit (SIL OFL 1.1) is the UI typeface, as in official builds. The family is
    exposed through --font-family-sans, which style.css reads, so no other file
    in the published tree changes.
 

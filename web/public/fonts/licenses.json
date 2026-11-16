@@ -1,0 +1,12 @@
+{
+  "IBM Plex Mono": {
+    "files": ["IBMPlexMono-Medium.woff2", "IBMPlexMono-Regular.woff2"],
+    "license": "OFL-1.1",
+    "text": "OFL.txt"
+  },
+  "Outfit": {
+    "files": ["Outfit-Medium.woff2", "Outfit-Regular.woff2"],
+    "license": "OFL-1.1",
+    "text": "OFL.txt"
+  }
+}
