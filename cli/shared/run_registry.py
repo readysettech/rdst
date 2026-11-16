@@ -252,6 +252,18 @@ class RunRegistry:
         self._runs.clear()
         return cancelled
 
+    async def reset_and_wait(self) -> int:
+        """Cancel tracked runs and wait for their async drivers to settle."""
+        tasks = [
+            handle.task
+            for handle in self._runs.values()
+            if handle.status not in TERMINAL_STATUSES and handle.task is not None
+        ]
+        cancelled = self.reset()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        return cancelled
+
     def wake_needs_key(self) -> int:
         """Wake every run currently parked on the shared key gate."""
         woken = 0

@@ -9,7 +9,7 @@ from typing import Any, Mapping, NamedTuple, Optional, Union
 
 from .aws_secrets import resolve_secret
 from .config.targets import default_port_for, normalize_db_type
-from .secret_store_service import SecretStoreService
+from .secret_store_service import SecretStoreService, apply_owned_environment
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +312,7 @@ def resolve_password_value(
             secret_val = resolve_secret(secret_arn, secret_key=secret_key)
             if secret_val:
                 if password_env:
-                    os.environ[password_env] = secret_val
+                    apply_owned_environment(password_env, secret_val)
                 return secret_val
         except Exception:
             pass
@@ -321,7 +321,7 @@ def resolve_password_value(
         store = secret_store or SecretStoreService()
         secret_val = store.get_secret(password_env)
         if secret_val:
-            os.environ[password_env] = secret_val
+            apply_owned_environment(password_env, secret_val)
             return secret_val
 
     return ""

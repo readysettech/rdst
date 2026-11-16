@@ -116,6 +116,8 @@ def test_web_auto_mode_serves_embedded_frontend(tmp_path):
                 with patch.dict("sys.modules", {"uvicorn": fake_uvicorn}):
                     with patch.dict("os.environ", {}, clear=True):
                         result = rdst.execute_command(Mock(), _web_args())
+                        assert rdst.os.environ["RDST_WEB_SERVER"] == "1"
+                        assert rdst.os.environ["RDST_HOSTED_REPORTS"] == "disabled"
                         assert rdst.os.environ["RDST_WEB_SERVE_STATIC"] == "1"
                         assert rdst.os.environ["RDST_WEB_DIST_DIR"] == str(dist_dir)
 
@@ -140,6 +142,8 @@ def test_web_auto_mode_falls_back_to_api_only_without_embedded_frontend():
                         clear=True,
                     ):
                         result = rdst.execute_command(Mock(), _web_args())
+                        assert rdst.os.environ["RDST_WEB_SERVER"] == "1"
+                        assert rdst.os.environ["RDST_HOSTED_REPORTS"] == "disabled"
                         assert rdst.os.environ["RDST_WEB_SERVE_STATIC"] == "0"
                         assert "RDST_WEB_DIST_DIR" not in rdst.os.environ
 

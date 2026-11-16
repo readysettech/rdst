@@ -256,8 +256,8 @@ class MonitorLoop:
         """Jev's read of the open actions, at the attention cadence while AI monitoring runs."""
         now = int(self.clock())
         interval = self.store.levers(target)["attention_every_min"] * 60
-        if now < self._ranked_at.get(target, 0) + interval or not signed_in() or \
-                database_limit.paused(self.store, target, now):
+        if now < self._ranked_at.get(target, 0) + interval or database_limit.ai_declined() or \
+                not signed_in() or database_limit.paused(self.store, target, now):
             return
         self._ranked_at[target] = now
         try:
@@ -694,8 +694,11 @@ class MonitorLoop:
         if outcome == "daily_cap":
             self._pulse(target, now, "attention", False, "Daily AI check limit reached")
         elif outcome == "signed_out":
-            self._pulse(target, now, "attention", True, "Sign in to turn on AI monitoring")
-        elif outcome == "local_only":
+            # An own key runs analyses and reports; the alert checks still need an account.
+            self._pulse(target, now, "attention", True,
+                        "Sign in to Readyset for slow-query alerts" if database_limit.own_key()
+                        else "Sign in to turn on AI monitoring")
+        elif outcome in ("local_only", "ai_off"):
             self._pulse(target, now, "attention", True, f"{checked}, AI checks are off")
         elif outcome == "allowance":
             self._pulse(target, now, "attention", True,

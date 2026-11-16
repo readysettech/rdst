@@ -146,7 +146,7 @@ def disable_background_provider_identity(monkeypatch):
     """Provider tests opt into identity calls explicitly; never leak HTTP."""
     monkeypatch.setattr(
         "features.providers.identity.capture_provider_identity_async",
-        lambda provider, token: None,
+        lambda provider, token, **kwargs: None,
     )
     monkeypatch.setattr(
         "features.providers.identity.capture_aws_identity_async",

@@ -19,6 +19,7 @@ from features.schema.assessment_context import (
 )
 from shared import agent_activity
 from shared.account_session import is_signed_in_locally
+from shared.ai_data_consent import ai_data_sharing_allowed
 from shared.config.targets import TargetsConfig
 from shared.llm_manager.jev_client import JevClient, JevClientError
 from shared.monitor.statements import display_name
@@ -234,6 +235,10 @@ class AssessmentWorker:
             return False
         eligible = await self._store(_eligible_keys, target)
         await self._store(store.prepare_assessments, target, identity, eligible_keys=eligible)
+        # With AI off nothing is claimed or sent; each row keeps its own state for when AI
+        # is turned back on.
+        if not ai_data_sharing_allowed():
+            return False
         if not is_signed_in_locally():
             await self._store(store.set_target_assessment_state,
                 target,

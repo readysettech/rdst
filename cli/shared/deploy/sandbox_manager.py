@@ -1190,6 +1190,35 @@ class ReadysetSandboxManager:
             raise asyncio.CancelledError
         return True
 
+    async def reset_local_data(self) -> None:
+        """Remove the managed sandbox and reset its in-process lifecycle state."""
+        prewarm = self._prewarm_task
+        self._prewarm_task = None
+        self._prewarm_target = None
+        if prewarm is not None and not prewarm.done():
+            prewarm.cancel()
+            _, cancelled = await _settle_transition(prewarm)
+            if cancelled:
+                raise asyncio.CancelledError
+
+        async with self._condition:
+            target = self._state.current_target
+
+        if target is not None and await self.remove_target(target):
+            return
+
+        error, cancelled = await _settle_transition(self._adapter.remove())
+        async with self._condition:
+            generation = self._state.generation
+            self._sandbox = None
+            self._state = SandboxState(generation=generation)
+            self._transition_in_progress = False
+            self._condition.notify_all()
+        if cancelled:
+            raise asyncio.CancelledError
+        if error is not None:
+            raise RuntimeError(f"Could not remove the Readyset sandbox: {error}") from error
+
     async def remove_target(self, target: str) -> bool:
         """Remove this target's sandbox after all current work has settled."""
         async with self.retire_target(target) as removed:

@@ -214,6 +214,12 @@ def capture_provider_identity(
         return False
 
 
+def reset_runtime_state() -> None:
+    """Forget identity-capture de-duplication state."""
+    with _CAPTURE_LOCK:
+        _CAPTURE_ATTEMPTS.clear()
+
+
 def capture_provider_identity_async(provider: str, token: str) -> None:
     """Schedule one best-effort capture per credential without blocking login."""
     fingerprint = f"{provider}:{hashlib.sha256(token.encode()).hexdigest()}"

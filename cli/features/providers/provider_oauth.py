@@ -336,6 +336,13 @@ class ProviderOAuth:
         with self._tokens_lock:
             self._tokens = None
 
+    def reset(self) -> None:
+        """Forget tokens and pending sign-ins held by this process."""
+        with self._registry_lock:
+            self.registry.clear()
+            self._last_collect = 0.0
+        self.clear_tokens()
+
     def refresh(self, tokens: dict[str, Any]) -> Optional[str]:
         """Renew the access token, or clear the session when that is impossible."""
         refresh_token = tokens.get("refresh_token")

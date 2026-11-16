@@ -1,4 +1,5 @@
-"""Signed-out automatic AI stays pending while local monitoring keeps recording."""
+"""Signed out, automatic AI runs on the user's own key or waits for a sign-in, while local
+monitoring keeps recording. Jev's checks need the sign-in either way."""
 
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -17,6 +18,9 @@ from shared.monitor.monitor_store import MonitorStore
 from tests.unit.test_monitor_analyze_queue import FakeService, NOW, add_query
 from tests.unit.test_monitor_database_limit import series
 from tests.unit.test_monitor_replay import Clock, ScriptedJev, loop_for
+
+# Authorizations where the user's own Anthropic key pays for monitoring's AI.
+OWN_KEY = {"env", "keyring", "saved_claude"}
 
 
 @pytest.fixture(params=["none", "env", "keyring", "saved_claude", "saved_readyset"])
@@ -41,7 +45,9 @@ def authorization(request, monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_automatic_lanes_hold_and_resume(authorization, monkeypatch, tmp_path):
-    _, signed_in = authorization
+    variant, signed_in = authorization
+    if variant in OWN_KEY:
+        return
     store = MonitorStore(tmp_path / "monitor.db", clock=lambda: NOW)
     store.set_settings("db", {"enabled": True, "deep_analysis": True, "nightly_report": True,
                               "nightly_hour": 0})
@@ -98,6 +104,46 @@ async def test_automatic_lanes_hold_and_resume(authorization, monkeypatch, tmp_p
     assert scheduler._plan(NOW)
 
 
+@pytest.mark.asyncio
+async def test_an_own_key_runs_analyses_and_reports_signed_out(authorization, monkeypatch,
+                                                                tmp_path):
+    variant, _ = authorization
+    if variant not in OWN_KEY:
+        return
+    store = MonitorStore(tmp_path / "monitor.db", clock=lambda: NOW)
+    store.set_settings("db", {"enabled": True, "deep_analysis": True, "nightly_report": True,
+                              "nightly_hour": 0})
+    store.start_first_hour("db", NOW - 30)
+    database_limit.set_ai_state(store, "db", "on")
+    _, yesterday_end, _ = snapshot.report_period("nightly", NOW)
+    store._write(lambda conn: conn.execute(
+        "INSERT INTO stmt_series (target,query_key,res,bucket_start,calls,total_ms,rows,blks_hit,blks_read) VALUES (?,?,?,?,?,?,?,?,?)",
+        ("db", "q", 60, yesterday_end - 60, 100, 1000, 0, 0, 0)))
+    service = FakeService()
+    queue = AnalyzeQueue(store, service=service, clock=lambda: NOW)
+    jev = ScriptedJev({"q": ("notify", "latency_regression", .8)})
+    attention = Mock(wraps=jev.attention)
+    jev.attention = attention
+    clock = Clock(NOW)
+    loop = loop_for(monkeypatch, tmp_path, store, clock, jev)
+    scheduler = report.ReportScheduler(store, clock=lambda: NOW)
+    for tick in range(3):
+        add_query(store, "one", 100, now=NOW + tick * 60)
+        series(store, "q", now=clock.now, before_calls=100, after_calls=100,
+               before_ms=10, after_ms=14)
+        loop.cycle("db")
+        await queue.tick()
+        clock.now += 60
+    # The key runs deep analysis and the nightly report without an account.
+    assert service.calls
+    assert scheduler._plan(NOW)
+    assert database_limit.display_state(store, "db") == "on"
+    # Jev's alert checks still need the account.
+    attention.assert_not_called()
+    assert store.read("SELECT detail FROM monitor_pulse WHERE kind='attention' ORDER BY id DESC LIMIT 1")[0][
+        "detail"] == "Sign in to Readyset for slow-query alerts"
+
+
 @pytest.mark.parametrize("feature", ["monitor", "analyze"])
 def test_provider_resolution_guard_and_manual_policy(authorization, feature, monkeypatch):
     variant, signed_in = authorization
@@ -110,14 +156,15 @@ def test_provider_resolution_guard_and_manual_policy(authorization, feature, mon
     monkeypatch.setattr(ClaudeProvider, "complete", transport)
     monkeypatch.setattr(HostedProvider, "complete", hosted_transport)
     with inference_workflow(feature, "web"):
-        if feature == "monitor" or variant in {"none", "saved_readyset"}:
+        if variant not in OWN_KEY:
             with pytest.raises(LLMError):
                 LLMManager().generate_response("unit prompt")
             transport.assert_not_called()
             hosted_transport.assert_not_called()
         else:
+            # Signed out, the user's own key pays for monitoring and manual analysis alike.
             assert resolve_api_key().provider == "claude"
-            LLMManager().generate_response("manual unit prompt")
+            LLMManager().generate_response("signed-out unit prompt")
             transport.assert_called_once()
     signed_in[0] = True
     with inference_workflow("monitor", "web"):
@@ -125,8 +172,13 @@ def test_provider_resolution_guard_and_manual_policy(authorization, feature, mon
         LLMManager().generate_response("automatic unit prompt")
     calls_before_logout = transport.call_count + hosted_transport.call_count
     signed_in[0] = False
-    with inference_workflow("monitor", "web"), pytest.raises(LLMError, match="signed out"):
-        LLMManager().generate_response("automatic unit prompt after logout")
+    with inference_workflow("monitor", "web"):
+        if variant in OWN_KEY:
+            LLMManager().generate_response("automatic unit prompt after logout")
+            assert transport.call_count + hosted_transport.call_count == calls_before_logout + 1
+            return
+        with pytest.raises(LLMError, match="signed out"):
+            LLMManager().generate_response("automatic unit prompt after logout")
     assert transport.call_count + hosted_transport.call_count == calls_before_logout
 
 
@@ -159,7 +211,7 @@ async def test_manual_analysis_with_own_key_remains_allowed(authorization, tmp_p
 
 @pytest.mark.asyncio
 async def test_logout_after_claim_holds_without_retry_backoff(authorization, tmp_path):
-    _, signed_in = authorization
+    variant, signed_in = authorization
     store = MonitorStore(tmp_path / "monitor.db", clock=lambda: NOW)
     store.set_settings("db", {"enabled": True, "deep_analysis": True})
     add_query(store, "one", 100)
@@ -171,6 +223,10 @@ async def test_logout_after_claim_holds_without_retry_backoff(authorization, tmp
     assert job is not None
     signed_in[0] = False
     await queue._process(job)
+    if variant in OWN_KEY:
+        # The own key carries the job on without the account.
+        assert len(service.calls) == 1
+        return
     assert service.calls == []
     held = store.analyze_jobs("db")[0]
     assert (held["state"], held["error"], held["started_at"]) == ("queued", "signed out", None)
@@ -230,7 +286,7 @@ async def _publish_nothing(*args):
 async def test_background_narrative_retry_is_held(authorization, monkeypatch, tmp_path):
     import json
 
-    _, signed_in = authorization
+    variant, signed_in = authorization
     store = MonitorStore(tmp_path / "monitor.db")
     run, _ = store.claim_report("db", "nightly", NOW)
     narrative = {"narrative_error": "service unavailable", "narrative_retry_at": NOW,
@@ -242,6 +298,12 @@ async def test_background_narrative_retry_is_held(authorization, monkeypatch, tm
     monkeypatch.setattr(report, "validate_narrative", lambda value: value)
     monkeypatch.setattr(report, "_bound_narrative", lambda value, context: value)
     scheduler = report.ReportScheduler(store, clock=lambda: NOW)
+    if variant in OWN_KEY:
+        # The own key writes the narrative without an account.
+        assert scheduler._plan(NOW)[0][0] == "retry"
+        await scheduler._retry_narrative(run["id"], "db", narrative)
+        provider.assert_called_once()
+        return
     assert scheduler._plan(NOW) == []
     await scheduler._retry_narrative(run["id"], "db", narrative)
     provider.assert_not_called()
@@ -253,12 +315,14 @@ async def test_background_narrative_retry_is_held(authorization, monkeypatch, tm
 
 
 def test_sign_out_preserves_local_only_slot_policy(authorization, tmp_path):
-    _, signed_in = authorization
+    variant, signed_in = authorization
     store = MonitorStore(tmp_path / "monitor.db")
     store.set_settings("db", {"enabled": True})
     database_limit.set_ai_state(store, "db", "local", "limit", NOW)
     assert database_limit.paused(store, "db", NOW)
-    assert database_limit.ai_reason(store, "db")["reason"] == "signed_out"
+    # An own key doesn't lift the account's limit; without one, the sign-in comes first.
+    assert database_limit.ai_reason(store, "db")["reason"] == (
+        "limit" if variant in OWN_KEY else "signed_out")
     signed_in[0] = True
     assert database_limit.ai_state(store, "db") == "local"
     assert database_limit.paused(store, "db", NOW + 60)
@@ -266,7 +330,7 @@ def test_sign_out_preserves_local_only_slot_policy(authorization, tmp_path):
 
 @pytest.mark.asyncio
 async def test_logout_during_parameter_collection_holds_analysis(authorization, tmp_path):
-    _, signed_in = authorization
+    variant, signed_in = authorization
     store = MonitorStore(tmp_path / "monitor.db", clock=lambda: NOW)
     store.set_settings("db", {"enabled": True, "deep_analysis": True})
     add_query(store, "one", 100)
@@ -280,6 +344,11 @@ async def test_logout_during_parameter_collection_holds_analysis(authorization, 
     queue = AnalyzeQueue(store, service=service, clock=lambda: NOW)
     signed_in[0] = True
     await queue.tick()
+    if variant in OWN_KEY:
+        # The own key carries the analysis on without the account.
+        assert store.analyze_jobs("db")[0]["state"] == "done"
+        assert len(service.calls) == 1
+        return
     assert service.calls == []
     assert store.analyze_jobs("db")[0]["state"] == "queued"
     assert store.analyze_jobs("db")[0]["error"] == "signed out"

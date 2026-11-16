@@ -71,10 +71,25 @@ def staging_file(destination: Path) -> Path:
     return Path(name)
 
 
+def _fsync_directory(path: Path) -> None:
+    """Persist a directory entry update where the platform supports it."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
 def replace_with_retry(source: str, destination: Path) -> None:
     for attempt in range(4):
         try:
             os.replace(source, destination)
+            _fsync_directory(destination.parent)
             return
         except PermissionError:
             if attempt == 3:
@@ -102,6 +117,18 @@ def _atomic_write(path: Path, write) -> None:
 
 def _write_toml(path: Path, data: dict[str, Any]) -> None:
     _atomic_write(path, lambda file_obj: toml.dump(data, file_obj))
+
+
+def ensure_directory(path: Path) -> None:
+    """Create an RDST-owned directory."""
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def write_toml(path: Path, data: dict[str, Any]) -> None:
+    """Serialize and atomically replace a TOML document."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(f"{path}.lock", timeout=10):
+        _write_toml(path, data)
 
 
 def write_text(path: Path, text: str) -> None:
@@ -145,11 +172,22 @@ def update_json(
         return current
 
 
+def append_text(path: Path, text: str) -> None:
+    """Append UTF-8 text under a file lock."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(f"{path}.lock", timeout=10):
+        with open(path, "a", encoding="utf-8", newline="\n") as file_obj:
+            file_obj.write(text)
+            file_obj.flush()
+            os.fsync(file_obj.fileno())
+
+
 def delete_file(path: Path) -> None:
     """Delete a persistent file under its writer lock."""
     with FileLock(f"{path}.lock", timeout=10):
         try:
             path.unlink()
+            _fsync_directory(path.parent)
         except FileNotFoundError:
             pass
 
@@ -169,9 +207,7 @@ def update_toml(
             try:
                 latest = toml.load(path)
             except Exception as exc:
-                raise RuntimeError(
-                    f"Failed to load {path} while saving: {exc}"
-                ) from exc
+                raise RuntimeError(f"Failed to load {path} while saving: {exc}") from exc
         else:
             latest = copy.deepcopy(baseline)
         merged = merge_mapping_changes(latest, baseline, current)

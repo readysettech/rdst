@@ -63,6 +63,7 @@ class _StubEmailService:
 def stub_keyservice(monkeypatch):
     import features.audit.email_service as email_service_mod
 
+    monkeypatch.setenv("RDST_HOSTED_REPORTS", "enabled")
     monkeypatch.setattr(email_service_mod, "EmailService", _StubEmailService)
     _StubEmailService.register_result = {"success": True, "verified": False}
     _StubEmailService.status_result = {"verified": False}
@@ -124,6 +125,22 @@ def test_post_then_get_roundtrip(client, config_path):
         "last_name": None,
         "verified": False,
     }
+
+
+def test_disabled_hosted_reports_keep_identity_local(client, config_path, monkeypatch):
+    monkeypatch.setenv("RDST_HOSTED_REPORTS", "disabled")
+
+    response = client.post(
+        "/api/settings/email", json={"email": "local@example.com"}
+    )
+    capability = client.get("/api/settings/hosted-reports")
+
+    assert response.status_code == 200
+    assert response.json()["verification_started"] is False
+    assert _stored_email(config_path) == "local@example.com"
+    assert _StubEmailService.last_register == {}
+    assert capability.status_code == 200
+    assert capability.json()["enabled"] is False
 
 
 def test_post_normalizes_trim_and_lowercase(client, config_path):

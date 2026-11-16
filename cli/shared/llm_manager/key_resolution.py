@@ -31,7 +31,7 @@ class KeyResolution:
 
 
 def require_monitoring_session() -> None:
-    """Automatic monitoring requires a current session, including own-key inference."""
+    """Automatic monitoring without the user's own key requires a current session."""
     from .base import LLMError
     from shared import account_session
 
@@ -60,8 +60,8 @@ def resolve_api_key(provider: str = "auto") -> KeyResolution:
     from .base import LLMError
     from .inference_attribution import attribution_for
 
-    if attribution_for(None)["feature"] == "monitor":
-        require_monitoring_session()
+    # Automatic monitoring runs on the user's own key, or else needs a current session.
+    monitoring = attribution_for(None)["feature"] == "monitor"
 
     def _keyring_secret(name: str) -> str | None:
         """Read one secret from the OS keyring, swallowing backend errors."""
@@ -107,8 +107,13 @@ def resolve_api_key(provider: str = "auto") -> KeyResolution:
         else None
     )
     if keyring_key:
-        os.environ["ANTHROPIC_API_KEY"] = keyring_key
+        from shared.secret_store_service import apply_owned_environment
+
+        apply_owned_environment("ANTHROPIC_API_KEY", keyring_key)
         return KeyResolution(api_key=keyring_key, is_trial=False, provider="claude")
+
+    if monitoring:
+        require_monitoring_session()
 
     # 3. Readyset account session.
     if requested_provider != "claude":

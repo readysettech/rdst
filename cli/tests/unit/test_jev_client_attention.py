@@ -146,3 +146,16 @@ def test_attention_sends_spills_and_nullable_lock_waits(monkeypatch):
     assert posted["target_numbers"]["lock_waits_max_5m"] == 4
     assert posted["queries"][0]["current_5m"]["temp_blks"] == 7
     assert posted["queries"][0]["baseline"]["1h"]["temp_blks"] == 20
+
+
+def test_store_build_sends_nothing_before_ai_data_consent(monkeypatch, tmp_path):
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.setenv("RDST_CONSENT", "opt_in")
+    monkeypatch.setattr(jev_client.account_session, "access_token", lambda **kwargs: "token")
+    session = Mock(spec=requests.Session)
+
+    with pytest.raises(jev_client.JevClientError) as exc_info:
+        jev_client.JevClient(session).attention(**inputs())
+
+    assert exc_info.value.code == "AI_DATA_CONSENT_REQUIRED"
+    session.post.assert_not_called()

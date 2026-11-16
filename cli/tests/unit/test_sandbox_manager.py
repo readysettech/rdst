@@ -122,6 +122,36 @@ def target_configs(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_local_data_reset_removes_managed_sandbox(tmp_path):
+    adapter = FakeAdapter()
+    adapter.current = ProvisionedSandbox(
+        target="one",
+        fingerprint="fingerprint",
+        connection=SandboxConnection(
+            engine="postgresql",
+            host="127.0.0.1",
+            port=5433,
+            database="one",
+            user="postgres",
+            password="secret",
+            cache_target="one-sandbox",
+        ),
+    )
+    manager = ReadysetSandboxManager(
+        adapter=adapter,
+        metadata_path=tmp_path / "metadata.json",
+    )
+    await manager.start()
+
+    await manager.reset_local_data()
+
+    assert adapter.removed == 1
+    assert manager._sandbox is None
+    assert manager._state.phase == "absent"
+    await manager.stop()
+
+
+@pytest.mark.asyncio
 async def test_startup_discards_container_interrupted_before_readiness(
     tmp_path, monkeypatch
 ):

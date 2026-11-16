@@ -180,8 +180,8 @@ class EnvRequirementsService:
 
         return requirements
 
-    def get_allowed_secret_names(self) -> List[str]:
-        cfg = self._load_config()
+    def get_allowed_secret_names(self, cfg: Any | None = None) -> List[str]:
+        cfg = cfg or self._load_config()
         names = set(self.ANTHROPIC_ACCEPTED_NAMES)
         names.update(self._target_env_mapping(cfg).keys())
         return sorted(names)
@@ -192,11 +192,11 @@ class EnvRequirementsService:
         (or, on a Mac, asks about) another's."""
         return sorted(set(self.ANTHROPIC_ACCEPTED_NAMES) | set(SESSION_SECRET_NAMES))
 
-    def get_clearable_secret_names(self) -> List[str]:
+    def get_clearable_secret_names(self, cfg: Any | None = None) -> List[str]:
         """Include retired credentials when explicitly clearing local state."""
         return sorted(
             set(
-                self.get_allowed_secret_names()
+                self.get_allowed_secret_names(cfg)
                 + self.LEGACY_SECRET_NAMES
                 + SESSION_SECRET_NAMES
             )

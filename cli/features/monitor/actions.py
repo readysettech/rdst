@@ -820,6 +820,7 @@ def _group(kind: str, cards: list[dict[str, Any]]) -> dict[str, Any]:
 AI_PAUSED_TEXT = {
     "limit": "Your account's AI slots are all in use, so the first analyses wait for a free one.",
     "quota": "You've run out of AI usage for now, so the first analyses wait until it's raised.",
+    "declined": "AI is off, so the first analyses don't run. Turn on AI in Settings to run them.",
 }
 
 
@@ -834,7 +835,10 @@ def _checkup_state(store: MonitorStore, target: str, now: int) -> dict[str, Any]
     progress = first_pass(store, target, now)
     if progress is not None and not progress["due"]:
         held, held_text, ai_reason = None, None, None
-        if not database_limit._signed_in():
+        if database_limit.ai_declined():
+            ai_reason = "declined"
+            held, held_text = "ai_paused", AI_PAUSED_TEXT[ai_reason]
+        elif not database_limit.can_run_ai():
             held, held_text = "sign_in", SIGN_IN_FOR_MONITORING
         elif database_limit.paused(store, target, now):
             quota = database_limit.ai_state(store, target) != "local" and \

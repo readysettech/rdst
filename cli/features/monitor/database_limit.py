@@ -51,8 +51,8 @@ AI_REASON_KEY = "ai_reason"
 AI_SINCE_KEY = "ai_since"
 # Why AI monitoring isn't on: signed_out (no Readyset session), unreachable (the Key Service
 # didn't answer), service_error (it answered with an error), limit (every slot is in use),
-# quota (the account's AI trial allowance is used up).
-AI_REASONS = ("signed_out", "unreachable", "service_error", "limit", "quota")
+# quota (the account's AI trial allowance is used up), declined (the user turned AI off).
+AI_REASONS = ("signed_out", "unreachable", "service_error", "limit", "quota", "declined")
 # The account's monthly AI allowance: refusal codes and the kind of AI work they hold.
 ALLOWANCE_CODES = {"JEV_BUDGET_EXHAUSTED": "jev", "HOSTED_CAP_REACHED": "hosted",
                    "HOSTED_GLOBAL_CAP_REACHED": "hosted"}
@@ -70,6 +70,8 @@ _TIMEOUT_S = 20
 _summary_lock = threading.Lock()
 _last_summary: dict[str, Any] | None = None
 _last_refresh: dict[str, float] = {}
+_claim_locks: dict[str, threading.Lock] = {}
+_claim_locks_guard = threading.Lock()
 
 
 def _account_salt() -> str:
@@ -210,6 +212,13 @@ def clear_allowance(store: Any, kind: str, now: int) -> None:
         store.action_item_for_subject(row["target"], "monitoring_issue", f"{kind}_allowance", now)
 
 
+def ai_declined() -> bool:
+    """Whether the user turned AI off (a Store build without AI data-sharing consent)."""
+    from shared.ai_data_consent import ai_data_sharing_allowed
+
+    return not ai_data_sharing_allowed()
+
+
 def ai_state(store: Any, target: str) -> str:
     """This target's AI monitoring state; ``off`` when monitoring is off."""
     rows = store.read("SELECT key,value FROM monitor_setting WHERE target=? "
@@ -223,10 +232,19 @@ def ai_state(store: Any, target: str) -> str:
 
 def display_state(store: Any, target: str) -> str:
     """The AI state the app shows: ``paused`` while the account's AI allowance is used up, and
-    ``pending`` for a slot held while signed out (AI can't run until the user signs in)."""
+    ``pending`` for a slot held while signed out without an own key (AI can't run until the
+    user signs in)."""
     state = ai_state(store, target)
-    if state in ("on", "local", "pending") and not _signed_in():
+    if state != "off" and ai_declined():
+        return "local"
+    # AI turned back on and not claimed yet: the database reads as starting.
+    if state in ("local", "pending") and _stored_reason(store, target) == "declined":
         return "pending"
+    if state in ("on", "local", "pending") and not _signed_in():
+        if not own_key():
+            return "pending"
+        # The user's own key runs AI without an account; the slot is claimed at sign-in.
+        return "local" if state == "local" else "on"
     if state in ("on", "pending") and any(
             kind != "hosted" or not own_key() for kind in allowance_reached(store)):
         return "paused"
@@ -265,8 +283,10 @@ def ai_reason(store: Any, target: str) -> dict[str, Any]:
     if state == "on":
         return {"reason": None, "since": since}
     if state == "local":
-        return {"reason": "limit", "since": since}
+        return {"reason": "declined" if ai_declined() else "limit", "since": since}
     reason = values.get(AI_REASON_KEY) or None
+    if reason == "declined":
+        reason = None
     if not _signed_in():
         reason = "signed_out"
     elif reason == "signed_out":
@@ -292,12 +312,15 @@ def hold_signed_out(store: Any, target: str, now: int) -> None:
 def paused(store: Any, target: str, now: int) -> bool:
     """Whether automatic AI work (analyses, report narratives) for this target is held.
 
-    Held when the database is local-only, the hosted allowance is used up, or the Key
-    Service recently refused it a slot, or the user is signed out.
+    Held when AI is off, the database is local-only, the hosted allowance is used up, or the
+    Key Service recently refused it a slot, or the user is signed out without an own key.
     """
+    if ai_declined():
+        return True
     if not _signed_in():
         hold_signed_out(store, target, now)
-        return True
+        if not own_key():
+            return True
     if ai_state(store, target) == "local" or (
             allowance_paused(store, "hosted", now) and not own_key()):
         return True
@@ -361,6 +384,12 @@ def _signed_in() -> bool:
         return False
 
 
+def can_run_ai() -> bool:
+    """Whether monitoring's analyses and reports can run: signed in to Readyset, or with the
+    user's own Anthropic key. Jev's checks need the sign-in either way."""
+    return _signed_in() or own_key()
+
+
 def _remember(body: dict[str, Any]) -> None:
     global _last_summary
     if "limit" in body and "active" in body:
@@ -407,8 +436,24 @@ def claim(target_config: dict[str, Any] | None, *, with_own_key: bool | None = N
     return {"state": "pending", "reason": "service_error"}
 
 
+def _claim_lock(target: str) -> threading.Lock:
+    with _claim_locks_guard:
+        return _claim_locks.setdefault(target, threading.Lock())
+
+
 def claim_target(store: Any, target: str, *, where: str = "enable") -> str:
-    """Claim the target's slot and record its AI state. Returns the state."""
+    """Claim the target's slot and record its AI state. Returns the state.
+
+    One claim or release per database at a time, each deciding from the AI choice as it
+    stands when it starts, so the last of overlapping calls records the latest choice.
+    """
+    with _claim_lock(target):
+        if ai_declined():
+            return _hold_no_slot(store, target)
+        return _claim(store, target, where)
+
+
+def _claim(store: Any, target: str, where: str) -> str:
     try:
         config = _target_config(target)
     except Exception:
@@ -416,11 +461,12 @@ def claim_target(store: Any, target: str, *, where: str = "enable") -> str:
     result = claim(config, label=target)
     state = result["state"]
     previous = ai_state(store, target)
+    was_declined = _stored_reason(store, target) == "declined"
     set_ai_state(store, target, state, result.get("reason"))
     _last_refresh[target] = time.monotonic()
     if state == "on":
         clear(store, target, int(time.time()))
-    elif state == "local" and previous != "local":
+    elif state == "local" and (previous != "local" or was_declined):
         summary = status_from(result)
         limit_reached(target, where=where, active=summary["in_use"], limit=summary["limit"])
     return state
@@ -440,6 +486,48 @@ def release_fingerprint(fp: str | None) -> bool:
         return False
     _remember(result[1])
     return bool(result[1].get("released"))
+
+
+# Inbox items about AI that turning AI off settles: a full account, a used-up allowance, a
+# sign-in AI was waiting for.
+AI_ISSUE_SUBJECTS = (SUBJECT, "hosted_allowance", "jev_allowance", "jev_login", "llm_login")
+
+
+def _hold_no_slot(store: Any, target: str) -> str:
+    """With AI off the database is monitored locally and frees any slot it may hold. Until
+    the Key Service confirms the release (signed out, or no answer) the database stays
+    pending, so the next due refresh retries it."""
+    now = int(time.time())
+    for subject in AI_ISSUE_SUBJECTS:
+        store.action_item_for_subject(target, "monitoring_issue", subject, now)
+    if ai_state(store, target) == "local" and _stored_reason(store, target) == "declined":
+        return "local"
+    released = False
+    if _signed_in():
+        try:
+            fp = fingerprint(_target_config(target))
+        except Exception:
+            fp = None
+        result = _request("POST", "/v1/monitor/databases/release",
+                          json={"fingerprint": fp}) if fp else (200, {})
+        # Answered at all means the Key Service no longer counts it, released now or before.
+        released = bool(result) and result[0] == 200
+        if released and result[1]:
+            _remember(result[1])
+    state = "local" if released else "pending"
+    set_ai_state(store, target, state, "declined")
+    _last_refresh[target] = time.monotonic()
+    return state
+
+
+def apply_ai_consent(store: Any) -> None:
+    """Apply an AI on or off decision to every monitored database at once: turning AI off
+    frees their slots, turning it on claims them."""
+    for target in sorted(store.monitored_targets()):
+        try:
+            claim_target(store, target, where="refresh")
+        except Exception:
+            logger.debug("Applying the AI decision failed for %s", target, exc_info=True)
 
 
 def refresh_claims(store: Any, targets: set[str], *, force: bool = False) -> None:

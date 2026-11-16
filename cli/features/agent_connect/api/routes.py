@@ -152,6 +152,16 @@ def _require_this_computer(request: Request) -> None:
         raise HTTPException(403, "Only RDST on this computer can start a coding agent")
 
 
+def _require_agent_allowed(request: Request) -> None:
+    """A coding agent RDST runs is an AI model reading what RDST hands it, so it runs only
+    while AI is allowed."""
+    from shared.ai_data_consent import ai_data_sharing_allowed
+
+    _require_this_computer(request)
+    if not ai_data_sharing_allowed():
+        raise HTTPException(403, tools.AGENTS_NEED_AI)
+
+
 def _search_homes(agent: discover.Agent) -> list[str]:
     """Session folders on the other side of this computer that the agent should read too:
     Windows' for an agent in WSL, and WSL's for one on Windows."""
@@ -181,6 +191,12 @@ def _free_name(base: str, also: set[str] | None = None) -> str:
 async def agent_connect_agents(request: Request, refresh: bool = False) -> dict:
     """The coding agents RDST can run to search for databases."""
     require_local_request(request)
+    from shared.ai_data_consent import ai_data_sharing_allowed
+
+    # With AI off RDST offers no coding agent, so its own paths (adding a database by hand,
+    # searching this computer) are the ones shown.
+    if not ai_data_sharing_allowed():
+        return {"agents": [], "apps": []}
     agents = await asyncio.to_thread(discover.detect, refresh)
     return {"agents": [agent.as_dict() for agent in agents],
             "apps": await asyncio.to_thread(discover.desktop_apps)}
@@ -189,7 +205,7 @@ async def agent_connect_agents(request: Request, refresh: bool = False) -> dict:
 @router.post("/agent-connect/agents/{key}/sign-in")
 async def agent_connect_sign_in(request: Request, key: str) -> dict:
     """Open a terminal where the user signs the agent in; the next detection sees it."""
-    _require_this_computer(request)
+    _require_agent_allowed(request)
     agent = await asyncio.to_thread(discover.find_agent, key)
     if agent is None:
         raise HTTPException(404, "RDST can't find that agent on this computer.")
@@ -211,7 +227,7 @@ def _base_for(request: Request, agent: discover.Agent) -> str:
 @router.post("/agent-connect/discover")
 async def agent_connect_discover(request: Request, body: DiscoverRequest) -> dict:
     """Start the agent searching the user's recent sessions for databases."""
-    _require_this_computer(request)
+    _require_agent_allowed(request)
     agent = await asyncio.to_thread(discover.find_agent, body.agent)
     if agent is None:
         raise HTTPException(404, "That coding agent isn't installed here.")
@@ -262,7 +278,7 @@ TRIAGE_MODEL = {"claude": "sonnet"}
 @router.post("/agent-connect/describe")
 async def agent_connect_describe(request: Request, body: DescribeRequest) -> dict:
     """Have the user's agent find and set up a database they described."""
-    _require_this_computer(request)
+    _require_agent_allowed(request)
     text = body.text.strip()
     if not text:
         raise HTTPException(400, "Say which database first.")
@@ -410,7 +426,7 @@ async def _forget_target(name: str) -> None:
 async def agent_connect_setup(request: Request, run_id: str, body: SetupRequest) -> dict:
     """Resume the search's session to set up the databases the user picked: add each, get it
     ready and turn monitoring on, the way the paste prompt has an agent do it."""
-    _require_this_computer(request)
+    _require_agent_allowed(request)
     search = _run(run_id)
     if search.kind not in ("search", "scan") or search.state == "running":
         raise HTTPException(409, "Wait for the search to finish first.")
@@ -468,7 +484,7 @@ async def agent_connect_setup(request: Request, run_id: str, body: SetupRequest)
 async def agent_connect_fix(request: Request, body: FixRequest) -> dict:
     """Have the agent get databases already in RDST ready to monitor, picking up the
     conversation it had about the first one when there was one."""
-    _require_this_computer(request)
+    _require_agent_allowed(request)
     agent = await asyncio.to_thread(discover.find_agent, body.agent)
     if agent is None:
         raise HTTPException(404, "That coding agent isn't installed here.")
@@ -543,7 +559,7 @@ class FolderRequest(BaseModel):
 async def agent_connect_folder(request: Request, run_id: str, body: FolderRequest) -> dict:
     """Read one project the scan only listed (on a Mac, one in Documents or another folder
     macOS asks about), and put what it names in the list in its place."""
-    _require_this_computer(request)
+    _require_agent_allowed(request)
     run = _run(run_id)
     waiting = next((c for c in run.candidates or [] if c.get("deferred") and
                     c.get("project") == body.project), None)
@@ -564,7 +580,7 @@ async def agent_connect_folder(request: Request, run_id: str, body: FolderReques
 @router.post("/agent-connect/discover/{run_id}/continue")
 async def agent_connect_continue(request: Request, run_id: str, body: ContinueRequest) -> dict:
     """Open the run's agent session in the user's Claude or Codex desktop app."""
-    _require_this_computer(request)
+    _require_agent_allowed(request)
     run = _run(run_id)
     url = discover.continue_url(run, body.app)
     if url is None:
@@ -633,7 +649,7 @@ async def agent_connect_ask_prompt(request: Request, body: FixPromptRequest) -> 
 @router.post("/agent-connect/connect")
 async def agent_connect_connect(request: Request, body: ConnectRequest) -> dict:
     """Add RDST to the agent's own MCP servers, so any of its conversations can use RDST."""
-    _require_this_computer(request)
+    _require_agent_allowed(request)
     agent = await asyncio.to_thread(discover.find_agent, body.agent)
     if agent is None or agent.side != "local":
         raise HTTPException(404, "That coding agent isn't installed here.")
@@ -651,7 +667,7 @@ async def agent_connect_connect(request: Request, body: ConnectRequest) -> dict:
 async def agent_connect_ask_open(request: Request, body: AskOpenRequest) -> dict:
     """Open the user's Claude or Codex app to ask about a database: the conversation that set
     it up when there was one, else a new one with the ask prompt typed in."""
-    _require_this_computer(request)
+    _require_agent_allowed(request)
     _require_target(body.target)
     if body.app not in await asyncio.to_thread(discover.desktop_apps_cached):
         raise HTTPException(404, "That app isn't installed here.")
@@ -701,7 +717,7 @@ async def agent_connect_fix_prompt(request: Request, body: FixPromptRequest) -> 
 async def agent_connect_open_app(request: Request, body: OpenAppRequest) -> dict:
     """Stage the paste prompt in a new conversation in the user's Claude or Codex app. The
     user sends it, and the prompt's attempt follows the agent the way a pasted one does."""
-    _require_this_computer(request)
+    _require_agent_allowed(request)
     if body.app not in await asyncio.to_thread(discover.desktop_apps_cached):
         raise HTTPException(404, "That app isn't installed here.")
     if not session.attempt_known(body.attempt):
@@ -736,7 +752,7 @@ REPLY_LIMIT = 2000
 async def agent_connect_reply(request: Request, run_id: str, body: ReplyRequest) -> dict:
     """Send the user's answer to a finished run's agent, continuing its conversation. A
     setup carries on with the same database."""
-    _require_this_computer(request)
+    _require_agent_allowed(request)
     previous = _run(run_id)
     text = body.text.strip()[:REPLY_LIMIT]
     if not text:
@@ -765,7 +781,7 @@ async def agent_connect_reply(request: Request, run_id: str, body: ReplyRequest)
 @router.post("/agent-connect/discover/{run_id}/terminal")
 async def agent_connect_terminal(request: Request, run_id: str) -> dict:
     """Open a terminal window that continues the run's agent conversation."""
-    _require_this_computer(request)
+    _require_agent_allowed(request)
     run = _run(run_id)
     if run.agent is None:
         raise HTTPException(409, "RDST looked by itself; there's no conversation to continue.")

@@ -11,6 +11,11 @@ import pytest
 from features.audit.email_service import EmailService
 
 
+@pytest.fixture(autouse=True)
+def enable_hosted_reports(monkeypatch):
+    monkeypatch.setenv("RDST_HOSTED_REPORTS", "enabled")
+
+
 class _RecordingService(EmailService):
     """EmailService with the network calls replaced by scripted results."""
 
@@ -31,6 +36,28 @@ class _RecordingService(EmailService):
 
     def poll_verification(self, *args, **kwargs):  # pragma: no cover - guard
         raise AssertionError("queue_report must not block on verification")
+
+
+def test_hosted_reports_default_to_disabled(monkeypatch):
+    from shared.hosted_reports import hosted_reports_enabled
+
+    monkeypatch.delenv("RDST_HOSTED_REPORTS", raising=False)
+
+    assert hosted_reports_enabled() is False
+
+
+def test_distribution_can_block_hosted_report_network_calls(monkeypatch):
+    monkeypatch.setenv("RDST_HOSTED_REPORTS", "disabled")
+    service = _RecordingService(send_results=[{"success": True}])
+
+    result = service.queue_report(
+        "a@b.com", "<html>sensitive</html>", "Subject", report_token="tok"
+    )
+
+    assert result["success"] is False
+    assert "unavailable in this distribution" in result["error"]
+    assert service.sends == []
+    assert service.registers == []
 
 
 def test_verified_token_sends_immediately():

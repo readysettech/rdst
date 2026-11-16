@@ -940,6 +940,10 @@ class AttentionJudge:
             self.store.record_judge_run(target, now, chosen, outcome="empty",
                                         response={"gate": gate} if context.get("gated") else None)
             return
+        # The user turned AI off: nothing goes to Jev and nothing retries.
+        if database_limit.ai_declined():
+            self.store.record_judge_run(target, now, chosen, outcome="ai_off")
+            return
         if not database_limit._signed_in():
             database_limit.hold_signed_out(self.store, target, now)
             self.store.record_judge_run(target, now, chosen, outcome="signed_out")

@@ -602,6 +602,10 @@ def assessments(target: str, keys: list[str] | None = None) -> dict[str, dict[st
     except Exception:
         logger.debug("Quick assessments unavailable for %s", target, exc_info=True)
         return {}
+    from features.monitor import database_limit
+
+    # With AI off, a query that isn't classified yet waits on AI, whatever its row says.
+    ai_off = database_limit.ai_declined()
     result = {}
     for key, row in rows.items():
         findings = (row.get("result") or {}).get("findings") if isinstance(
@@ -615,12 +619,14 @@ def assessments(target: str, keys: list[str] | None = None) -> dict[str, dict[st
                          for item in findings or [] if isinstance(item, dict)],
             "model": row["model"] or None, "rubric_version": row["rubric_version"] or None,
             "assessed_at": row["assessed_at"] or None, "error_code": row["error_code"] or None,
-            "waiting_reason": ASSESSMENT_WAITING.get(row["status"]),
+            "waiting_reason": AI_OFF_WAITING if ai_off and row["status"] in ASSESSMENT_WAITING
+            and row["status"] != "unsupported" else ASSESSMENT_WAITING.get(row["status"]),
             "schema_coverage": row.get("schema_coverage") or None,
             "schema_collected_at": row.get("schema_collected_at") or None}
     return result
 
 
+AI_OFF_WAITING = "AI is off. Turn on AI in Settings to classify queries."
 # What an assessment that isn't complete is waiting for, as the row says it.
 ASSESSMENT_WAITING = {
     "pending": "Queued. RDST assesses new queries in the background within a few minutes.",
@@ -2271,7 +2277,9 @@ def home(store: MonitorStore, now: int, *, configured: list[dict[str, Any]] | No
         elif (failing := failing_since(store, name)) is not None:
             # The latest check failed: the database is down before the outage is filed.
             state, since = "cant_reach", failing
-        elif database_limit.paused(store, name, now) or "jev_login" in issues:
+        # With AI turned off the database is watched locally; nothing waits to resume.
+        elif not database_limit.ai_declined() and (
+                database_limit.paused(store, name, now) or "jev_login" in issues):
             state, since = "ai_paused", ai_paused_since(store, name, issues)
         else:
             state, since = "watching", None

@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
 from shared.constants import rdst_data_dir
+from shared.persistence import write_text
 
 _OFF_VALUES = ("false", "0", "no", "off", "disable", "disabled")
 # The opt-out line as written, honored even when a typo elsewhere makes the file unreadable.
@@ -67,6 +68,32 @@ _sentry_sdk = None
 _requests = None
 
 
+def _discard_queued_posthog(client: Any) -> None:
+    """Stop a PostHog client's senders and drop the events it queued but hasn't sent; flushing
+    would send them. A paused sender admits no further request, including a batch it already
+    took and is holding for its flush interval; one already on the wire can't be recalled.
+    PostHog 7 keeps a queue per lane; older clients keep one."""
+    from queue import Empty
+
+    for consumer in getattr(client, "consumers", None) or ():
+        try:
+            consumer.pause()
+        except Exception:
+            pass
+
+    lanes = getattr(client, "_lanes", None) or ()
+    queues = [lane.queue for lane in lanes if getattr(lane, "queue", None) is not None]
+    if not queues and getattr(client, "queue", None) is not None:
+        queues = [client.queue]
+    for pending in queues:
+        while True:
+            try:
+                pending.get_nowait()
+            except Empty:
+                break
+            pending.task_done()
+
+
 def _get_posthog():
     global _posthog
     if _posthog is None:
@@ -87,20 +114,6 @@ def _get_sentry():
         except ImportError:
             _sentry_sdk = False
     return _sentry_sdk if _sentry_sdk else None
-
-
-def _sentry_before_send(event, hint):
-    """Strip the payloads that carry credentials: request bodies, and the local
-    variables of every captured frame (connection URLs, resolved passwords)."""
-    try:
-        event.pop("request", None)
-        for group in ("exception", "threads"):
-            for entry in (event.get(group) or {}).get("values") or []:
-                for frame in (entry.get("stacktrace") or {}).get("frames") or []:
-                    frame.pop("vars", None)
-    except Exception:
-        return None
-    return event
 
 
 def _get_requests():
@@ -192,10 +205,6 @@ class CommandRun:
 
 
 FEEDBACK_NOT_SENT = "Couldn't send your feedback. Check your connection and try again."
-FEEDBACK_TELEMETRY_OFF = (
-    "Feedback isn't sent while telemetry is turned off. "
-    "To send it, start RDST without RDST_TELEMETRY=off."
-)
 
 
 # The production PostHog project (260434) and the preview project (640148). Only a released
@@ -305,6 +314,10 @@ def posthog_project(key: str) -> str:
     return "production" if key == PRODUCTION_POSTHOG_KEY else "preview"
 
 
+class FeedbackDeliveryError(RuntimeError):
+    """Raised when PostHog does not accept an explicit feedback event."""
+
+
 class TelemetryManager:
     """
     Manages all telemetry for RDST.
@@ -315,7 +328,7 @@ class TelemetryManager:
     - PostHog for usage analytics
     - Sentry for crash reporting
     - Cumulative usage stats per device
-    - Privacy controls (opt-out via env var or config)
+    - Explicit opt-in controls, with an environment-level off switch
     """
 
     # Configuration, overridable via the environment.
@@ -332,6 +345,13 @@ class TelemetryManager:
     INTERNAL_INSTALL_REQUEST_TIMEOUT = (1, 1)
     INTERNAL_INSTALL_TOTAL_TIMEOUT_SECONDS = 2
     BACKGROUND_FLUSH_TIMEOUT_SECONDS = 5
+    FEEDBACK_REQUEST_TIMEOUT = (3.05, 10)
+    # A 10,000-character note plus its kind label and the help chat that led to it.
+    MAX_FEEDBACK_REASON_LENGTH = 32_000
+    MAX_FEEDBACK_QUERY_LENGTH = 100_000
+    MAX_FEEDBACK_PLAN_LENGTH = 500_000
+    MAX_FEEDBACK_TEXT_ATTACHMENT_LENGTH = 50_000
+    CONSENT_VERSION = 1
 
     def __init__(self):
         self._device_id: Optional[str] = None
@@ -348,6 +368,7 @@ class TelemetryManager:
         self._internal_user_result: Optional[bool] = None
         self._pending_posthog_sends: list[Callable[[bool], None]] = []
         self._internal_user_resolution_started = False
+        self._consent_generation = 0
         # Per-command finalizer dispatch table. Bound methods, so they
         # close over `self` correctly. Features can extend via
         # `register_command_finalizer`.
@@ -357,11 +378,11 @@ class TelemetryManager:
 
     def _ensure_initialized(self):
         """Lazy initialization to avoid startup cost."""
-        if self._initialized:
+        if self._initialized or not self.is_enabled():
             return
 
         with self._lock:
-            if self._initialized:
+            if self._initialized or not self.is_enabled():
                 return
 
             # Do not import the PostHog SDK when telemetry has no ingest key.
@@ -384,15 +405,17 @@ class TelemetryManager:
 
             # Initialize Sentry
             sentry = _get_sentry()
-            if sentry and self.SENTRY_DSN and self.is_enabled():
+            if sentry and self.SENTRY_DSN:
                 try:
                     sentry.init(
                         dsn=self.SENTRY_DSN,
-                        traces_sample_rate=0.1,
+                        traces_sample_rate=0.0,
+                        send_default_pii=False,
+                        max_breadcrumbs=0,
+                        include_local_variables=False,
+                        before_send=self._sanitize_sentry_event,
                         environment=os.environ.get("RDST_ENV", "production"),
                         release=self._get_version(),
-                        include_local_variables=False,
-                        before_send=_sentry_before_send,
                     )
                     # Set user context with device_id
                     sentry.set_user({"id": self.device_id})
@@ -400,6 +423,47 @@ class TelemetryManager:
                     pass
 
             self._initialized = True
+
+    @staticmethod
+    def _sanitize_sentry_event(event: Dict[str, Any], _hint: Any) -> Dict[str, Any]:
+        """Keep crash structure while removing application and database content."""
+        sanitized: Dict[str, Any] = {}
+        for key in ("event_id", "timestamp", "platform", "level", "release", "environment"):
+            if key in event:
+                sanitized[key] = event[key]
+        user = event.get("user")
+        if isinstance(user, dict) and user.get("id") is not None:
+            sanitized["user"] = {"id": str(user["id"])}
+
+        exception = event.get("exception")
+        if isinstance(exception, dict) and isinstance(exception.get("values"), list):
+            values = []
+            for value in exception["values"]:
+                if not isinstance(value, dict):
+                    continue
+                safe_value: Dict[str, Any] = {
+                    "type": value.get("type", "Error"),
+                    "value": "RDST captured an error",
+                }
+                stacktrace = value.get("stacktrace")
+                if isinstance(stacktrace, dict) and isinstance(
+                    stacktrace.get("frames"), list
+                ):
+                    frames = []
+                    for frame in stacktrace["frames"]:
+                        if not isinstance(frame, dict):
+                            continue
+                        frames.append(
+                            {
+                                key: frame[key]
+                                for key in ("function", "module", "lineno")
+                                if key in frame
+                            }
+                        )
+                    safe_value["stacktrace"] = {"frames": frames}
+                values.append(safe_value)
+            sanitized["exception"] = {"values": values}
+        return sanitized
 
     def _start_background(self, target: Callable[[], None]) -> None:
         """Start background work and track it for shutdown draining."""
@@ -483,8 +547,7 @@ class TelemetryManager:
         # Persist
         persisted = False
         try:
-            self._rdst_dir.mkdir(parents=True, exist_ok=True)
-            device_id_file.write_text(self._device_id, encoding="utf-8")
+            write_text(device_id_file, self._device_id)
             persisted = True
         except Exception:
             pass
@@ -520,34 +583,113 @@ class TelemetryManager:
         # Run in background to not block
         self._start_background(track)
 
-    def is_enabled(self) -> bool:
-        """Check if telemetry is enabled."""
-        if self._enabled is not None:
-            return self._enabled
+    def telemetry_consent(self) -> str:
+        """Return pending, granted, or denied for routine diagnostics."""
+        try:
+            from shared.config.targets import create_targets_config
 
-        # Disable telemetry during tests
+            config_file = self._rdst_dir / "config.toml"
+            if config_file.exists() and config_opts_out(config_file.read_text(encoding="utf-8")):
+                return "denied"
+            cfg = create_targets_config(path=str(config_file))
+            cfg.load()
+            consent = cfg.get_telemetry_consent()
+            if (
+                consent == "granted"
+                and cfg.get_telemetry_consent_version() != self.CONSENT_VERSION
+            ):
+                return "pending"
+            return consent
+        except Exception:
+            return "pending"
+
+    def forced_off_reason(self) -> Optional[str]:
         if os.environ.get("RDST_TESTING", "").lower() in ("true", "1", "yes"):
-            self._enabled = False
-            return False
-
-        # Check environment variable
+            return "testing"
         env_val = os.environ.get("RDST_TELEMETRY", "").lower()
         if env_val in ("false", "0", "no", "off", "disable", "disabled"):
-            self._enabled = False
-            return False
+            return "environment"
+        return None
 
-        # Check config file
-        config_file = self._rdst_dir / "config.toml"
-        if config_file.exists():
+    def is_enabled(self) -> bool:
+        """Store builds send telemetry only after opt-in; others until it's turned off.
+
+        The answer holds until config.toml changes, so a choice saved by another RDST
+        process (the desktop backend, the CLI) takes effect here too.
+        """
+        stamp = self._config_stamp()
+        if self._enabled is not None and stamp == getattr(self, "_enabled_stamp", None):
+            return self._enabled
+        from shared.distribution import consent_opt_in
+
+        was_enabled = self._enabled
+        consent = self.telemetry_consent()
+        self._enabled = self.forced_off_reason() is None and (
+            consent == "granted" if consent_opt_in() else consent != "denied"
+        )
+        self._enabled_stamp = stamp
+        if was_enabled and not self._enabled:
+            self._disable_remote_clients()
+        return self._enabled
+
+    def _config_stamp(self) -> tuple[int, int] | None:
+        try:
+            stat = (self._rdst_dir / "config.toml").stat()
+        except OSError:
+            return None
+        return (stat.st_mtime_ns, stat.st_size)
+
+    def set_telemetry_consent(self, consent: str) -> None:
+        """Persist a decision before changing any in-memory sender state."""
+        from shared.config.targets import create_targets_config
+
+        cfg = create_targets_config(path=str(self._rdst_dir / "config.toml"))
+        cfg.load()
+        cfg.set_telemetry_consent(consent, self.CONSENT_VERSION)
+        cfg.save()
+
+        with self._internal_user_lock:
+            self._consent_generation += 1
+            self._enabled = None
+            if consent == "denied":
+                self._pending_posthog_sends = []
+
+        if consent == "denied":
+            self._disable_remote_clients()
+        else:
+            self._initialized = False
+
+    def _disable_remote_clients(self) -> None:
+        module = _posthog or None
+        for client in (getattr(module, "default_client", None),
+                       getattr(self, "_preview_client", None)):
+            if client is not None:
+                _discard_queued_posthog(client)
+        # Its senders are stopped for good; diagnostics turned back on get new clients.
+        if module is not None:
+            module.default_client = None
+        self._preview_client = None
+        sentry = _get_sentry() if _sentry_sdk is not None else None
+        if sentry:
             try:
-                if config_opts_out(config_file.read_text(encoding="utf-8")):
-                    self._enabled = False
-                    return False
+                sentry.set_user(None)
+                sentry.get_client().close()
             except Exception:
                 pass
 
-        self._enabled = True
-        return True
+    def reset_runtime_state(self, *, close_remote: bool = True) -> None:
+        """Forget consent-derived runtime state."""
+        with self._internal_user_lock:
+            self._consent_generation += 1
+            self._pending_posthog_sends = []
+            self._internal_user_result = None
+            self._internal_user_resolution_started = False
+            self._enabled = None
+            self._initialized = False
+            self._device_id = None
+            self._stats = None
+        if close_remote:
+            self._disable_remote_clients()
 
     def _get_version(self) -> str:
         """Get RDST version."""
@@ -646,8 +788,7 @@ class TelemetryManager:
             return
         try:
             stats_file = self._rdst_dir / "stats.json"
-            self._rdst_dir.mkdir(parents=True, exist_ok=True)
-            stats_file.write_text(json.dumps(self._stats, indent=2), encoding="utf-8")
+            write_text(stats_file, json.dumps(self._stats, indent=2))
         except Exception:
             pass
 
@@ -690,12 +831,25 @@ class TelemetryManager:
             from shared import product_telemetry
 
             person = product_telemetry.identity(self.device_id)
+            consent_generation = self._consent_generation
             all_props = self._get_base_properties()
             if properties:
                 all_props.update(properties)
 
+            def allowed() -> bool:
+                return consent_generation == self._consent_generation and self.is_enabled()
+
+            def capture(target, **kwargs):
+                # Checked again under the lock a withdrawal takes before it drains the queue,
+                # so nothing is queued after the drain.
+                with self._internal_user_lock:
+                    return target.capture(**kwargs) if allowed() else None
+
             def send(internal_user: bool):
                 client = posthog
+                with self._internal_user_lock:
+                    if not allowed():
+                        return
                 try:
                     internal_user = internal_user or internal_install(person["email"])
                     client = self._routed_client(posthog, internal_user, delivered is not None)
@@ -723,18 +877,21 @@ class TelemetryManager:
                                 binding = product_telemetry.state_value(binding_key)
                                 if binding is None or binding == distinct_id:
                                     identify_props["$anon_distinct_id"] = self.device_id
-                                client.capture(distinct_id=distinct_id, event="$identify",
-                                                properties=identify_props)
+                                capture(client, distinct_id=distinct_id, event="$identify",
+                                        properties=identify_props)
                                 if binding is None:
                                     product_telemetry.set_state_value(binding_key, distinct_id)
-                                self._alias_legacy_person(client, distinct_id)
+                                with self._internal_user_lock:
+                                    if allowed():
+                                        self._alias_legacy_person(client, distinct_id)
                             else:
                                 all_props["$set_once"] = person_props
                             self._identified_person = profile
-                    sent = client.capture(
+                    sent = capture(
+                        client,
                         distinct_id=distinct_id,
                         event=event,
-                        properties=all_props
+                        properties=all_props,
                     )
                     if delivered is not None:
                         delivered.append(sent is not None)
@@ -1612,7 +1769,7 @@ class TelemetryManager:
     def submit_feedback(
         self,
         reason: str,
-        email: str,
+        email: Optional[str],
         query_hash: Optional[str] = None,
         query_sql: Optional[str] = None,
         plan_json: Optional[str] = None,
@@ -1621,6 +1778,9 @@ class TelemetryManager:
         kind: str = "feedback",  # feedback, feature_request, bug
         include_query: bool = False,
         include_plan: bool = False,
+        feedback_kind: str = "general",
+        feature: Optional[str] = None,
+        ai_output: Optional[str] = None,
         flags_used: Optional[list] = None,
     ) -> bool:
         """
@@ -1633,22 +1793,55 @@ class TelemetryManager:
             plan_json: Execution plan (only included if include_plan=True)
             suggestion_text: What RDST suggested
             sentiment: positive/negative/neutral
-            email: Required email for follow-up and feedback attribution
+            email: Follow-up identity; optional for AI-output safety reports
             include_query: Whether to include raw SQL
             include_plan: Whether to include execution plan
+            feedback_kind: General feedback or a contextual AI-output report
+            feature: Product surface that generated the reported output
+            ai_output: AI-generated content the user reviewed and chose to include
             flags_used: CLI flags that were used
         """
+        reason = reason.strip()
         email = (email or "").strip().lower()
-        if not email:
-            raise ValueError("Email is required to submit feedback")
+        if not reason:
+            raise ValueError("Feedback text is required")
+        if len(reason) > self.MAX_FEEDBACK_REASON_LENGTH:
+            raise ValueError(
+                f"Feedback text exceeds the {self.MAX_FEEDBACK_REASON_LENGTH:,} character limit"
+            )
+        if query_hash and len(query_hash) > 128:
+            raise ValueError("Query identifier is too long")
+        if (
+            include_query
+            and query_sql
+            and len(query_sql) > self.MAX_FEEDBACK_QUERY_LENGTH
+        ):
+            raise ValueError("SQL attachment exceeds the 100,000 character limit")
+        if (
+            include_plan
+            and plan_json
+            and len(plan_json) > self.MAX_FEEDBACK_PLAN_LENGTH
+        ):
+            raise ValueError("Plan attachment exceeds the 500,000 character limit")
+        if (
+            suggestion_text
+            and len(suggestion_text) > self.MAX_FEEDBACK_TEXT_ATTACHMENT_LENGTH
+        ):
+            raise ValueError("Suggestion attachment exceeds the 50,000 character limit")
+        if (
+            ai_output
+            and len(ai_output) > self.MAX_FEEDBACK_TEXT_ATTACHMENT_LENGTH
+        ):
+            raise ValueError("AI output exceeds the 50,000 character limit")
+        if feature and len(feature) > 64:
+            raise ValueError("Feedback feature name is too long")
+        if not email and feedback_kind != "ai_output":
+            raise ValueError("Email is required to submit general feedback")
 
         from shared.api.email import EMAIL_RE
 
-        if not EMAIL_RE.match(email):
+        if email and not EMAIL_RE.match(email):
             raise ValueError("Invalid email address")
-        if not self.is_enabled():
-            raise RuntimeError(FEEDBACK_TELEMETRY_OFF)
-
         properties = {
             "reason": reason,
             "sentiment": sentiment,
@@ -1657,8 +1850,13 @@ class TelemetryManager:
             "email": email,
             "include_query": include_query,
             "include_plan": include_plan,
+            "feedback_kind": feedback_kind,
         }
 
+        if feature:
+            properties["feature"] = feature
+        if ai_output:
+            properties["ai_output"] = ai_output
         if query_hash:
             properties["query_hash"] = query_hash
         if suggestion_text:
@@ -1670,7 +1868,13 @@ class TelemetryManager:
         if include_plan and plan_json:
             properties["plan_json"] = plan_json
 
-        # Save email for enriching future telemetry events (first_analyze, etc.)
+        try:
+            self._capture_explicit_feedback(properties)
+        except FeedbackDeliveryError:
+            return False
+
+        # Save an explicitly supplied follow-up email only after PostHog accepts
+        # the report. Anonymous AI-output reports never modify local identity.
         if email:
             try:
                 from shared.config.targets import create_targets_config
@@ -1683,14 +1887,57 @@ class TelemetryManager:
             except Exception:
                 pass
 
-        return self.deliver_with_stats("feedback_submitted", properties)
+        return True
+
+    def _capture_explicit_feedback(self, properties: Dict[str, Any]) -> str:
+        """Synchronously submit an explicit report to PostHog."""
+        requests = _get_requests()
+        if not requests or not self.POSTHOG_API_KEY:
+            raise FeedbackDeliveryError("Feedback delivery is unavailable")
+
+        internal_user = bool(self._internal_user_result) or internal_install(
+            properties.get("email") or ""
+        )
+        event_id = str(uuid.uuid4())
+        timestamp = datetime.now(timezone.utc).isoformat()
+        event = {
+            "uuid": event_id,
+            "event": "feedback_submitted",
+            "distinct_id": f"feedback-{event_id}",
+            "timestamp": timestamp,
+            "properties": {
+                **properties,
+                "$geoip_disable": True,
+                "$process_person_profile": False,
+                "rdst_version": self._get_version(),
+                "timestamp": timestamp,
+            },
+        }
+        try:
+            response = requests.post(
+                f"{self.POSTHOG_HOST.rstrip('/')}/batch/",
+                json={
+                    "api_key": routed_posthog_key(self.POSTHOG_API_KEY, internal_user),
+                    "batch": [event],
+                    "sent_at": timestamp,
+                },
+                timeout=self.FEEDBACK_REQUEST_TIMEOUT,
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            raise FeedbackDeliveryError(
+                "PostHog did not accept the feedback report"
+            ) from exc
+        return event_id
 
     # =========================================================================
     # Cleanup
     # =========================================================================
 
     def flush(self):
-        """Flush any pending events (call before exit)."""
+        """Flush pending events only while explicit consent remains granted."""
+        if not self.is_enabled():
+            return
         deadline = time.monotonic() + self.BACKGROUND_FLUSH_TIMEOUT_SECONDS
 
         # Enqueue registers the resolver while holding this lock. Crossing the

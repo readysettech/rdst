@@ -15,6 +15,7 @@ import asyncio
 from dataclasses import asdict, dataclass
 from typing import Any, AsyncGenerator, Callable
 
+from shared.ai_data_consent import ai_data_sharing_allowed
 from shared.anthropic_env import validate_anthropic_key
 from shared.async_utils import run_blocking
 from shared.service_events import ErrorEvent
@@ -230,6 +231,9 @@ class TargetBootstrapService:
 
         if not options.annotate:
             yield _stage(STAGE_ANNOTATE, "skipped", "Annotation disabled")
+            return
+        if not ai_data_sharing_allowed():
+            yield _stage(STAGE_ANNOTATE, "skipped", "AI is off")
             return
         validity = await run_blocking(self._key_validator)
         if not validity.get("valid"):

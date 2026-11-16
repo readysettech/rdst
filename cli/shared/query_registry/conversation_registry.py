@@ -14,6 +14,8 @@ from typing import Dict, List, Optional, Any
 
 import shared.constants as shared_constants
 
+from shared.persistence import delete_file, write_json
+
 
 @dataclass
 class ConversationMessage:
@@ -143,12 +145,6 @@ class ConversationRegistry:
         else:
             self.conversations_dir = shared_constants.rdst_data_dir() / "conversations"
 
-        self._ensure_directory()
-
-    def _ensure_directory(self) -> None:
-        """Ensure conversations directory exists."""
-        self.conversations_dir.mkdir(parents=True, exist_ok=True)
-
     def _get_conversation_path(self, conversation_id: str) -> Path:
         """Get path to conversation JSON file."""
         return self.conversations_dir / f"{conversation_id}.json"
@@ -190,12 +186,10 @@ class ConversationRegistry:
         Args:
             conversation: InteractiveConversation to save
         """
-        self._ensure_directory()
         path = self._get_conversation_path(conversation.conversation_id)
 
         try:
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(conversation.to_dict(), f, indent=2, ensure_ascii=False)
+            write_json(path, conversation.to_dict())
         except Exception as e:
             raise RuntimeError(f"Failed to save conversation {conversation.conversation_id}: {e}")
 
@@ -249,7 +243,7 @@ class ConversationRegistry:
         path = self._get_conversation_path(conversation_id)
 
         if path.exists():
-            path.unlink()
+            delete_file(path)
             return True
         return False
 
@@ -263,8 +257,6 @@ class ConversationRegistry:
         Returns:
             List of conversation IDs
         """
-        self._ensure_directory()
-
         conversation_ids = []
         for path in self.conversations_dir.glob("*.json"):
             conversation_id = path.stem

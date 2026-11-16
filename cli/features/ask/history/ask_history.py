@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from shared.constants import rdst_data_dir
+from shared.persistence import append_text, write_text
 
 
 @dataclass
@@ -51,11 +52,9 @@ class AskHistory:
 
     def _ensure_directory(self):
         """Ensure history directory exists."""
-        self.history_file.parent.mkdir(parents=True, exist_ok=True)
-
-        # Create empty file if it doesn't exist
+        # Create empty file if it doesn't exist.
         if not self.history_file.exists():
-            self.history_file.touch()
+            write_text(self.history_file, "")
 
     def add_entry(
         self,
@@ -84,9 +83,7 @@ class AskHistory:
             execution_time_ms=execution_time_ms
         )
 
-        # Append to file
-        with open(self.history_file, 'a', encoding='utf-8', newline='\n') as f:
-            f.write(json.dumps(entry.to_dict()) + '\n')
+        append_text(self.history_file, json.dumps(entry.to_dict()) + '\n')
 
     def get_recent(self, limit: int = 20) -> List[HistoryEntry]:
         """

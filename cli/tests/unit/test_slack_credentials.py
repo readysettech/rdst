@@ -28,6 +28,15 @@ class FakeSecretStore:
     def get_secret(self, name):
         return self.values.get(name)
 
+    def track_existing_secrets(self, names):
+        del names
+
+    def clear_required(self, names, *, clear_environment="all"):
+        del clear_environment
+        for name in names:
+            self.values.pop(name, None)
+        return {"cleared": list(names), "missing": [], "errors": []}
+
 
 def test_slack_tokens_are_stored_in_keyring_not_json(tmp_path, monkeypatch):
     credentials_path = tmp_path / "credentials.json"

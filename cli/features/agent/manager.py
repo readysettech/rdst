@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .config import AgentConfig, SafetyConfig, RestrictionsConfig, agents_dir
 from shared.config.targets import create_targets_config, is_windows_reserved_name
+from shared.persistence import delete_file
 
 from features.guard import GuardManager, GuardNotFoundError
 
@@ -218,7 +219,7 @@ class AgentManager:
         """
         path = self._get_path(name)
         if path.exists():
-            path.unlink()
+            delete_file(path)
             return True
         return False
 

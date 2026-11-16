@@ -73,6 +73,18 @@ def forget_secret(name: str) -> None:
         _SECRET_CACHE.pop(name, None)
 
 
+def reset_runtime_state() -> None:
+    """Forget provider credentials and status held by this process."""
+    global _SECRET_STORE
+    with _SECRET_LOCK:
+        _SECRET_CACHE.clear()
+        _SECRET_STORE = None
+    with _STATUS_CACHE_LOCK:
+        caches = list(_STATUS_CACHES.values())
+    for cache in caches:
+        cache.clear()
+
+
 class CredentialCache:
     """Memo for one value, held per credential and for a bounded time."""
 

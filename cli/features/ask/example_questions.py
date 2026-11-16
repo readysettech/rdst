@@ -16,14 +16,13 @@ from typing import Any
 
 from shared.anthropic_env import has_anthropic_api_key
 from shared.constants import rdst_data_dir
+from shared.persistence import write_text
 
 logger = logging.getLogger(__name__)
 
 
 def _cache_path(target: str):
-    d = rdst_data_dir() / "cache" / "ask_examples"
-    d.mkdir(parents=True, exist_ok=True)
-    return d / f"{target}.json"
+    return rdst_data_dir() / "cache" / "ask_examples" / f"{target}.json"
 
 
 def _fingerprint(table_names: list[str]) -> str:
@@ -112,9 +111,9 @@ def get_example_questions(
         examples = _semantic_examples(target, semantic_layer)
         if examples:
             try:
-                cache.write_text(
+                write_text(
+                    cache,
                     json.dumps({"fingerprint": fp, "examples": examples}),
-                    encoding="utf-8",
                 )
             except Exception:
                 logger.debug("Failed to write ask-examples cache", exc_info=True)

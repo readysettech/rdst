@@ -64,6 +64,7 @@ def test_semantic_cache_hit_skips_generation(monkeypatch, tmp_path):
     monkeypatch.setattr(eq, "rdst_data_dir", lambda: tmp_path)
     tables = ["title_ratings"]
     cache = eq._cache_path("t")
+    cache.parent.mkdir(parents=True)
     cache.write_text(
         json.dumps({"fingerprint": eq._fingerprint(tables), "examples": ["cached q"]})
     )
@@ -79,6 +80,7 @@ def test_semantic_cache_hit_skips_generation(monkeypatch, tmp_path):
 def test_stale_cache_fingerprint_is_ignored(monkeypatch, tmp_path):
     monkeypatch.setattr(eq, "rdst_data_dir", lambda: tmp_path)
     cache = eq._cache_path("t")
+    cache.parent.mkdir(parents=True)
     cache.write_text(json.dumps({"fingerprint": "old", "examples": ["stale"]}))
     # No key → falls through to introspection rather than the stale cache.
     monkeypatch.setattr(eq, "has_anthropic_api_key", lambda: False)

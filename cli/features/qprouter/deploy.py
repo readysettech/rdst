@@ -26,6 +26,7 @@ from pathlib import Path
 
 from shared.constants import rdst_instance_suffix
 from shared.deploy.docker_topology import DockerTopology
+from shared.persistence import ensure_directory, write_text
 
 # Container-name prefix; each desktop flavor gets its own set of containers.
 # Links alias every peer under its production name, which the rendered configs use.
@@ -464,12 +465,12 @@ def write_sqp_config(
     Returns (config_path, denylist_path). The embedded QueryPilot plugin is
     explicitly disabled; the demo uses the standalone qp-cron container instead.
     """
-    out_dir.mkdir(parents=True, exist_ok=True)
+    ensure_directory(out_dir)
     denylist = out_dir / "denylist"
-    denylist.write_text("", encoding="utf-8", newline="\n")
+    write_text(denylist, "")
+    denylist.chmod(0o644)
     cfg = out_dir / "sqp.toml"
-    cfg.write_text(
-        f"""[general]
+    content = f"""[general]
 pool_mode = "transaction"
 worker_threads = 0
 
@@ -511,10 +512,9 @@ format = "pretty"
 
 [plugins.query_pilot]
 enabled = false
-""",
-        encoding="utf-8",
-        newline="\n",
-    )
+"""
+    write_text(cfg, content)
+    cfg.chmod(0o644)
     return cfg, denylist
 
 
@@ -531,21 +531,19 @@ def write_qp_config(
         raise ValueError(f"unsupported query_discovery_mode: {query_discovery_mode}")
     if number_of_queries < 1 or number_of_queries > 40:
         raise ValueError("number_of_queries must be between 1 and 40")
-    out_dir.mkdir(parents=True, exist_ok=True)
+    ensure_directory(out_dir)
     out_dir.chmod(0o755)
     denylist = out_dir / "denylist"
-    denylist.write_text("", encoding="utf-8", newline="\n")
+    write_text(denylist, "")
     denylist.chmod(0o644)
     crontab = out_dir / "crontab"
-    crontab.write_text(
+    write_text(
+        crontab,
         "*/15 * * * * * * /usr/bin/sqp-query-pilot --config /etc/sqp/qp.cnf\n",
-        encoding="utf-8",
-        newline="\n",
     )
     crontab.chmod(0o644)
     cfg = out_dir / "qp.cnf"
-    cfg.write_text(
-        f"""backend_type = "sqp"
+    content = f"""backend_type = "sqp"
 database_type = "postgresql"
 sqp_api_url = "http://qpdemo-sqp:{admin_port}"
 sqp_readyset_pool = "readyset"
@@ -569,10 +567,8 @@ denylist_path = "/etc/sqp/denylist"
 readyset_user = "{creds["user"]}"
 readyset_password = "{creds["password"]}"
 readyset_database = "{creds["database"]}"
-""",
-        encoding="utf-8",
-        newline="\n",
-    )
+"""
+    write_text(cfg, content)
     cfg.chmod(0o644)
     return cfg, denylist, crontab
 

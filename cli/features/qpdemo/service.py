@@ -32,6 +32,7 @@ from features.qpdemo.load_driver import DualPathLoadDriver, WindowStat
 from features.qpdemo.workload import WORKLOAD, load_sqls, workload_dicts
 from shared.constants import rdst_instance_suffix
 from shared.deploy.docker_topology import DockerTopology
+from shared.persistence import write_text
 from shared.telemetry import telemetry
 
 logger = logging.getLogger(__name__)
@@ -723,10 +724,9 @@ class DemoService:
                 lines.append(f"digest={to_hex(fp)} # manual cache")
         for fp in manual_fps:
             lines.append(f"digest={to_hex(fp)} # manual cache")
-        (QP_CONFIG_DIR / "denylist").write_text(
+        write_text(
+            QP_CONFIG_DIR / "denylist",
             "\n".join(sorted(set(lines))) + ("\n" if lines else ""),
-            encoding="utf-8",
-            newline="\n",
         )
 
     # ---- preflight -------------------------------------------------------------
@@ -1298,6 +1298,20 @@ class DemoService:
         self._provision_cancel.set()
         with self._lifecycle_lock:
             return self._teardown_locked(reason)
+
+    def reset_local_data(self) -> dict:
+        """Stop in-process demo workers before the shared data directory is reset."""
+        with self._lifecycle_lock:
+            if self._ports is not None:
+                return self._teardown_locked("local_reset")
+            self.stop_load()
+            self._stop_supervisor()
+            self._provisioning = False
+            self._auto_teardown_at = None
+            with self._history_lock:
+                self._history = []
+                self._events = []
+            return {"success": True, "message": "Demo runtime stopped."}
 
     def _teardown_locked(self, reason: str) -> dict:
         # Only a real, provisioned environment counts as a teardown for the

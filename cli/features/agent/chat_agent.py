@@ -318,6 +318,10 @@ class ChatAgent:
         Returns:
             LLM response dict.
         """
+        # This path uses the Anthropic SDK directly, so apply the same desktop
+        # data-sharing gate as the shared LLM request methods.
+        self._get_llm().assert_data_consent()
+
         # Use Anthropic client directly for tool use
         try:
             import anthropic
@@ -327,7 +331,12 @@ class ChatAgent:
         # Explicitly pass API key to avoid env conflicts
         api_key = self._get_api_key()
 
-        client = anthropic.Anthropic(api_key=api_key)
+        # Where AI waits for consent, a retry could send after it's withdrawn, so each send
+        # goes through the gate above.
+        llm = self._get_llm()
+        client = anthropic.Anthropic(
+            api_key=api_key, **({"max_retries": 0} if llm._enforce_data_consent else {})
+        )
 
         response = client.messages.create(
             model=self._resolve_model(),

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from shared.constants import rdst_data_dir
-from shared.persistence import is_safe_file_stem
+from shared.persistence import is_safe_file_stem, write_text
 
 from ..storage import find_audit_run
 from .report import render_v3_fleet_html, render_v3_single_html
@@ -32,10 +32,8 @@ def save_report_locally(run_id: str, html: str) -> str | None:
         logger.warning("Refusing to save a report under run id %r", run_id)
         return None
     try:
-        directory = reports_dir()
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{run_id}.html"
-        path.write_text(html, encoding="utf-8")
+        path = reports_dir() / f"{run_id}.html"
+        write_text(path, html)
         return str(path)
     except Exception as exc:
         logger.warning("Could not save report for %s: %s", run_id, exc)

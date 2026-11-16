@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from shared.constants import rdst_data_dir
-from shared.persistence import is_safe_file_stem, require_safe_file_stem, write_json
+from shared.persistence import (
+    delete_file,
+    is_safe_file_stem,
+    require_safe_file_stem,
+    write_json,
+)
 
 from .models import FleetAuditSnapshot, FleetDiff, FleetDiffEntry
 
@@ -40,14 +44,12 @@ class SnapshotStore:
 
     def save(self, snapshot: FleetAuditSnapshot) -> str:
         require_safe_file_stem(snapshot.snapshot_id, "snapshot id")
-        self.base_dir.mkdir(parents=True, exist_ok=True)
         path = self.base_dir / f"{snapshot.snapshot_id}.json"
         write_json(path, asdict(snapshot))
         return str(path)
 
     def save_raw(self, snapshot_id: str, data: Any) -> str:
         require_safe_file_stem(snapshot_id, "snapshot id")
-        self.base_dir.mkdir(parents=True, exist_ok=True)
         path = self.base_dir / f"{snapshot_id}.json"
         write_json(path, data)
         return str(path)
@@ -121,7 +123,7 @@ class SnapshotStore:
             return False
         path = self.base_dir / f"{snapshot_id}.json"
         if path.exists():
-            os.unlink(path)
+            delete_file(path)
             return True
         return False
 

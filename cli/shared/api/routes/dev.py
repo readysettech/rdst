@@ -1,6 +1,8 @@
 """API routes for development-only utilities."""
 
 from __future__ import annotations
+
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, Request
@@ -29,7 +31,7 @@ async def clear_keyring(request: Request) -> ClearKeyringResponse:
     names = env_service.get_clearable_secret_names()
 
     secret_store = SecretStoreService()
-    result = secret_store.clear_required(names)
+    result = await asyncio.to_thread(secret_store.clear_required, names)
 
     cleared = result.get("cleared", [])
     missing = result.get("missing", [])

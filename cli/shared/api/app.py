@@ -484,7 +484,10 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     # happens to have open, and the API has no auth to fall back on.
     app.add_middleware(
         CORSMiddleware,
-        allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$",
+        allow_origins=[],
+        allow_origin_regex=(
+            r"^https?://(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$"
+        ),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

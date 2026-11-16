@@ -8,6 +8,7 @@ from typing import List, Literal, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, SecretStr
 
+from shared.ai_data_consent import ai_data_sharing_allowed
 from shared.anthropic_env import (
     ANTHROPIC_API_KEY_NAMES,
     MALFORMED_ANTHROPIC_KEY_MESSAGE,
@@ -46,6 +47,7 @@ KEY_SAVED_UNCHECKED_MESSAGE = (
     "Key saved, but RDST couldn't check it with Anthropic. "
     "Settings shows whether it works once Anthropic can be reached."
 )
+KEY_SAVED_AI_OFF_MESSAGE = "Key saved. RDST checks it with Anthropic once AI is on."
 
 
 def _has_working_anthropic_key(service: EnvRequirementsService) -> bool:
@@ -141,8 +143,11 @@ async def set_env_secret(request: Request, body: EnvSetRequest) -> EnvSetRespons
             message=MALFORMED_ANTHROPIC_KEY_MESSAGE,
         )
 
-    unchecked = False
-    if body.name in ANTHROPIC_API_KEY_NAMES:
+    unchecked_message = None
+    if body.name in ANTHROPIC_API_KEY_NAMES and not ai_data_sharing_allowed():
+        # With AI off nothing goes to Anthropic, so the key is saved unchecked.
+        unchecked_message = KEY_SAVED_AI_OFF_MESSAGE
+    elif body.name in ANTHROPIC_API_KEY_NAMES:
         # A key replaces the current one only once Anthropic accepts it. A key Anthropic can't
         # be asked about is saved only when there is no working key to lose.
         verdict = await asyncio.to_thread(check_anthropic_key, value)
@@ -154,10 +159,11 @@ async def set_env_secret(request: Request, body: EnvSetRequest) -> EnvSetRespons
                 if keeps_current:
                     message += " Your current key is still in use."
                 return EnvSetResponse(success=False, name=body.name, message=message)
-            unchecked = True
+            unchecked_message = KEY_SAVED_UNCHECKED_MESSAGE
 
     service.bind_missing_target_password(body.name)
-    result = service.secret_store.set_secret(
+    result = await asyncio.to_thread(
+        service.secret_store.set_secret,
         name=body.name,
         value=value,
         persist=body.persist,
@@ -171,7 +177,7 @@ async def set_env_secret(request: Request, body: EnvSetRequest) -> EnvSetRespons
         name=body.name,
         persisted=bool(result.get("persisted", False)),
         session_only=bool(result.get("session_only", True)),
-        message=KEY_SAVED_UNCHECKED_MESSAGE if unchecked else result.get("message"),
+        message=unchecked_message or result.get("message"),
     )
 
 

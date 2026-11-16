@@ -49,6 +49,12 @@ def _clear_tokens() -> None:
     _OAUTH.clear_tokens()
 
 
+def reset_runtime_state() -> None:
+    """Forget the local OAuth session and status cache."""
+    _OAUTH.reset()
+    status_cache(BROKER_PROVIDER).clear()
+
+
 def start_login(return_url: Optional[str] = None) -> dict[str, Any]:
     """Start a sign-in and return the URL the browser must open."""
     return _OAUTH.start_login(return_url)

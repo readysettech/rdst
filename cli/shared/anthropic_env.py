@@ -8,7 +8,7 @@ import re
 import time
 from typing import Any
 
-from shared.secret_store_service import SecretStoreService
+from shared.secret_store_service import SecretStoreService, apply_owned_environment
 
 ANTHROPIC_API_KEY_NAMES = ("ANTHROPIC_API_KEY",)
 
@@ -77,7 +77,7 @@ def get_anthropic_api_key(
 
     value = store.get_secret("ANTHROPIC_API_KEY")
     if value:
-        os.environ["ANTHROPIC_API_KEY"] = value
+        apply_owned_environment("ANTHROPIC_API_KEY", value)
         return value
 
     return None
@@ -132,11 +132,17 @@ def check_anthropic_key(key: str) -> dict[str, Any]:
     """Ask Anthropic whether ``key`` authenticates, with one minimal request.
 
     Returns ``{"valid": bool, "reason": "ok" | "rejected" | "provider_error", "model": ...}``.
-    A key with characters outside the key alphabet is ``rejected`` without a request. Results
-    are cached per key. Blocking (network I/O): callers on the event loop must offload it.
+    A key with characters outside the key alphabet is ``rejected`` without a request. With AI
+    off in a build that asks first, nothing is sent and the key reads as unchecked
+    (``provider_error``). Results are cached per key. Blocking (network I/O): callers on the
+    event loop must offload it.
     """
     if not is_well_formed_anthropic_key(key):
         return {"valid": False, "reason": "rejected", "model": None}
+    from shared.ai_data_consent import ai_data_sharing_allowed
+
+    if not ai_data_sharing_allowed():
+        return {"valid": False, "reason": "provider_error", "model": None}
 
     fingerprint = _fingerprint(key)
     cached = _validity_cache.get(fingerprint)
@@ -149,7 +155,7 @@ def check_anthropic_key(key: str) -> dict[str, Any]:
 
     model = AnthropicModel.HAIKU_4_5.value
     try:
-        LLMManager().query(
+        LLMManager(enforce_data_consent=False).query(
             system_message="ping",
             user_query="ping",
             provider="claude",

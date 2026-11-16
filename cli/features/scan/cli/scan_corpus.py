@@ -10,13 +10,13 @@ matched across different sources:
 - Runtime queries (pg_stat_activity, rdst top)
 """
 
-import os
 import hashlib
 import json
 from datetime import datetime
-from typing import List, Dict, Optional, Any
+from typing import Any, Dict, List, Optional
 
 from shared.constants import rdst_data_dir
+from shared.persistence import write_text
 
 # Import deep normalization from query_registry for cross-source matching
 from shared.query_registry import hash_sql_deep, normalize_sql_deep
@@ -74,8 +74,6 @@ class QueryCorpus:
 
     def save(self):
         """Save corpus to disk."""
-        self.corpus_dir.mkdir(parents=True, exist_ok=True)
-
         now = datetime.utcnow().isoformat() + "Z"
 
         data = {
@@ -91,7 +89,7 @@ class QueryCorpus:
         else:
             content = json.dumps(data, indent=2)
 
-        self.corpus_file.write_text(content, encoding="utf-8")
+        write_text(self.corpus_file, content)
 
     def add_query(self, query_data: Dict) -> str:
         """

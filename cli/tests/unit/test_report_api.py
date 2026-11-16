@@ -5,13 +5,41 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from shared.api.app import create_app
 from shared.api.routes import report as report_mod
 
 
 def _client() -> TestClient:
     app = FastAPI()
     app.include_router(report_mod.router, prefix="/api")
-    return TestClient(app, client=("127.0.0.1", 54321))
+    return TestClient(
+        app,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    )
+
+
+def test_cors_allows_loopback_origins_only():
+    client = TestClient(
+        create_app(),
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    )
+    headers = {"Access-Control-Request-Method": "POST"}
+
+    allowed = client.options(
+        "/api/report",
+        headers={**headers, "Origin": "http://localhost:3001"},
+    )
+    blocked = client.options(
+        "/api/report",
+        headers={**headers, "Origin": "https://attacker.example"},
+    )
+
+    assert allowed.status_code == 200
+    assert allowed.headers["access-control-allow-origin"] == "http://localhost:3001"
+    assert blocked.status_code == 400
+    assert "access-control-allow-origin" not in blocked.headers
 
 
 def test_report_requires_email():
@@ -60,18 +88,17 @@ def test_report_says_when_feedback_did_not_leave_the_machine():
     }
 
 
-def test_report_with_telemetry_off_says_how_to_send_it():
-    with patch("shared.telemetry.telemetry.is_enabled", return_value=False):
+def test_feedback_is_sent_with_telemetry_off():
+    with patch("shared.telemetry.telemetry.is_enabled", return_value=False), patch(
+        "shared.telemetry.telemetry.submit_feedback", return_value=True
+    ) as submit_feedback:
         response = _client().post(
             "/api/report", json={"reason": "Great tool", "email": "a@example.com"}
         )
 
     assert response.status_code == 200
-    assert response.json() == {
-        "success": False,
-        "error": "Feedback isn't sent while telemetry is turned off. "
-        "To send it, start RDST without RDST_TELEMETRY=off.",
-    }
+    assert response.json()["success"] is True
+    submit_feedback.assert_called_once()
 
 
 def test_feature_request_is_labelled_and_carries_the_chat():
@@ -153,3 +180,107 @@ def test_long_chat_sends_only_recent_turns():
     assert len(history) <= 20
     assert history[0]["role"] == "user"
     assert history[-1]["content"] == "answer 59"
+
+
+def test_report_forwards_user_reviewed_ai_output():
+    with patch("shared.telemetry.telemetry.submit_feedback") as submit_feedback:
+        response = _client().post(
+            "/api/report",
+            json={
+                "reason": "This output exposed sensitive data",
+                "feedback_kind": "ai_output",
+                "feature": "analyze",
+                "ai_output": "Generated answer reviewed by the user",
+            },
+        )
+
+    assert response.status_code == 200
+    assert submit_feedback.call_args.kwargs["feedback_kind"] == "ai_output"
+    assert submit_feedback.call_args.kwargs["feature"] == "analyze"
+    assert submit_feedback.call_args.kwargs["email"] == ""
+    assert (
+        submit_feedback.call_args.kwargs["ai_output"]
+        == "Generated answer reviewed by the user"
+    )
+
+
+def test_report_surfaces_posthog_delivery_failure():
+    with patch(
+        "shared.telemetry.telemetry.submit_feedback",
+        side_effect=RuntimeError("delivery failed"),
+    ):
+        response = _client().post(
+            "/api/report",
+            json={"reason": "Great tool", "email": "feedback@example.com"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": False,
+        "error": "PostHog did not accept the feedback report. Please try again.",
+    }
+
+
+def test_report_rejects_hostile_browser_origin():
+    with patch("shared.telemetry.telemetry.submit_feedback") as submit_feedback:
+        response = _client().post(
+            "/api/report",
+            headers={"Origin": "https://attacker.example"},
+            json={"reason": "Great tool", "email": "feedback@example.com"},
+        )
+
+    assert response.status_code == 403
+    submit_feedback.assert_not_called()
+
+
+def test_report_bounds_feedback_message_size():
+    response = _client().post(
+        "/api/report",
+        json={"reason": "x" * 10_001, "email": "feedback@example.com"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_report_limits_ai_output_attachment_size():
+    response = _client().post(
+        "/api/report",
+        json={
+            "reason": "Bad output",
+            "email": "feedback@example.com",
+            "feedback_kind": "ai_output",
+            "ai_output": "x" * 50_001,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_bug_report_with_a_long_help_chat_is_sent():
+    with patch("shared.telemetry_manager.TelemetryManager._capture_explicit_feedback") as capture, \
+            patch("shared.telemetry.telemetry.is_enabled", return_value=True):
+        response = _client().post(
+            "/api/report",
+            json={
+                "reason": "x" * 10_000,
+                "email": "user@example.com",
+                "kind": "bug",
+                "transcript": "User: why?\n" * 2_000,
+            },
+        )
+
+    assert response.json() == {"success": True, "error": None}
+    assert capture.call_args.args[0]["reason"].startswith("[Bug report] ")
+
+
+def test_report_explains_a_rejected_email():
+    with patch(
+        "shared.telemetry.telemetry.submit_feedback",
+        side_effect=ValueError("Invalid email address"),
+    ):
+        response = _client().post(
+            "/api/report", json={"reason": "Great tool", "email": "a@example.com"}
+        )
+
+    assert response.json() == {"success": False, "error": "Invalid email address"}
+

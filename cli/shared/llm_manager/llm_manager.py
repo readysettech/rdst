@@ -43,6 +43,7 @@ class LLMManager:
         self,
         defaults: Optional[Dict[str, Any]] = None,
         logger: Optional[logging.Logger] = None,
+        enforce_data_consent: bool | None = None,
     ):
         d = LLMDefaults(**(defaults or {}))
 
@@ -62,12 +63,28 @@ class LLMManager:
             d.model = env_model
 
         self.defaults = d
+        if enforce_data_consent is None:
+            from shared.ai_data_consent import requires_ai_data_consent
+
+            enforce_data_consent = requires_ai_data_consent()
+        self._enforce_data_consent = enforce_data_consent
         self.logger = logger or logging.getLogger("llm_manager")
         self.logger.addHandler(logging.NullHandler())
 
         self._providers: Dict[str, Provider] = {}
         self.register_provider("claude", ClaudeProvider())
         self.register_provider("readyset", HostedProvider())
+
+    def assert_data_consent(self) -> None:
+        if not self._enforce_data_consent:
+            return
+        from shared.ai_data_consent import ai_data_sharing_allowed
+
+        if not ai_data_sharing_allowed():
+            raise LLMError(
+                "AI data sharing requires explicit permission in RDST Settings.",
+                code="AI_DATA_CONSENT_REQUIRED",
+            )
 
     # Provider registry
     def register_provider(self, name: str, provider: Provider) -> None:
@@ -118,6 +135,7 @@ class LLMManager:
           "raw": {...}  # present if debug=True
         }
         """
+        self.assert_data_consent()
         requested_provider = (provider or self.defaults.provider or "auto").lower()
         from .key_resolution import KeyResolution
 
@@ -286,6 +304,7 @@ class LLMManager:
         Wraps the sync provider.stream() generator using a queue bridge to convert
         to async generator. Yields tokens as they arrive from the provider.
         """
+        self.assert_data_consent()
         requested_provider = (provider or self.defaults.provider or "auto").lower()
 
         from .key_resolution import KeyResolution

@@ -343,8 +343,7 @@ def monitor_work():
                    if plan["jobs"].get(job["id"], {}).get("queue_state") == "today"]
         retrying += [{"target": target, "query_key": key, **retry}
                      for key, retry in retry_plan(store, target, now).items()
-                     if retry["retry_at"] is not None and (database_limit._signed_in()
-                         or retry["reason"] == "user" and database_limit.own_key())]
+                     if retry["retry_at"] is not None and database_limit.can_run_ai()]
         done += store.read("SELECT * FROM analyze_job WHERE target=? AND state='done' "
                            "AND finished_at>=? ORDER BY finished_at DESC,id DESC LIMIT ?",
                            (target, day_start, WORK_DONE_LISTED))
@@ -429,6 +428,8 @@ async def enqueue_analysis(target: str, key: str, request: Request):
     if not verdict["analyzable"]:
         # Refuse up front with the reason; a queued job for these only ever fails.
         raise HTTPException(422, verdict["not_analyzable_reason"])
+    if await asyncio.to_thread(database_limit.ai_declined):
+        raise HTTPException(403, "AI is off. Turn on AI in Settings to run deep analysis.")
     if not await asyncio.to_thread(database_limit._signed_in) and not await asyncio.to_thread(
             database_limit.own_key):
         raise HTTPException(401, "Sign in to run deep analysis")
@@ -820,7 +821,8 @@ async def put_settings(target: str, body: MonitorSettingsUpdate, request: Reques
     if turned_on:
         # A full account still gets local monitoring; the claim decides whether AI joins.
         ai_state = await asyncio.to_thread(database_limit.claim_target, _store(), target)
-        ai_monitoring = {"on": "on", "local": "local_only"}.get(ai_state)
+        ai_monitoring = "ai_off" if await asyncio.to_thread(database_limit.ai_declined) else {
+            "on": "on", "local": "local_only"}.get(ai_state)
         if ai_monitoring is None:
             # Turned on without AI from the sign-in ask, or waiting on the Key Service.
             signed_in = await asyncio.to_thread(database_limit._signed_in)

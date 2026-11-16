@@ -214,6 +214,11 @@ class JevClient:
         return body
 
     def _send(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        from shared.ai_data_consent import ai_data_sharing_allowed
+
+        # Quick assessments carry SQL and schema evidence to an AI service, like any AI call.
+        if not ai_data_sharing_allowed():
+            raise JevClientError("AI_DATA_CONSENT_REQUIRED", 403)
         token = self._session_token()
         if not token:
             raise JevClientError("LOGIN_REQUIRED", 401)
@@ -227,6 +232,10 @@ class JevClient:
 
         response = None
         for attempt in range(2):
+            # Getting or refreshing the token can take a while, and AI may have been turned off
+            # meanwhile: every send asks again.
+            if not ai_data_sharing_allowed():
+                raise JevClientError("AI_DATA_CONSENT_REQUIRED", 403)
             try:
                 response = self._session.post(
                     keyservice_url(path),

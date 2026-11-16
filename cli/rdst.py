@@ -801,6 +801,8 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
         else:
             return RdstResult(False, f"Invalid UI mode: {ui_mode}")
 
+        os.environ["RDST_WEB_SERVER"] = "1"
+        os.environ["RDST_HOSTED_REPORTS"] = "disabled"
         os.environ["RDST_WEB_SERVE_STATIC"] = "1" if serve_static else "0"
         # The app advertises this address to local agents in desktop-server.json.
         os.environ["RDST_WEB_HOST"] = host

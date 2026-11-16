@@ -277,6 +277,7 @@ async def ask_examples(
 
     from features.ask.example_questions import get_example_questions
     from features.schema.semantic_layer.manager import SemanticLayerManager
+    from shared.ai_data_consent import ai_data_sharing_allowed
 
     manager = SemanticLayerManager()
     layer = None
@@ -285,8 +286,12 @@ async def ask_examples(
         layer = manager.load(target)
         table_names = list(layer.tables.keys())
 
+    # With AI off, the examples come from the schema alone.
     result = await asyncio.to_thread(
-        get_example_questions, target, table_names, layer
+        get_example_questions,
+        target,
+        table_names,
+        layer if ai_data_sharing_allowed() else None,
     )
     return AskExamplesResponse(**result)
 

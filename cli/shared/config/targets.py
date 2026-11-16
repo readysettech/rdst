@@ -2,6 +2,7 @@
 
 import copy
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -209,6 +210,52 @@ class TargetsConfig:
             validate=_validate_target_mapping,
         )
         self._baseline = copy.deepcopy(self._data)
+
+    def get_telemetry_consent(self) -> str:
+        """Return the explicit routine-telemetry decision for this install."""
+        privacy = self._data.get("privacy") or {}
+        consent = privacy.get("telemetry_consent")
+        if consent in ("granted", "denied"):
+            return consent
+
+        # Preserve the legacy opt-out. An old true value or a missing value is
+        # not proof of informed consent and remains pending.
+        if self._data.get("telemetry_enabled") is False:
+            return "denied"
+        return "pending"
+
+    def get_telemetry_consent_version(self) -> int | None:
+        privacy = self._data.get("privacy") or {}
+        version = privacy.get("telemetry_consent_version")
+        return version if type(version) is int else None
+
+    def set_telemetry_consent(self, consent: str, version: int) -> None:
+        if consent not in ("granted", "denied"):
+            raise ValueError("Telemetry consent must be granted or denied")
+        privacy = self._data.setdefault("privacy", {})
+        privacy["telemetry_consent"] = consent
+        privacy["telemetry_consent_version"] = version
+        privacy["telemetry_consent_updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._data.pop("telemetry_enabled", None)
+
+    def get_ai_data_consent(self) -> str:
+        """Return the explicit decision for sending content to AI providers."""
+        privacy = self._data.get("privacy") or {}
+        consent = privacy.get("ai_data_consent")
+        return consent if consent in ("granted", "denied") else "pending"
+
+    def get_ai_data_consent_version(self) -> int | None:
+        privacy = self._data.get("privacy") or {}
+        version = privacy.get("ai_data_consent_version")
+        return version if type(version) is int else None
+
+    def set_ai_data_consent(self, consent: str, version: int) -> None:
+        if consent not in ("granted", "denied"):
+            raise ValueError("AI data consent must be granted or denied")
+        privacy = self._data.setdefault("privacy", {})
+        privacy["ai_data_consent"] = consent
+        privacy["ai_data_consent_version"] = version
+        privacy["ai_data_consent_updated_at"] = datetime.now(timezone.utc).isoformat()
 
     def list_targets(self) -> List[str]:
         return sorted(self._data.get("targets", {}).keys())

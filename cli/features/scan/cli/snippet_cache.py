@@ -15,12 +15,13 @@ The entire pipeline is deterministic.
 Cache storage: ~/.rdst/cache/scan-snippets/<project>.json
 """
 
-import json
 import hashlib
+import json
 from datetime import datetime
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 
 from shared.constants import rdst_data_dir
+from shared.persistence import write_json
 
 
 class SnippetCache:
@@ -51,8 +52,7 @@ class SnippetCache:
 
     def _save(self):
         """Save cache to disk."""
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.cache_file.write_text(json.dumps(self.cache, indent=2), encoding="utf-8")
+        write_json(self.cache_file, self.cache)
 
     def get(self, snippet_hash: str) -> Optional[Dict[str, Any]]:
         """

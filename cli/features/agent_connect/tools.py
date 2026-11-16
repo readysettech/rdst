@@ -486,14 +486,16 @@ def _needs_user(name: str) -> str | None:
     """Why the user turns monitoring on in the app, or None when the agent may.
 
     The first time, the Turn on monitoring dialog explains what RDST reads and runs,
-    including EXPLAIN ANALYZE. Signed out, it asks the user to sign in for monitoring's AI.
+    including EXPLAIN ANALYZE. Signed out without an own Anthropic key, it asks the user to sign
+    in for monitoring's AI.
     Once the user has turned a database on, the agent may turn it back on.
     """
+    from features.monitor import database_limit
     from features.monitor.api import routes as monitor
 
     if monitor._store().levers(name)["enabled"] or monitor.monitoring_approved(name):
         return None
-    return AWAITING_USER if _signed_in() else AWAITING_SIGNIN
+    return AWAITING_USER if _signed_in() or database_limit.own_key() else AWAITING_SIGNIN
 
 
 async def _await_user(name: str) -> dict | None:
@@ -984,6 +986,13 @@ def _app_failure(name: str, args: dict, message: str) -> None:
         discover.app_call(args.get("name"), f"Couldn't: {message.splitlines()[0][:200]}")
 
 
+# What a coding agent gets from RDST while AI is off.
+AGENTS_NEED_AI = (
+    "AI is off in RDST, so it doesn't share your database with coding agents. "
+    "Turn on AI in Settings to use them."
+)
+
+
 def tool_list() -> list[dict]:
     return [{"name": name, "description": f"{description} {ABOUT}", "inputSchema": schema}
             for name, (description, schema, _handler) in TOOLS.items()]
@@ -994,6 +1003,12 @@ async def call_tool(app: FastAPI, name: str, args: dict | None) -> dict:
     entry = TOOLS.get(name)
     if entry is None:
         raise KeyError(name)
+    from shared.ai_data_consent import ai_data_sharing_allowed
+
+    # The agent calling is an AI model: with AI off, RDST answers it nothing.
+    if not ai_data_sharing_allowed():
+        _count(name, False, "ai_off")
+        return {"content": [{"type": "text", "text": AGENTS_NEED_AI}], "isError": True}
     args = dict(args or {})
     if name in APP_CALLS and args.get("name"):
         from features.agent_connect import discover

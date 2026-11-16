@@ -199,6 +199,12 @@ def _clear_tokens() -> None:
     _OAUTH.clear_tokens()
 
 
+def reset_runtime_state() -> None:
+    """Forget the local OAuth session and status cache."""
+    _OAUTH.reset()
+    status_cache(BROKER_PROVIDER).clear()
+
+
 def handle_callback(code: str, state: str) -> dict[str, Any]:
     """Exchange an authorization code and record the login outcome."""
     login_id, entry = _OAUTH.find_login_by_state(state)

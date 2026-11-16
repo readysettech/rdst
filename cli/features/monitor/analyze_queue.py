@@ -66,6 +66,7 @@ OVER_ALLOWANCE = ("Today's automatic analyses are done. RDST picks this query up
                   "if it's still among the busiest, or you can analyze it now.")
 # Automatic analyses need a Readyset account, even with an AI key of your own.
 SIGN_IN_FOR_MONITORING = "Sign in to turn on AI monitoring"
+AI_OFF = "AI is off. Turn on AI in Settings to run deep analysis."
 # A failure that's the AI service's rather than the query's (the Key Service or hosted AI
 # erroring, busy or not answering) retries by itself after each of these waits. Past the
 # last one, the query waits for the normal policy and the row explains why.
@@ -128,7 +129,7 @@ def analysis_retry(job: dict[str, Any], retry: dict[str, Any] | None) -> dict[st
     if job["state"] != "failed" or not retry:
         return {"attempts": None, "retry_at": None}
     facts: dict[str, Any] = {"attempts": retry["attempts"], "retry_at": retry["retry_at"]}
-    if not database_limit._signed_in() and (job["reason"] != "user" or not database_limit.own_key()):
+    if not database_limit.can_run_ai():
         return {**facts, "retry_at": None, "error_kind": "login_required",
                 "reason": SIGN_IN_FOR_MONITORING if job["reason"] != "user"
                 else "Sign in to run deep analysis"}
@@ -299,7 +300,8 @@ def queue_plan(store: MonitorStore, target: str, now: int) -> dict[str, Any]:
     own_key = database_limit.own_key()
     eligible = store.full_detail_keys(target)
     enabled = target in store.monitored_targets()
-    ai_held = signed_in and database_limit.paused(store, target, now)
+    ai_held = (signed_in or own_key) and database_limit.paused(store, target, now)
+    ai_off = database_limit.ai_declined()
     average = average_run_seconds(store, target)
     started = facts["used"]
     newcomers_left = facts["newcomer_left"]
@@ -314,7 +316,10 @@ def queue_plan(store: MonitorStore, target: str, now: int) -> dict[str, Any]:
         first_hour = automatic and hour_start <= job["enqueued_at"] < hour_end
         limit = facts["cap"] - facts["reserved"] if automatic else facts["cap"]
         newcomer = job["reason"] in NEWCOMER_REASONS and not first_hour
-        if not signed_in and (job["reason"] != "user" or not own_key):
+        if ai_off:
+            jobs[job["id"]] = {"queue_state": "held", "held_reason": "ai_off",
+                               "reason_text": AI_OFF}
+        elif not signed_in and not own_key:
             jobs[job["id"]] = {"queue_state": "held", "held_reason": "sign_in", "reason_text":
                                SIGN_IN_FOR_MONITORING if job["reason"] != "user"
                                else "Sign in to run deep analysis"}
@@ -1365,8 +1370,8 @@ class AnalyzeQueue:
             target, now, cap=cap, reserve=report_reserve(cap),
             newcomer_cap=newcomer_cap(target, self.store),
             eligible_keys=sorted(self.store.full_detail_keys(target)),
-            allow_report=signed_in and not ai_held,
-            allow_user=signed_in or database_limit.own_key(),
+            allow_report=database_limit.can_run_ai() and not ai_held,
+            allow_user=(signed_in or database_limit.own_key()) and not database_limit.ai_declined(),
             allow_automatic=self.store.levers(target)["enabled"] and self.store.levers(target)["deep_analysis"]
             and not ai_held)
 
@@ -1425,7 +1430,7 @@ class AnalyzeQueue:
         target, key = job["target"], job["query_key"]
         if self._stop.is_set() or not await asyncio.to_thread(self.store.analysis_owned, job):
             return
-        if job["reason"] != "user" and not await asyncio.to_thread(database_limit._signed_in):
+        if job["reason"] != "user" and not await asyncio.to_thread(database_limit.can_run_ai):
             await asyncio.to_thread(self.store.hold_analysis, job["id"],
                                     owner=job["owner"], attempt=job["attempt"])
             return
@@ -1514,7 +1519,7 @@ class AnalyzeQueue:
             error = None
             fingerprint = None if user_requested else await asyncio.to_thread(
                 database_limit.target_fingerprint, target)
-            if not user_requested and not await asyncio.to_thread(database_limit._signed_in):
+            if not user_requested and not await asyncio.to_thread(database_limit.can_run_ai):
                 await asyncio.to_thread(self.store.hold_analysis, job["id"],
                                         owner=job["owner"], attempt=job["attempt"])
                 return
@@ -1530,7 +1535,7 @@ class AnalyzeQueue:
                         if run.stopped.is_set() or self._stop.is_set() or not await asyncio.to_thread(
                                 self.store.analysis_owned, job):
                             return
-                        if not user_requested and not await asyncio.to_thread(database_limit._signed_in):
+                        if not user_requested and not await asyncio.to_thread(database_limit.can_run_ai):
                             await asyncio.to_thread(self.store.hold_analysis, job["id"],
                                                     owner=job["owner"], attempt=job["attempt"])
                             return
@@ -1617,7 +1622,7 @@ class AnalyzeQueue:
         except Exception as exc:
             if not await asyncio.to_thread(self.store.analysis_owned, job):
                 return
-            if job["reason"] != "user" and not await asyncio.to_thread(database_limit._signed_in):
+            if job["reason"] != "user" and not await asyncio.to_thread(database_limit.can_run_ai):
                 await asyncio.to_thread(self.store.hold_analysis, job["id"],
                                         owner=job["owner"], attempt=job["attempt"])
                 return

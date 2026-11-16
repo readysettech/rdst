@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterator
 
 from shared.config.targets import is_windows_reserved_name
+from shared.persistence import delete_file
 
 from . import config as _config
 from .config import GuardConfig
@@ -136,7 +137,7 @@ class GuardManager:
         if not path.exists():
             raise GuardNotFoundError(f"Guard '{name}' not found")
 
-        path.unlink()
+        delete_file(path)
 
     def list(self) -> list[str]:
         """List all guard names.
@@ -210,6 +211,6 @@ class GuardManager:
         new_path = config.save(self._guard_path(new_name))
 
         # Delete old file
-        self._guard_path(old_name).unlink()
+        delete_file(self._guard_path(old_name))
 
         return new_path

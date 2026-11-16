@@ -21,6 +21,10 @@ from typing import Any, Dict, Iterator, List, Optional
 from filelock import FileLock
 
 from shared.constants import ensure_private_data_dir, rdst_data_dir
+from shared.hosted_reports import (
+    hosted_reports_disabled_message,
+    hosted_reports_enabled,
+)
 from shared.keyservice import (
     DEFAULT_KEYSERVICE_URL,
     keyservice_base_url,
@@ -149,6 +153,8 @@ class EmailService:
         """Register an email for report delivery. If html/subject are
         supplied, the keyservice queues the report and delivers it on the
         verify-link click. Returns the keyservice JSON response."""
+        if not hosted_reports_enabled():
+            return {"success": False, "error": hosted_reports_disabled_message()}
         return self._sync(self._register(email, html, subject, summary, ttl_days, mode))
 
     async def _register(
@@ -201,6 +207,8 @@ class EmailService:
     def check_status(self, email: str) -> Dict[str, Any]:
         """One verification check for `email`. A check that outlasts its deadline reads
         as still pending; the next one picks up from the stored pickups."""
+        if not hosted_reports_enabled():
+            return {"verified": False, "error": hosted_reports_disabled_message()}
         try:
             return self._sync(self._check_status(email))
         except TimeoutError:
@@ -274,6 +282,8 @@ class EmailService:
         """Send a report using a verified report token. mode='link' hosts
         the HTML and emails a View button (best for CSS-heavy reports);
         mode='inline' embeds the HTML directly."""
+        if not hosted_reports_enabled():
+            return {"success": False, "error": hosted_reports_disabled_message()}
         return self._sync(self._send(report_token, html_body, subject, as_attachment, attachment_name, mode, ttl_days, summary))
 
     async def _send(
@@ -335,6 +345,8 @@ class EmailService:
         `report_token` comes back as `stale_token=True` so the caller can drop
         it from local config; `queued=True` means verification is pending.
         """
+        if not hosted_reports_enabled():
+            return {"success": False, "error": hosted_reports_disabled_message()}
         stale_token = False
         if report_token:
             result = self.send_report(
@@ -408,6 +420,9 @@ class EmailService:
         On a stale token the result includes `stale_token=True` so the
         caller can drop the entry from local config.
         """
+        if not hosted_reports_enabled():
+            return {"success": False, "error": hosted_reports_disabled_message()}
+
         def _send_with_mode(token):
             return self.send_report(
                 token, html_body, subject,
@@ -476,6 +491,7 @@ class EmailService:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 import concurrent.futures
+
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     return pool.submit(lambda: asyncio.run(coro)).result(timeout=35)
             return loop.run_until_complete(coro)

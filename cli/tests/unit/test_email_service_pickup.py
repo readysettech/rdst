@@ -17,6 +17,11 @@ from features.audit.email_service import EmailService
 from shared.constants import rdst_data_dir
 
 
+@pytest.fixture(autouse=True)
+def enable_hosted_reports(monkeypatch):
+    monkeypatch.setenv("RDST_HOSTED_REPORTS", "enabled")
+
+
 @pytest.fixture
 def keyservice(monkeypatch):
     calls: list[httpx.Request] = []

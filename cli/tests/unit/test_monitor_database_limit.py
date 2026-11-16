@@ -152,6 +152,26 @@ def test_status_carries_each_targets_reason_and_since(tmp_path, targets, monkeyp
     assert database_limit.ai_reason(store, "a")["reason"] == "signed_out"
 
 
+
+def test_an_own_key_runs_monitoring_ai_without_an_account(tmp_path, targets, monkeypatch):
+    store = MonitorStore(tmp_path / "monitor.db")
+    store.set_settings("a", {"enabled": True})
+    monkeypatch.setattr(database_limit, "_signed_in", lambda: False)
+    monkeypatch.setattr(database_limit, "own_key", lambda: True)
+    # Turned on signed out, the claim waits for a sign-in, yet the key runs AI meanwhile.
+    database_limit.hold_signed_out(store, "a", NOW)
+    assert database_limit.can_run_ai()
+    assert database_limit.display_state(store, "a") == "on"
+    assert database_limit.ai_reason(store, "a")["reason"] is None
+    assert not database_limit.paused(store, "a", NOW)
+    # The slot is still claimed at sign-in: the stored state keeps waiting for it.
+    assert database_limit.ai_state(store, "a") == "pending"
+    # Without the key, the same database waits for the sign-in.
+    monkeypatch.setattr(database_limit, "own_key", lambda: False)
+    assert not database_limit.can_run_ai()
+    assert database_limit.display_state(store, "a") == "pending"
+    assert database_limit.paused(store, "a", NOW)
+
 def test_status_reads_the_limit_from_the_key_service():
     summary = {"limit": 3, "own_key_limit": 10, "active": 5, "hosted_active": 2}
     assert database_limit.status_from(summary, with_own_key=False) == {

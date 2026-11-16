@@ -88,6 +88,8 @@ def test_track_identifies_install_without_attaching_stored_email(tmp_path, monke
     tm._rdst_dir = tmp_path
     tm._device_id = "dev-telemetry-123"
     tm._enabled = True
+    # Held until config.toml changes.
+    tm._enabled_stamp = tm._config_stamp()
     tm._initialized = True
     # Only a release build carries an ingest key; without one track() sends nothing.
     tm.POSTHOG_API_KEY = "phc_test_key"

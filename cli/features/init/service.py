@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, AsyncGenerator
-import datetime
 import os
 
+from shared.ai_data_consent import ai_data_sharing_allowed
 from shared.anthropic_env import get_anthropic_source, has_anthropic_api_key
 from shared.account_session import is_signed_in_locally
 from shared.config.targets import TargetsConfig
@@ -178,8 +179,13 @@ class InitService:
                 ),
             }
 
+        if not ai_data_sharing_allowed():
+            return {"success": False, "error": "AI is off. Turn on AI in Settings to check it."}
         try:
-            llm_mgr = create_llm_manager(defaults={"max_tokens": 8, "temperature": 0.0})
+            llm_mgr = create_llm_manager(
+                defaults={"max_tokens": 8, "temperature": 0.0},
+                enforce_data_consent=False,
+            )
             llm_mgr.query(
                 system_message="You are a terse assistant.",
                 user_query="ping",

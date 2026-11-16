@@ -13,6 +13,7 @@ from typing import Any
 import requests
 
 from shared import account_session
+from shared.ai_data_consent import ai_data_sharing_allowed
 from shared.keyservice import keyservice_base_url
 
 from .base import LLMError, Provider, ProviderRequest, ProviderResponse, provider_unreachable
@@ -130,6 +131,12 @@ class HostedProvider(Provider):
         debug: bool = False,
     ) -> ProviderResponse:
         with _HOSTED_REQUEST_LOCK:
+            # A request can wait here behind another; AI turned off meanwhile stops it.
+            if not ai_data_sharing_allowed():
+                raise LLMError(
+                    "AI data sharing requires explicit permission in RDST Settings.",
+                    code="AI_DATA_CONSENT_REQUIRED",
+                )
             started = time.monotonic()
             try:
                 response = self._complete_serialized(
@@ -207,6 +214,12 @@ class HostedProvider(Provider):
         token = api_key
         response = None
         for attempt in range(2):
+            # A retry after a token refresh is a new send; AI may have been turned off.
+            if attempt and not ai_data_sharing_allowed():
+                raise LLMError(
+                    "AI data sharing requires explicit permission in RDST Settings.",
+                    code="AI_DATA_CONSENT_REQUIRED",
+                )
             try:
                 response = _HTTP_SESSION.post(
                     endpoint,

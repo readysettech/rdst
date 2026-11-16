@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable
 from typing import Any, Optional
 
+from shared.ai_data_consent import ai_data_sharing_allowed
 from shared.anthropic_env import validate_anthropic_key
 from shared.db_connection import (
     create_mysql_connection_from_params,
@@ -43,6 +44,12 @@ class AnnotateService:
         table_name: Optional[str] = None,
         sample_rows: int = 5,
     ) -> AsyncGenerator[AnnotateEvent, None]:
+        if not ai_data_sharing_allowed():
+            yield AnnotateErrorEvent(
+                type="annotate_error",
+                message="AI is off. Turn on AI in Settings to write schema descriptions.",
+            )
+            return
         # Validity, not presence: a present-but-rejected key would otherwise
         # march every table and report a false success (rdst-0yy.11). The ping
         # is blocking, so offload it off the event loop.

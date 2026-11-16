@@ -20,7 +20,7 @@ except ImportError:
 from pathlib import Path
 
 from shared.constants import rdst_data_dir, rdst_instance_suffix
-from shared.persistence import update_json, write_text
+from shared.persistence import delete_file, ensure_directory, update_json, write_text
 from shared.secret_store_service import SecretStoreService
 
 
@@ -50,6 +50,30 @@ def _token_key(workspace_id: str, kind: str, version: str | None = None) -> str:
 
 def _credential_version() -> str:
     return uuid.uuid4().hex
+
+
+def stored_credential_secret_names() -> list[str]:
+    """List keyring entries referenced by RDST-owned Slack metadata."""
+    path = credentials_file()
+    if not path.exists():
+        return []
+    with open(path, "r", encoding="utf-8") as file_obj:
+        data = json.load(file_obj)
+    if not isinstance(data, dict):
+        raise RuntimeError("Slack credential metadata is not an object")
+
+    names: set[str] = set()
+    for workspace_id, entry in data.items():
+        if not isinstance(workspace_id, str) or not isinstance(entry, dict):
+            raise RuntimeError("Slack credential metadata contains an invalid entry")
+        version = entry.get("secret_version")
+        if version is not None and not isinstance(version, str):
+            raise RuntimeError("Slack credential metadata contains an invalid version")
+        for kind in ("bot", "app"):
+            names.add(_token_key(workspace_id, kind))
+            if version:
+                names.add(_token_key(workspace_id, kind, version))
+    return sorted(names)
 
 
 @dataclass
@@ -118,8 +142,8 @@ class SlackCredentials:
 
 def ensure_slack_dirs() -> None:
     """Create Slack config directories if they don't exist."""
-    slack_config_dir().mkdir(parents=True, exist_ok=True)
-    slack_agents_dir().mkdir(parents=True, exist_ok=True)
+    ensure_directory(slack_config_dir())
+    ensure_directory(slack_agents_dir())
 
 
 def load_credentials(workspace_id: str | None = None) -> dict[str, SlackCredentials]:
@@ -209,13 +233,24 @@ def save_credentials(credentials: SlackCredentials) -> None:
     Args:
         credentials: The credentials to save.
     """
-    ensure_slack_dirs()
-
     creds_file = credentials_file()
 
     store = _secret_store()
     if not store.is_available():
         raise RuntimeError("Slack credentials require an available secure keyring")
+
+    previous_names: list[str] = []
+    if creds_file.exists():
+        with open(creds_file, "r", encoding="utf-8") as file_obj:
+            existing = json.load(file_obj)
+        previous = existing.get(credentials.workspace_id) if isinstance(existing, dict) else None
+        if isinstance(previous, dict):
+            previous_version = previous.get("secret_version")
+            previous_names = [
+                _token_key(credentials.workspace_id, kind, previous_version)
+                for kind in ("bot", "app")
+            ]
+            store.track_existing_secrets(previous_names)
 
     version = _credential_version()
     for kind, token in (("bot", credentials.bot_token), ("app", credentials.app_token)):
@@ -236,6 +271,11 @@ def save_credentials(credentials: SlackCredentials) -> None:
         return existing
 
     update_json(creds_file, update)
+
+    if previous_names:
+        cleanup = store.clear_required(previous_names, clear_environment="none")
+        if cleanup.get("errors"):
+            raise RuntimeError("Failed to remove superseded Slack credentials")
 
 
 def load_agent_config(agent_name: str) -> AgentConfig | None:
@@ -265,8 +305,6 @@ def save_agent_config(config: AgentConfig) -> None:
     Args:
         config: The agent configuration to save.
     """
-    ensure_slack_dirs()
-
     agent_file = slack_agents_dir() / f"{config.name}.toml"
 
     if tomli_w is None:
@@ -317,6 +355,6 @@ def delete_agent(agent_name: str) -> bool:
     """
     agent_file = slack_agents_dir() / f"{agent_name}.toml"
     if agent_file.exists():
-        agent_file.unlink()
+        delete_file(agent_file)
         return True
     return False

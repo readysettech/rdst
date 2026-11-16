@@ -427,7 +427,7 @@ def health_findings(day: dict[str, Any]) -> list[dict[str, Any]]:
             for check in (day.get("overview") or {}).get("checks") or []]
 
 
-def _computed_narrative(context: dict[str, Any]) -> dict[str, Any]:
+def _computed_narrative(context: dict[str, Any], ai_off: bool = False) -> dict[str, Any]:
     top = context["top_queries"]
     health = context["health_collectors"]
     checks = []
@@ -443,7 +443,8 @@ def _computed_narrative(context: dict[str, Any]) -> dict[str, Any]:
                        "note": str(health["collection_error"])})
     change = context["deltas"]["24h"]["database"]["total_ms"]
     return ReportNarrative(
-        summary="The measured report is ready. The written summary retries shortly.",
+        summary=("The measured report is ready. Turn on AI for the written summary." if ai_off
+                 else "The measured report is ready. The written summary retries shortly."),
         fix_first=[FixFirst(query_key=row["query_key"], title="Review the deep analysis",
                             why=f"{row['db_time_share'] * 100:.1f}% of database time in the last 24 hours",
                             action="Review deep analysis") for row in top[:5]],
@@ -733,7 +734,7 @@ async def run_report(target: str, trigger: Literal["nightly", "user"], *,
     monotonic = monotonic or (time.monotonic if clock is time.time else clock)
     store = store or MonitorStore()
     now = int(clock())
-    if trigger == "nightly" and not await asyncio.to_thread(database_limit._signed_in):
+    if trigger == "nightly" and not await asyncio.to_thread(database_limit.can_run_ai):
         database_limit.hold_signed_out(store, target, now)
         if claimed_run is not None:
             await asyncio.to_thread(store.update_report, claimed_run["id"], state="cancelled",
@@ -792,11 +793,15 @@ async def run_report(target: str, trigger: Literal["nightly", "user"], *,
                   f"{'query' if len(keys) == 1 else 'queries'} with the most database time",
                   done=len(keys), total=len(keys))
         step = "analyses"
-        await asyncio.to_thread(enqueue_for_report, target, keys, store=store, now=now)
-        if wake_queue:
-            wake_queue()
+        # With AI off no deep analysis can run, so the report reads the plans and doesn't wait.
+        ai_off = await asyncio.to_thread(database_limit.ai_declined)
+        if not ai_off:
+            await asyncio.to_thread(enqueue_for_report, target, keys, store=store, now=now)
+            if wake_queue:
+                wake_queue()
         await asyncio.to_thread(emit.step, "analyses", "running", f"0 of {len(keys)}", done=0, total=len(keys))
-        deadline = monotonic() + (USER_WAIT_SECONDS if trigger == "user" else NIGHTLY_WAIT_SECONDS)
+        deadline = monotonic() + (0 if ai_off else USER_WAIT_SECONDS if trigger == "user"
+                                  else NIGHTLY_WAIT_SECONDS)
         latest: dict[str, dict[str, Any]] = {}
         shown: dict[str, tuple] = {}
         progress_done = -1
@@ -842,9 +847,10 @@ async def run_report(target: str, trigger: Literal["nightly", "user"], *,
             await sleep(min(1.0, max(0.0, deadline - monotonic())))
         pending = [key for key in keys if key not in ready and key not in terminal]
         if pending:
+            queries = f"{len(pending)} {'query' if len(pending) == 1 else 'queries'}"
             await asyncio.to_thread(emit, {"type": "budget", "message": (
-                f"Finishing with plans only for {len(pending)} "
-                f"{'query' if len(pending) == 1 else 'queries'} - full analyses continue "
+                f"AI is off, so the report reads plans only for {queries}" if ai_off else
+                f"Finishing with plans only for {queries} - full analyses continue "
                 "in the background")})
         analyses = []
         provisional_keys = []
@@ -857,14 +863,17 @@ async def run_report(target: str, trigger: Literal["nightly", "user"], *,
                 logger.warning("Stored analysis unavailable for %s", key, exc_info=True)
                 detail = None
             if detail is None:
-                provisional_keys.append(key)
+                # The report stays provisional only while a full analysis is on its way.
+                if not ai_off:
+                    provisional_keys.append(key)
                 detail = {"query_key": key, "provisional": True,
                           "explain": await _fallback_explain(target, key,
                                                               texts.get(key, ""), explain)}
                 if key in pending:
                     await asyncio.to_thread(emit, {"type": "analysis", "key": key, "state": "provisional",
                           "display_name": names[key],
-                          "reason": "Full analysis continues in the background.",
+                          "reason": ("AI is off, so only the plan was read." if ai_off
+                                     else "Full analysis continues in the background."),
                           "result_line": ("Plan read with EXPLAIN"
                                           if "plan" in detail["explain"] else None),
                           "duration_s": None, "phase": None, "error_kind": None})
@@ -917,6 +926,8 @@ async def run_report(target: str, trigger: Literal["nightly", "user"], *,
             operation="monitor_report" if trigger == "nightly" else None,
         ):
             try:
+                if database_limit.ai_declined():
+                    raise RuntimeError("AI_OFF: AI is off on this computer")
                 if trigger == "nightly" and database_limit.paused(store, target, int(clock())):
                     # Local-only, a used-up allowance or a recent refusal: no model call.
                     raise RuntimeError("AI_PAUSED: AI monitoring is paused for this database")
@@ -925,8 +936,14 @@ async def run_report(target: str, trigger: Literal["nightly", "user"], *,
                 narrative_error = None
             except Exception as exc:
                 logger.warning("Report narrative unavailable for %s: %s", target, exc)
-                narrative = _computed_narrative(context)
                 narrative_error = str(exc)
+                # AI turned off while the summary was being written refuses the model call:
+                # that report waits for AI too, rather than promising a retry.
+                ai_off = narrative_error.startswith("AI_OFF") or \
+                    await asyncio.to_thread(database_limit.ai_declined)
+                if ai_off and not narrative_error.startswith("AI_OFF"):
+                    narrative_error = f"AI_OFF: {narrative_error}"
+                narrative = _computed_narrative(context, ai_off=ai_off)
                 if database_limit.is_limit_error(exc):
                     await asyncio.to_thread(database_limit.file_refusal, store, target,
                                             int(clock()))
@@ -948,7 +965,9 @@ async def run_report(target: str, trigger: Literal["nightly", "user"], *,
                   "provisional_query_keys": provisional_keys,
                   "digest": await _to_thread(target, digest, store, target, now),
                   "narrative_error": narrative_error,
-                  "narrative_retry_at": now + 900 if narrative_error else None,
+                  # With AI off nothing retries until it is back on, so no retry time is shown.
+                  "narrative_retry_at": (now + 900 if narrative_error
+                                         and not narrative_error.startswith("AI_OFF") else None),
                   "narrative_retry_count": 0}
         finished_at = int(clock())
         await asyncio.to_thread(store.update_report, run_id, report=report, provisional=bool(provisional_keys),
@@ -968,6 +987,8 @@ async def run_report(target: str, trigger: Literal["nightly", "user"], *,
         for section in SECTIONS:
             await asyncio.to_thread(emit, {"type": "section", "section": section, "state": "ready"})
         await asyncio.to_thread(emit.step, "narrative", "done", "Report written" if narrative_error is None else
+                  "Measured sections ready; turn on AI for the written summary"
+                  if narrative_error.startswith("AI_OFF") else
                   "Measured sections ready; the written summary retries shortly")
         await asyncio.to_thread(emit, {"type": "run", "state": "done", "started_at": started_at,
               "elapsed_s": max(0, finished_at - started_at)})
@@ -1117,7 +1138,7 @@ def present_report(row: dict[str, Any], store: MonitorStore, *,
                         "AND max_conns IS NOT NULL ORDER BY bucket_start DESC LIMIT 1",
                         (row["target"],))
     page = report_v2.view(row, report if isinstance(report, dict) else None, body, store,
-                          signed_in=database_limit._signed_in(), fixed=fixed,
+                          signed_in=database_limit.can_run_ai(), fixed=fixed,
                           engine=str((day or {}).get("engine") or "postgresql"),
                           max_conns=limits[0]["max_conns"] if limits else None,
                           detailed=view == "detailed")
@@ -1381,7 +1402,7 @@ class ReportScheduler:
                 plan.append(("retry", (row["id"], row["target"], report)))
         local = datetime.fromtimestamp(now)
         for target in self.store.monitored_targets():
-            if not database_limit._signed_in():
+            if not database_limit.can_run_ai():
                 database_limit.hold_signed_out(self.store, target, now)
                 continue
             nightly = self._nightly(target, now, local)

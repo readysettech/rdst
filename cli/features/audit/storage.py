@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -12,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from shared.constants import rdst_data_dir
-from shared.persistence import write_json
+from shared.persistence import delete_file, write_json
 
 from .models import WorkloadRun
 
@@ -36,7 +35,6 @@ class AuditStorage:
         """Persist a run. `extra` carries audit fields that live alongside the
         WorkloadRun shape in the saved JSON."""
         target_dir = self.base_dir / run.target_name
-        target_dir.mkdir(parents=True, exist_ok=True)
         path = target_dir / f"{run.run_id}.json"
         data = asdict(run)
         if extra:
@@ -103,7 +101,7 @@ class AuditStorage:
     def delete_run(self, target: str, run_id: str) -> bool:
         path = self.base_dir / target / f"{run_id}.json"
         if path.exists():
-            os.unlink(path)
+            delete_file(path)
             return True
         return False
 

@@ -77,6 +77,7 @@ def judge_summary(outcome: str, items: int, dry_run: bool) -> tuple[str, str]:
         "daily_cap": ("skipped", "Daily limit reached"),
         "backoff": ("skipped", "Waiting to retry after an error"),
         "local_only": ("skipped", "Local monitoring only, AI checks are off"),
+        "ai_off": ("skipped", "AI is off, nothing checked"),
         "allowance": ("skipped", "AI trial limit reached, retrying later"),
         "error": ("failed", "The AI check didn't complete"),
         "filing_error": ("failed", "Filing the result failed"),

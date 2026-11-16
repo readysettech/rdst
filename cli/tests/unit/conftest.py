@@ -16,6 +16,7 @@ from fastapi import Request
 from httpx import ASGITransport, AsyncClient, Response
 from keyring.backend import KeyringBackend
 
+from shared import secret_store_service
 from shared.secret_store_service import SecretStoreService
 
 
@@ -123,7 +124,7 @@ class _InMemoryKeyring(KeyringBackend):
 
 
 @pytest.fixture(autouse=True)
-def _isolated_keyring():
+def _isolated_keyring(tmp_path, monkeypatch):
     """Route all keyring access to an in-memory backend for every test.
 
     Also resets `SecretStoreService._probe_cache`, which caches backend
@@ -136,6 +137,13 @@ def _isolated_keyring():
 
     saved_cache = dict(SecretStoreService._probe_cache)
     SecretStoreService._probe_cache.clear()
+    SecretStoreService._environment_owners.clear()
+    SecretStoreService._environment_originals.clear()
+    monkeypatch.setattr(
+        secret_store_service,
+        "_secret_inventory_path",
+        lambda: tmp_path / ".rdst" / "secret-inventory.json",
+    )
 
     try:
         yield backend

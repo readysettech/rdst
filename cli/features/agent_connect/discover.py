@@ -28,6 +28,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
+from shared.ai_data_consent import ai_data_sharing_allowed
 from shared.constants import rdst_data_dir, rdst_instance_suffix
 
 logger = logging.getLogger(__name__)
@@ -1385,6 +1386,11 @@ async def _drive(run: Run, command: list[str], cwd: str | None, log: Path) -> No
     resumed = run.session
     try:
         for attempt in range(2):
+            # A run asked for just as AI was turned off would miss stop_all's sweep: it doesn't
+            # start, and a retry doesn't either.
+            if not ai_data_sharing_allowed():
+                run.state, run.message = "cancelled", None
+                break
             run.process = await asyncio.create_subprocess_exec(
                 *command, cwd=cwd, stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,

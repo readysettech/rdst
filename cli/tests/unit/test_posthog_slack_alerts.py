@@ -447,7 +447,10 @@ class TestInstallationTracking:
         tm._rdst_dir = temp_rdst_dir
 
         with (
-            patch.object(Path, "write_text", side_effect=OSError("read-only home")),
+            patch(
+                "shared.telemetry_manager.write_text",
+                side_effect=OSError("read-only home"),
+            ),
             patch.object(tm, "_schedule_installation_tracking") as mock_schedule,
         ):
             assert tm.device_id
@@ -594,7 +597,7 @@ class TestEmailPersistence:
         mock_cfg.get_email.return_value = None  # no existing email
 
         with (
-            patch.object(tm, "deliver_with_stats", return_value=True) as mock_track,
+            patch.object(tm, "_capture_explicit_feedback") as capture_feedback,
             patch("shared.config.targets.create_targets_config") as mock_cfg_factory,
         ):
             mock_cfg_factory.return_value = mock_cfg
@@ -610,8 +613,7 @@ class TestEmailPersistence:
 
         mock_cfg.set_email.assert_called_once_with("feedback@example.com")
         mock_cfg.save.assert_called_once()
-        event, properties = mock_track.call_args.args
-        assert event == "feedback_submitted"
+        properties = capture_feedback.call_args.args[0]
         assert properties["reason"] == "Great tool!"
         assert properties["query_hash"] == "abc123"
         assert properties["query_sql"] == "SELECT 1"
@@ -624,11 +626,33 @@ class TestEmailPersistence:
         tm = TelemetryManager()
         tm._rdst_dir = temp_rdst_dir
 
-        with patch.object(tm, "deliver_with_stats") as mock_track:
+        with patch.object(tm, "_capture_explicit_feedback") as capture_feedback:
             with pytest.raises(ValueError, match="Email is required"):
                 tm.submit_feedback(reason="Anonymous feedback", email=None)
 
-        mock_track.assert_not_called()
+        capture_feedback.assert_not_called()
+
+    def test_ai_output_safety_report_can_be_anonymous(self, temp_rdst_dir):
+        from shared.telemetry_manager import TelemetryManager
+
+        tm = TelemetryManager()
+        tm._rdst_dir = temp_rdst_dir
+        tm._enabled = True
+
+        with patch.object(tm, "_capture_explicit_feedback") as capture_feedback:
+            tm.submit_feedback(
+                reason="Unsafe output",
+                email=None,
+                feedback_kind="ai_output",
+                feature="analyze",
+                ai_output="reviewed output",
+            )
+
+        properties = capture_feedback.call_args.args[0]
+        assert properties["has_email"] is False
+        assert properties["feedback_kind"] == "ai_output"
+        assert properties["feature"] == "analyze"
+        assert properties["ai_output"] == "reviewed output"
 
     def test_feedback_reports_an_unreachable_posthog(self, temp_rdst_dir, monkeypatch):
         from shared.telemetry_manager import TelemetryManager
@@ -648,45 +672,21 @@ class TestEmailPersistence:
         assert delivered is False
 
     def test_feedback_is_sent_before_it_is_reported_delivered(self, temp_rdst_dir, monkeypatch):
-        from types import SimpleNamespace
-
-        from shared import telemetry_manager
         from shared.telemetry_manager import TelemetryManager
-
-        captured = []
-
-        class SyncClient:
-            def __init__(self, *args, **kwargs):
-                assert kwargs["sync_mode"] is True
-
-            def capture(self, **kwargs):
-                captured.append(kwargs["event"])
-                return "event-uuid"
-
-            def shutdown(self):
-                pass
 
         tm = TelemetryManager()
         tm._rdst_dir = temp_rdst_dir
         tm._enabled = True
-        tm._initialized = True
-        tm._device_id = "test-device-id"
         tm._internal_user_result = False
         monkeypatch.setattr(tm, "POSTHOG_API_KEY", "phc_test")
-        monkeypatch.setattr(telemetry_manager, "_get_posthog",
-                            lambda: SimpleNamespace(Client=SyncClient))
-        with patch("shared.config.targets.create_targets_config"):
+        requests = MagicMock()
+        with (
+            patch("shared.telemetry_manager._get_requests", return_value=requests),
+            patch("shared.config.targets.create_targets_config"),
+        ):
             assert tm.submit_feedback(reason="Hi", email="a@example.com") is True
-        assert captured[-1] == "feedback_submitted"
-
-    def test_feedback_is_not_claimed_sent_with_telemetry_off(self, temp_rdst_dir):
-        from shared.telemetry_manager import TelemetryManager
-
-        tm = TelemetryManager()
-        tm._rdst_dir = temp_rdst_dir
-        tm._enabled = False
-        with pytest.raises(RuntimeError, match="telemetry is turned off"):
-            tm.submit_feedback(reason="Hello", email="a@example.com")
+        batch = requests.post.call_args.kwargs["json"]["batch"]
+        assert batch[0]["event"] == "feedback_submitted"
 
 
 class TestTrialServiceDisplayName:

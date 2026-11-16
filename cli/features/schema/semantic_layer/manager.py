@@ -7,9 +7,9 @@ Provides the main interface for other rdst components to access domain knowledge
 
 from pathlib import Path
 from typing import Optional
-import os
 
 from shared.constants import rdst_semantic_layer_dir
+from shared.persistence import delete_file
 
 from features.schema.semantic_models import (
     SemanticLayer,
@@ -130,7 +130,7 @@ class SemanticLayerManager:
         if not path.exists():
             return False
 
-        path.unlink()
+        delete_file(path)
         if target in self._cache:
             del self._cache[target]
 

@@ -12,7 +12,7 @@ import re
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from shared.api.email import normalized_email
 from shared.api.guards import require_local_request
@@ -32,14 +32,26 @@ _TRANSCRIPT_CHARS = 20_000
 class ReportRequest(BaseModel):
     """Request body for submitting feedback."""
 
-    reason: str  # Required - feedback text
+    reason: str = Field(min_length=1, max_length=10_000)
     sentiment: ReportSentiment = "neutral"
     kind: ReportKind = "feedback"
     transcript: Optional[str] = Field(None, max_length=400_000)  # Help chat that led here
-    query_hash: Optional[str] = None  # Optional - reference a specific query
-    email: str  # Required - identifies the user in PostHog and Slack notifications
+    query_hash: Optional[str] = Field(default=None, max_length=128)
+    email: Optional[str] = Field(default=None, max_length=320)
     include_query: bool = False  # Whether to include raw SQL
     include_plan: bool = False  # Whether to include execution plan
+    feedback_kind: Literal["general", "ai_output"] = "general"
+    feature: Optional[str] = Field(default=None, max_length=64)
+    ai_output: Optional[str] = Field(default=None, max_length=50_000)
+
+    @model_validator(mode="after")
+    def validate_feedback(self):
+        self.reason = self.reason.strip()
+        if not self.reason:
+            raise ValueError("Feedback text is required")
+        if self.feedback_kind == "general" and not (self.email or "").strip():
+            raise ValueError("Email is required for general feedback")
+        return self
 
 
 class ReportResponse(BaseModel):
@@ -50,20 +62,18 @@ class ReportResponse(BaseModel):
 
 
 @router.post("/report")
-async def submit_report(
-    http_request: Request, request: ReportRequest
-) -> ReportResponse:
+async def submit_report(request: Request, report: ReportRequest) -> ReportResponse:
     """
     Submit user feedback.
 
     Feedback is sent to PostHog for analytics and to Slack through a PostHog workflow.
     If a query_hash is provided, the query context is loaded from the registry.
     """
-    require_local_request(http_request)
+    require_local_request(request)
 
-    # Keep every accepted feedback event attributable before it reaches
-    # PostHog (and the Slack workflow fed by that event).
-    email = normalized_email(request.email)
+    # General feedback is attributable for follow-up. AI-output safety reports
+    # may be anonymous so identity collection does not block abuse reporting.
+    email = normalized_email(report.email) if report.email else ""
 
     try:
         from shared.telemetry import telemetry
@@ -73,40 +83,49 @@ async def submit_report(
         plan_json = None
         suggestion_text = None
 
-        if request.query_hash:
+        if report.query_hash:
             query_sql, plan_json, suggestion_text = _load_query_context(
-                request.query_hash
+                report.query_hash
             )
 
-        reason = request.reason
-        if request.kind in _KIND_LABELS:
-            reason = f"[{_KIND_LABELS[request.kind]}] {reason}"
-        if request.transcript:
+        reason = report.reason
+        if report.kind in _KIND_LABELS:
+            reason = f"[{_KIND_LABELS[report.kind]}] {reason}"
+        if report.transcript:
             # The end of a long chat is what led to the note.
-            transcript = request.transcript[-_TRANSCRIPT_CHARS:]
+            transcript = report.transcript[-_TRANSCRIPT_CHARS:]
             reason = f"{reason}\n\n--- Conversation ---\n{transcript}"
 
         # Delivered before replying, so the dialog never thanks for feedback still here.
         delivered = await asyncio.to_thread(
             telemetry.submit_feedback,
             reason=reason,
-            kind=request.kind,
-            query_hash=request.query_hash,
+            kind=report.kind,
+            query_hash=report.query_hash,
             query_sql=query_sql,
             plan_json=plan_json,
             suggestion_text=suggestion_text,
-            sentiment=request.sentiment,
+            sentiment=report.sentiment,
             email=email,
-            include_query=request.include_query,
-            include_plan=request.include_plan,
-            flags_used=["web"],  # Indicate this came from web UI
+            include_query=report.include_query,
+            include_plan=report.include_plan,
+            feedback_kind=report.feedback_kind,
+            feature=report.feature,
+            ai_output=report.ai_output,
+            flags_used=["web"],
         )
         if not delivered:
             return ReportResponse(success=False, error=FEEDBACK_NOT_SENT)
         return ReportResponse(success=True)
 
-    except Exception as e:
-        return ReportResponse(success=False, error=str(e))
+    except ValueError as exc:
+        # Validation messages are written for the person sending the report.
+        return ReportResponse(success=False, error=str(exc))
+    except Exception:
+        return ReportResponse(
+            success=False,
+            error="PostHog did not accept the feedback report. Please try again.",
+        )
 
 
 class ChatMessage(BaseModel):

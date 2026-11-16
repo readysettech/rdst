@@ -1135,10 +1135,6 @@ class QueryRegistry:
         """
         self._write_guard = guard
 
-    def _ensure_directory(self) -> None:
-        """Ensure the registry directory exists."""
-        self.registry_path.parent.mkdir(parents=True, exist_ok=True)
-
     def load(self) -> None:
         """Load queries from the backing store into memory.
 
