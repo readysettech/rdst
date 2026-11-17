@@ -53,6 +53,27 @@ vi.mock('@/lib/monitor/hooks', async (original) => ({
   }),
 }))
 
+// A build that asks before AI (`required`), and the user's answer so far.
+const aiConsent = vi.hoisted(() => ({
+  required: false,
+  consent: 'granted' as 'granted' | 'denied' | 'pending',
+  decide: vi.fn(),
+}))
+vi.mock('@/lib/aiConsent', () => ({
+  useAiConsent: () => ({
+    required: aiConsent.required,
+    consent: aiConsent.consent,
+    off: aiConsent.required && aiConsent.consent !== 'granted',
+    declined: aiConsent.required && aiConsent.consent === 'denied',
+    loading: false,
+    failed: false,
+    decide: aiConsent.decide,
+    deciding: false,
+    error: null,
+    resetError: () => {},
+  }),
+}))
+
 vi.mock('@/lib/accountStatus', () => ({
   useSignedOut: () => !account.signedIn,
 }))
@@ -75,6 +96,35 @@ vi.mock('@/components/TrialRegistrationDialog', () => ({
         </button>
         <button type="button" onClick={onClose}>
           Close sign-in
+        </button>
+      </div>
+    ) : null,
+}))
+
+// Saving a key is the key dialog's own business; here it saves on a click.
+vi.mock('@/components/AiProviderGate', () => ({
+  AnthropicKeyDialog: ({
+    isOpen,
+    onClose,
+    onSuccess,
+  }: {
+    isOpen: boolean
+    onClose: () => void
+    onSuccess: () => void
+  }) =>
+    isOpen ? (
+      <div data-testid="key-dialog">
+        <button
+          type="button"
+          onClick={() => {
+            onSuccess()
+            onClose()
+          }}
+        >
+          Save key
+        </button>
+        <button type="button" onClick={onClose}>
+          Close key
         </button>
       </div>
     ) : null,
@@ -126,6 +176,7 @@ const { EnableMonitoringDialog } = await import('./EnableMonitoringDialog')
 
 beforeEach(() => {
   mutate.mockReset()
+  aiConsent.decide = vi.fn().mockResolvedValue(undefined)
   vi.mocked(trackEvent).mockClear()
   prereq.recheck = vi.fn().mockResolvedValue(undefined)
   FakeEventSource.last = null
@@ -140,6 +191,8 @@ afterEach(() => {
   account.limit = {}
   prereq.phase = 'ready'
   saved.value = {}
+  aiConsent.required = false
+  aiConsent.consent = 'granted'
 })
 
 it('says what monitoring reads and runs and turns it on with one action', () => {
@@ -364,17 +417,20 @@ it('signed in, turns on with one action and asks for no sign-in', () => {
   )
 })
 
-it('signed out, must sign up to turn monitoring on, with no way around it', () => {
+it('signed out without a key, signs up or adds a key to turn monitoring on', () => {
   account.signedIn = false
   renderWithClient(
     <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
   )
   expect(screen.getByTestId('monitoring-signin-gate').textContent).toContain(
-    'Monitoring runs on a free Readyset account.'
+    "Monitoring's AI comes with a free Readyset account."
   )
   expect(
     screen.queryByRole('button', { name: 'Turn on monitoring' })
   ).toBeNull()
+  expect(
+    screen.getByRole('button', { name: 'use your own Anthropic key' })
+  ).toBeTruthy()
   expect(
     screen.queryByRole('button', { name: 'Turn on without AI' })
   ).toBeNull()
@@ -383,7 +439,7 @@ it('signed out, must sign up to turn monitoring on, with no way around it', () =
   })
 })
 
-it('signed out, signing in turns monitoring on with the choices made', () => {
+it('signed out, signing in turns monitoring on with the choices made', async () => {
   account.signedIn = false
   renderWithClient(
     <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
@@ -402,9 +458,11 @@ it('signed out, signing in turns monitoring on with the choices made', () => {
   expect(trackEvent).toHaveBeenCalledWith('monitoring_signin_gate_choice', {
     choice: 'signed_in_after',
   })
-  expect(mutate).toHaveBeenCalledWith(
-    { enabled: true, deep_analysis: true, analysis_mode: 'plans_only' },
-    expect.anything()
+  await waitFor(() =>
+    expect(mutate).toHaveBeenCalledWith(
+      { enabled: true, deep_analysis: true, analysis_mode: 'plans_only' },
+      expect.anything()
+    )
   )
   expect(screen.queryByTestId('sign-in-dialog')).toBeNull()
 })
@@ -450,4 +508,120 @@ it("with the account's AI slots full, says deep analysis waits for a free one", 
       'Deep analysis is on. Change it any time in Monitoring settings.'
     )
   ).toBeNull()
+})
+
+it('asking first, says what AI sees and turns monitoring on with AI from one button', async () => {
+  aiConsent.required = true
+  aiConsent.consent = 'pending'
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  expect(screen.getByTestId('ai-disclosure').textContent).toContain(
+    'SQL text and query plans'
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Allow AI and turn on' }))
+  await waitFor(() => expect(mutate).toHaveBeenCalledOnce())
+  expect(aiConsent.decide).toHaveBeenCalledWith('granted')
+  expect(mutate.mock.calls[0][0]).toMatchObject({ enabled: true })
+})
+
+it('asking first, continuing without AI says what stops before turning monitoring on', async () => {
+  aiConsent.required = true
+  aiConsent.consent = 'pending'
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Continue without AI' }))
+  expect(
+    screen.getByRole('heading', { name: 'Monitor without AI?' })
+  ).toBeTruthy()
+  expect(screen.getByTestId('ai-off-comparison').textContent).toContain(
+    'Fixes and index suggestions'
+  )
+  expect(mutate).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+  expect(screen.getByRole('heading', { name: 'Monitor reports' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Continue without AI' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Monitor without AI' }))
+  await waitFor(() => expect(mutate).toHaveBeenCalledOnce())
+  expect(aiConsent.decide).toHaveBeenCalledWith('denied')
+})
+
+it('asking first and signed out, allows AI once the sign-in finishes', async () => {
+  aiConsent.required = true
+  aiConsent.consent = 'pending'
+  account.signedIn = false
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Allow AI and sign in' }))
+  expect(await screen.findByTestId('sign-in-dialog')).toBeTruthy()
+  expect(aiConsent.decide).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Finish sign-in' }))
+  expect(aiConsent.decide).toHaveBeenCalledWith('granted')
+  await waitFor(() => expect(mutate).toHaveBeenCalledOnce())
+})
+
+it('asking first and signed out, closing the sign-in leaves the question open', async () => {
+  aiConsent.required = true
+  aiConsent.consent = 'pending'
+  account.signedIn = false
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Allow AI and sign in' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Close sign-in' }))
+  expect(aiConsent.decide).not.toHaveBeenCalled()
+  expect(mutate).not.toHaveBeenCalled()
+  expect(
+    screen.getByRole('button', { name: 'Allow AI and sign in' })
+  ).toBeTruthy()
+  expect(
+    screen.getByRole('button', { name: 'Continue without AI' })
+  ).toBeTruthy()
+})
+
+it('asking first and signed out, an own key allows AI and turns monitoring on', async () => {
+  aiConsent.required = true
+  aiConsent.consent = 'pending'
+  account.signedIn = false
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  expect(screen.getByTestId('monitoring-own-key-note').textContent).toContain(
+    'Slow-query alerts still need a free Readyset account.'
+  )
+  fireEvent.click(
+    screen.getByRole('button', { name: 'use your own Anthropic key' })
+  )
+  expect(aiConsent.decide).not.toHaveBeenCalled()
+  fireEvent.click(await screen.findByRole('button', { name: 'Save key' }))
+  expect(aiConsent.decide).toHaveBeenCalledWith('granted')
+  await waitFor(() => expect(mutate).toHaveBeenCalledOnce())
+  expect(screen.queryByTestId('sign-in-dialog')).toBeNull()
+})
+
+it('signed out with an own key, turns monitoring on with no sign-in', () => {
+  account.signedIn = false
+  account.limit = { own_key: true }
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  expect(screen.queryByTestId('monitoring-signin-gate')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Turn on monitoring' }))
+  expect(mutate).toHaveBeenCalledOnce()
+})
+
+it('with AI turned off, monitors without it and needs no sign-in', () => {
+  aiConsent.required = true
+  aiConsent.consent = 'denied'
+  account.signedIn = false
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  expect(screen.getByTestId('monitoring-ai-off')).toBeTruthy()
+  expect(screen.queryByTestId('monitoring-signin-gate')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Turn on monitoring' }))
+  expect(mutate).toHaveBeenCalledOnce()
+  expect(aiConsent.decide).not.toHaveBeenCalled()
 })

@@ -1,0 +1,12 @@
+{
+  "direct": {
+    "consent": "opt_out",
+    "startAtLogin": "on",
+    "hostedReports": "disabled"
+  },
+  "microsoft-store": {
+    "consent": "opt_in",
+    "startAtLogin": "ask",
+    "hostedReports": "disabled"
+  }
+}

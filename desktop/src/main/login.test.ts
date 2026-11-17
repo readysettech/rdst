@@ -3,7 +3,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { getStartAtLogin, isHiddenLaunch, setStartAtLogin } from './login.js'
+import {
+  getStartAtLogin,
+  isHiddenLaunch,
+  setStartAtLogin,
+  withLoginAsk,
+} from './login.js'
 
 const temporary: string[] = []
 afterEach(() => {
@@ -97,5 +102,14 @@ describe('start at login', () => {
       note: 'Start at login is unavailable in AppImage builds.',
     })
     expect(setStartAtLogin(app, true, 'linux', env).available).toBe(false)
+  })
+
+  it('asks only in a build that asks first, until answered, where it can start at login', () => {
+    const status = { enabled: false, available: true }
+    expect(withLoginAsk(status, true, false).ask).toBe(true)
+    expect(withLoginAsk(status, true, true).ask).toBe(false)
+    expect(withLoginAsk(status, false, false).ask).toBe(false)
+    const unavailable = { enabled: false, available: false }
+    expect(withLoginAsk(unavailable, true, false).ask).toBe(false)
   })
 })

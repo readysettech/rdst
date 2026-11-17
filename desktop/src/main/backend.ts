@@ -119,6 +119,8 @@ export interface StartBackendOptions {
   keyservice?: string
   /** The packaged build's instance ('' for production) and the URL scheme the shell registered. */
   identity?: BackendIdentity
+  /** The build's distribution rules; omitted, hosted reports stay disabled. */
+  distribution?: BackendDistribution
   onPhase?: (phase: StartupPhase, store?: string) => void
   /** Called once the process exists, so a quit during startup can stop it. */
   onSpawn?: (handle: BackendHandle) => void
@@ -214,15 +216,25 @@ export interface BackendIdentity {
   protocol: string
 }
 
+/** What the build's distribution (distributions.json) sets for the backend. */
+export interface BackendDistribution {
+  /** 'opt_in': diagnostics and AI data sharing wait for the user's yes. */
+  consent: string
+  hostedReports: boolean
+}
+
 export function backendEnvironment(
   base: NodeJS.ProcessEnv = process.env,
   keyservice?: string,
-  identity?: BackendIdentity
+  identity?: BackendIdentity,
+  distribution?: BackendDistribution
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {
     ...base,
     PATH: backendExecutablePath(base.PATH),
     RDST_DESKTOP: '1',
+    RDST_HOSTED_REPORTS: distribution?.hostedReports ? 'enabled' : 'disabled',
+    ...(distribution ? { RDST_CONSENT: distribution.consent } : {}),
     ...(keyservice && !base.RDST_KEYSERVICE_URL
       ? { RDST_KEYSERVICE_URL: keyservice }
       : {}),
@@ -488,7 +500,8 @@ export async function startBackend(
   const environment = backendEnvironment(
     process.env,
     options.keyservice,
-    options.identity
+    options.identity,
+    options.distribution
   )
   if (options.token) environment.RDST_API_TOKEN = options.token
   let listening = false

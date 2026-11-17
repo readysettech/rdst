@@ -5,6 +5,7 @@ import { Text } from '@rs/ui-new/text'
 import { type ReactNode, useEffect } from 'react'
 import { tourPending } from '../features/onboarding/onboardingState'
 import { TourEntry } from '../features/onboarding/TourEntry'
+import { useAiConsent } from '../lib/aiConsent'
 import { type OnboardingStep, trackEventOnce } from '../lib/analytics'
 import { scopedKey } from '../lib/installationScope'
 
@@ -62,6 +63,14 @@ export function GetStarted({
 }) {
   const current = STEPS.findIndex((item) => item.key === step)
   useStepViewed(step)
+  // A build that asks about AI asks when monitoring turns on, and with AI off there's no
+  // sign-in to mention.
+  const ai = useAiConsent()
+  const monitorCaption = ai.declined
+    ? 'AI is off, so RDST shows charts and alerts for connections, stuck queries and locks.'
+    : ai.required && ai.consent === 'pending'
+      ? 'RDST asks about AI there. It checks every query each minute, and with AI your first fixes show up in about 10 minutes.'
+      : null
   return (
     <div className="max-w-2xl" data-testid="get-started">
       <Text as="h2" level="headline-2" className="text-content-layout-1">
@@ -113,7 +122,11 @@ export function GetStarted({
                   {item.title}
                 </Text>
                 <Text level="caption" className="text-content-layout-3">
-                  {done && doneCaption ? doneCaption : item.caption}
+                  {done && doneCaption
+                    ? doneCaption
+                    : item.key === 'monitor' && monitorCaption
+                      ? monitorCaption
+                      : item.caption}
                 </Text>
               </div>
               {active && action}
@@ -190,8 +203,9 @@ export function claimFirstRunPopup(key: 'add-database'): boolean {
   const optIn = (window as { __RDST_FIRST_RUN_POPUPS__?: boolean })
     .__RDST_FIRST_RUN_POPUPS__
   if (navigator.webdriver && !optIn) return false
-  // A new install sees the tour first; finishing it opens this dialog.
-  if (tourPending()) return false
+  // A new install sees the tour first; finishing it opens this dialog. It never opens over
+  // another dialog, such as the Store build's consent questions.
+  if (tourPending() || document.querySelector('[role="dialog"]')) return false
   try {
     if (sessionStorage.getItem(firstRunPopupKey(key))) return false
   } catch {

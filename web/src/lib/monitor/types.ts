@@ -1459,13 +1459,14 @@ export interface MonitorWork {
 }
 
 /** Why AI monitoring isn't on: signed out, the Key Service unreachable or erroring, every
- * slot in use, or the account's AI trial allowance used up. */
+ * slot in use, the account's AI trial allowance used up, or the user turned AI off. */
 export type AiMonitoringReason =
   | 'signed_out'
   | 'unreachable'
   | 'service_error'
   | 'limit'
   | 'quota'
+  | 'declined'
 
 /** AI monitoring on `in_use` of `limit` databases for the signed-in account. */
 export interface MonitoringLimit {

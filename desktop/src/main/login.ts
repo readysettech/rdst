@@ -8,6 +8,8 @@ export interface LoginStatus {
   enabled: boolean
   available: boolean
   note?: string
+  /** This build asks before starting at login, and the user hasn't answered yet. */
+  ask?: boolean
 }
 
 interface LoginApp {
@@ -92,6 +94,18 @@ export function setStartAtLogin(
     app.setLoginItemSettings({ openAtLogin: enabled, args: [HIDDEN_ARG] })
   }
   return getStartAtLogin(app, platform, env, identity)
+}
+
+/**
+ * Builds that ask first (the Microsoft Store build) leave start at login off until the
+ * user answers; the others turn it on at first run.
+ */
+export function withLoginAsk(
+  status: LoginStatus,
+  asksFirst: boolean,
+  answered: boolean
+): LoginStatus {
+  return { ...status, ask: asksFirst && status.available && !answered }
 }
 
 export function isHiddenLaunch(argv: string[] = process.argv): boolean {

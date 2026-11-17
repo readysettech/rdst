@@ -175,6 +175,8 @@ function heldStep(
     case 'limit':
     case 'quota':
       return { state: 'blocked', meta: 'AI is off for this database' }
+    case 'declined':
+      return { state: 'off', meta: 'AI is off' }
     case 'unreachable':
     case 'service_error':
     case 'not_started':

@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('rdstDesktop', {
     selectSshKey: (): Promise<string | null> =>
       ipcRenderer.invoke('ssh:select-key'),
   },
+  data: {
+    clearStorage: (): Promise<void> => ipcRenderer.invoke('data:clear-storage'),
+  },
   updates: {
     getState: (): Promise<UpdateStatePayload | null> =>
       ipcRenderer.invoke('updates:get-state'),
@@ -76,6 +79,9 @@ contextBridge.exposeInMainWorld('rdstDesktop', {
       return () => ipcRenderer.removeListener('desktop:backend-state', listener)
     },
   },
+  /** Runs that showed the window, counted up to the second. */
+  getWindowOpens: (): Promise<number> =>
+    ipcRenderer.invoke('desktop:get-window-opens'),
   getStartAtLogin: (): Promise<LoginStatus> =>
     ipcRenderer.invoke('desktop:get-start-at-login'),
   setStartAtLogin: (enabled: boolean): Promise<LoginStatus> =>

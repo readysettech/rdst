@@ -32,5 +32,6 @@ export function AiSetupNotice() {
 
 /** `true` when an AI-dependent action must not be offered as available. */
 export function useAiBlocked(): boolean {
-  return useAiGate().status === 'blocked'
+  const { status } = useAiGate()
+  return status === 'blocked' || status === 'off'
 }

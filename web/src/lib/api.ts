@@ -1,5 +1,6 @@
 import type { components as apiComponents } from './api.generated'
 import { api as typedClient } from './client'
+import { clearBrowserStorage, clearDesktopStorage } from './desktop'
 import { extractDetail, throwIfApiError, throwIfNotOk } from './httpError'
 import { setInstallationScope } from './installationScope'
 
@@ -747,9 +748,59 @@ export type TrialStatusResponse =
 export type TrialSimulationResponse =
   apiComponents['schemas']['TrialSimulationResponse']
 
+export type TelemetrySettingsResponse =
+  apiComponents['schemas']['TelemetrySettingsResponse']
+export type TelemetryConsent = TelemetrySettingsResponse['consent']
+
+export async function fetchTelemetrySettings(): Promise<TelemetrySettingsResponse> {
+  const { data, response } = await typedClient.GET('/api/settings/telemetry')
+  await throwIfNotOk(response, 'Failed to load telemetry settings')
+  if (!data) throw new Error('Missing response body')
+  return data
+}
+
+export async function setTelemetryConsent(
+  consent: Exclude<TelemetryConsent, 'pending'>
+): Promise<TelemetrySettingsResponse> {
+  const { data, response } = await typedClient.PUT('/api/settings/telemetry', {
+    body: { consent },
+  })
+  await throwIfNotOk(response, 'Failed to update telemetry settings')
+  if (!data) throw new Error('Missing response body')
+  return data
+}
+
+export type AIDataSettingsResponse =
+  apiComponents['schemas']['AIDataSettingsResponse']
+export type AIDataConsent = AIDataSettingsResponse['consent']
+
+export async function fetchAIDataSettings(): Promise<AIDataSettingsResponse> {
+  const { data, response } = await typedClient.GET('/api/settings/ai-data')
+  await throwIfNotOk(response, 'Failed to load AI data-sharing settings')
+  if (!data) throw new Error('Missing response body')
+  return data
+}
+
+export async function setAIDataConsent(
+  consent: Exclude<AIDataConsent, 'pending'>
+): Promise<AIDataSettingsResponse> {
+  const { data, response } = await typedClient.PUT('/api/settings/ai-data', {
+    body: { consent },
+  })
+  await throwIfNotOk(response, 'Failed to update AI data-sharing settings')
+  if (!data) throw new Error('Missing response body')
+  return data
+}
+
+// The app's own storage goes only after the backend's reset succeeds: a refused reset leaves
+// everything in place, as its message says.
 export async function resetLocalData(): Promise<void> {
-  const { response } = await typedClient.POST('/api/settings/reset-local-data')
-  await throwIfNotOk(response, 'Failed to remove local data')
+  const { error, response } = await typedClient.POST(
+    '/api/settings/reset-local-data'
+  )
+  throwIfApiError(response, error, 'Failed to remove local data')
+  clearBrowserStorage()
+  await clearDesktopStorage()
 }
 
 export async function registerTrial(

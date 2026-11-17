@@ -187,6 +187,17 @@ describe('one monitoring status for every surface', () => {
     })
   })
 
+  it('says AI is off when the user turned it off, with the way to turn it on', () => {
+    expect(
+      monitoringStatus({ enabled: true, ai: 'local', reason: 'declined' })
+    ).toMatchObject({
+      kind: 'local_only',
+      label: 'AI off',
+      reasonLabel: 'AI is off on this computer',
+      action: { kind: 'turn_on_ai', label: 'Turn on AI' },
+    })
+  })
+
   it('says signed out at once, and turns "starting" into a reason after a minute', () => {
     expect(
       monitoringStatus({

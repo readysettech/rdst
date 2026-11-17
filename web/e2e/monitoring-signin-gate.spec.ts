@@ -7,8 +7,9 @@ import {
   test,
 } from './fixtures'
 
-// Monitoring's AI runs through a Readyset account, so turning monitoring on signed out
-// asks for a sign-in right there. Turning on without AI stays possible, as the quieter way.
+// Monitoring's AI runs through a Readyset account or the user's own Anthropic key, so turning
+// monitoring on signed out without a key asks for a sign-in or the key right there. Turning on
+// without AI stays possible, as the quieter way.
 
 const TARGET = 'e2e-guard'
 const AUTH_URL = 'https://supabase.e2e.test/auth/v1'
@@ -49,6 +50,17 @@ async function mockSignInStart(page: Page) {
   )
 }
 
+/** Answer whether the user's own Anthropic key pays for AI, whatever this backend has. */
+async function mockOwnKey(page: Page, ownKey: boolean) {
+  await page.route('**/api/monitor/limit**', async (route) => {
+    const response = await route.fetch()
+    route.fulfill({
+      response,
+      json: { ...(await response.json()), own_key: ownKey },
+    })
+  })
+}
+
 const turnOnRequest = (request: Request) =>
   request.method() === 'PUT' &&
   request.url().endsWith(`/api/monitor/targets/${TARGET}/settings`) &&
@@ -78,15 +90,16 @@ test.afterEach(async ({ page }) => {
   })
 })
 
-test('signed out, turning on needs a Readyset account, with no way around it', async ({
+test('signed out, turning on needs a Readyset account or an own key', async ({
   page,
 }) => {
   await mockAccount(page)
+  await mockOwnKey(page, false)
   const dialog = await openTurnOn(page)
 
   const gate = dialog.getByTestId('monitoring-signin-gate')
   await expect(gate).toContainText(
-    'Monitoring runs on a free Readyset account.'
+    "Monitoring's AI comes with a free Readyset account."
   )
   await expect(
     dialog.getByRole('button', { name: 'Turn on monitoring' })
@@ -94,6 +107,9 @@ test('signed out, turning on needs a Readyset account, with no way around it', a
   await expect(
     dialog.getByRole('button', { name: 'Turn on without AI' })
   ).toHaveCount(0)
+  await expect(
+    gate.getByRole('button', { name: 'use your own Anthropic key' })
+  ).toBeVisible()
   await dialog
     .getByRole('button', { name: 'Get started with Readyset' })
     .click()
@@ -107,6 +123,7 @@ test('signing in from the gate turns monitoring on once the sign-in finishes', a
   page,
 }) => {
   const account = await mockAccount(page)
+  await mockOwnKey(page, false)
   await mockSignInStart(page)
   const dialog = await openTurnOn(page)
 
@@ -130,6 +147,18 @@ test('signing in from the gate turns monitoring on once the sign-in finishes', a
   await enabled
   await expect(login).toHaveCount(0)
   await expect(dialog).toHaveCount(0)
+})
+
+test('signed out with an own key, turning on needs no account', async ({
+  page,
+}) => {
+  await mockAccount(page)
+  await mockOwnKey(page, true)
+  const dialog = await openTurnOn(page)
+  await expect(dialog.getByTestId('monitoring-signin-gate')).toHaveCount(0)
+  const enabled = page.waitForRequest(turnOnRequest)
+  await dialog.getByRole('button', { name: 'Turn on monitoring' }).click()
+  await enabled
 })
 
 test('signed in, turning on asks for nothing more', async ({ page }) => {

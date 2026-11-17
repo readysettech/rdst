@@ -3,6 +3,7 @@ import { type ReactNode, useEffect } from 'react'
 import { legacyTitle } from '../layout/Main'
 import { trackEventOnce } from '../lib/analytics'
 import { useAiGate } from '../lib/useAiGate'
+import { AiOffGate } from './AiConsent'
 import { AiProviderGate } from './AiProviderGate'
 
 /** The bar title of each page the gate can stand in for. */
@@ -24,6 +25,10 @@ const OPEN_PATHS = [
   '/configure',
   '/account-login',
 ]
+
+// With AI turned off, only the pages that are AI end to end stand aside; the rest of the app
+// works without it.
+const AI_ONLY_PATHS = ['/ask', '/results', '/scan', '/guards']
 
 /** Keep local database monitoring available during AI setup. */
 export function AiAccessBoundary({
@@ -47,6 +52,12 @@ export function AiAccessBoundary({
   }, [settled, gated])
 
   if (open) return children
+  if (gate.status === 'off') {
+    if (!AI_ONLY_PATHS.includes(path)) return children
+    return frame(
+      <AiOffGate path={path} title={PAGE_TITLES[path] ?? legacyTitle(path)} />
+    )
+  }
   if (
     gate.status === 'checking' ||
     gate.status === 'error' ||

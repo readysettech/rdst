@@ -6,6 +6,7 @@ import { Text } from '@rs/ui-new/text'
 import { TwoPane } from '@rs/ui-new/two-pane'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { AiOffNotice } from '@/components/AiConsent'
 import { useOpenAddDatabase } from '@/components/configure/addDatabase'
 import { useDbFilter } from '@/hooks/useDbFilter'
 import { useTarget } from '@/hooks/useTarget'
@@ -362,6 +363,7 @@ export function InboxPage() {
         }
       />
       <PageNoticeSlot className="px-6 pt-4" />
+      <AiOffNotice className="mx-6 mt-4" />
       <Scrollable rootClassName="min-h-0 flex-1" className="pt-1 pb-6">
         {open.error || done.error ? (
           <div className="px-6 pt-4">

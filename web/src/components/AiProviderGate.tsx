@@ -51,8 +51,7 @@ export function AiProviderGate({
   title = 'Home',
 }: AiProviderGateProps) {
   const queryClient = useQueryClient()
-  const { envRequirements, envRequirementsQuery, anthropicRequirement } =
-    useTrialSource()
+  const { envRequirementsQuery, anthropicRequirement } = useTrialSource()
   const [accountOpen, setAccountOpen] = useState(false)
   const [keyOpen, setKeyOpen] = useState(false)
   const accountConnected = Boolean(
@@ -65,29 +64,6 @@ export function AiProviderGate({
   // A connected account needs no new sign-in, only switching AI to it.
   const signIn = () =>
     accountConnected ? useAccount.mutate() : setAccountOpen(true)
-
-  const keyRequirements = useMemo<EnvRequirement[]>(() => {
-    if (anthropicRequirement) {
-      return [
-        {
-          ...anthropicRequirement,
-          accepted_names:
-            anthropicRequirement.accepted_names.length > 0
-              ? anthropicRequirement.accepted_names
-              : ['ANTHROPIC_API_KEY'],
-        },
-      ]
-    }
-    return [
-      {
-        kind: 'anthropic_api_key',
-        accepted_names: ['ANTHROPIC_API_KEY'],
-        satisfied: false,
-        source: 'missing',
-        target: null,
-      },
-    ]
-  }, [anthropicRequirement])
 
   if (gate.status === 'checking') {
     return (
@@ -177,17 +153,14 @@ export function AiProviderGate({
           refresh()
         }}
       />
-      <EnvSecretsDialog
+      <AnthropicKeyDialog
         isOpen={keyOpen}
         onClose={() => setKeyOpen(false)}
-        requirements={keyRequirements}
-        showManualAnthropicInput
-        keyringAvailable={Boolean(envRequirements?.keyring_available)}
-        onTrialRegister={() => {
+        onSignIn={() => {
           setKeyOpen(false)
           signIn()
         }}
-        trialActionLabel={
+        signInLabel={
           accountConnected
             ? 'Use Hosted by Readyset instead'
             : 'Sign in to Readyset instead'
@@ -195,5 +168,56 @@ export function AiProviderGate({
         onSuccess={refresh}
       />
     </GateFrame>
+  )
+}
+
+/** Saves the user's own Anthropic key; `onSignIn` offers a Readyset account instead. */
+export function AnthropicKeyDialog({
+  isOpen,
+  onClose,
+  onSuccess,
+  onSignIn,
+  signInLabel,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  onSuccess: () => void
+  onSignIn: () => void
+  signInLabel: string
+}) {
+  const { envRequirements, anthropicRequirement } = useTrialSource()
+  const requirements = useMemo<EnvRequirement[]>(() => {
+    if (anthropicRequirement) {
+      return [
+        {
+          ...anthropicRequirement,
+          accepted_names:
+            anthropicRequirement.accepted_names.length > 0
+              ? anthropicRequirement.accepted_names
+              : ['ANTHROPIC_API_KEY'],
+        },
+      ]
+    }
+    return [
+      {
+        kind: 'anthropic_api_key',
+        accepted_names: ['ANTHROPIC_API_KEY'],
+        satisfied: false,
+        source: 'missing',
+        target: null,
+      },
+    ]
+  }, [anthropicRequirement])
+  return (
+    <EnvSecretsDialog
+      isOpen={isOpen}
+      onClose={onClose}
+      requirements={requirements}
+      showManualAnthropicInput
+      keyringAvailable={Boolean(envRequirements?.keyring_available)}
+      onTrialRegister={onSignIn}
+      trialActionLabel={signInLabel}
+      onSuccess={onSuccess}
+    />
   )
 }

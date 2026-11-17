@@ -1,3 +1,4 @@
+import { useAiConsent } from './aiConsent'
 import { useTrialSource } from './trialQueries'
 import { useAnthropicValidity } from './useAnthropicValidity'
 
@@ -8,6 +9,8 @@ export type AiGate =
   /** The probe itself failed (network/provider) — run allowed, badge explains. */
   | { status: 'unverified' }
   | { status: 'blocked'; reason: 'missing' | 'invalid' | 'exhausted' }
+  /** The user hasn't allowed AI (a build that asks first): nothing goes to AI. */
+  | { status: 'off' }
 
 /**
  * Resolves the AI-insights dependency up front instead of after a wasted run
@@ -16,6 +19,7 @@ export type AiGate =
  * blocks the primary run actions — no silent degraded runs.
  */
 export function useAiGate(): AiGate {
+  const aiConsent = useAiConsent()
   const {
     envRequirements,
     envRequirementsQuery,
@@ -35,9 +39,19 @@ export function useAiGate(): AiGate {
         Boolean(anthropicRequirement.anthropic_key_configured))) &&
     !isTrialSource &&
     !isTrialExhausted
-  const validityQuery = useAnthropicValidity(hasKey && !isReadysetAccount)
+  // With AI off, nothing contacts Anthropic, a key check included.
+  const validityQuery = useAnthropicValidity(
+    hasKey &&
+      !isReadysetAccount &&
+      !aiConsent.loading &&
+      !aiConsent.failed &&
+      !aiConsent.off
+  )
   const validity = validityQuery.data
 
+  // A build that asks first isn't known to allow AI until its answer loads.
+  if (aiConsent.loading) return { status: 'checking' }
+  if (aiConsent.off) return { status: 'off' }
   if (envRequirementsQuery.isError) {
     return {
       status: 'error',

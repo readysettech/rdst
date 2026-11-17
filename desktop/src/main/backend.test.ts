@@ -96,7 +96,9 @@ describe('backend port', () => {
     expect(await findAvailablePort('127.0.0.1', preferred)).toBe(preferred)
 
     const holder = net.createServer()
-    await new Promise<void>((resolve) => holder.listen(preferred, '127.0.0.1', resolve))
+    await new Promise<void>((resolve) =>
+      holder.listen(preferred, '127.0.0.1', resolve)
+    )
     try {
       const fallback = await findAvailablePort('127.0.0.1', preferred)
       expect(fallback).not.toBe(preferred)
@@ -154,7 +156,33 @@ describe('backendEnvironment', () => {
     const environment = backendEnvironment({ PATH: '/usr/bin', CUSTOM: 'kept' })
 
     expect(environment.RDST_DESKTOP).toBe('1')
+    expect(environment.RDST_HOSTED_REPORTS).toBe('disabled')
     expect(environment.CUSTOM).toBe('kept')
+  })
+
+  it('requires a distribution to explicitly enable hosted report uploads', () => {
+    const environment = backendEnvironment(
+      { PATH: '/usr/bin' },
+      undefined,
+      undefined,
+      {
+        consent: 'opt_out',
+        hostedReports: true,
+      }
+    )
+
+    expect(environment.RDST_HOSTED_REPORTS).toBe('enabled')
+  })
+
+  it("tells the backend its distribution's consent rule, over an inherited one", () => {
+    const environment = backendEnvironment(
+      { RDST_CONSENT: 'opt_out' },
+      undefined,
+      undefined,
+      { consent: 'opt_in', hostedReports: false }
+    )
+
+    expect(environment.RDST_CONSENT).toBe('opt_in')
   })
 })
 

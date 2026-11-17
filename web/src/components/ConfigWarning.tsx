@@ -3,6 +3,7 @@ import { Text } from '@rs/ui-new/text'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
+import { useAiConsent } from '../lib/aiConsent'
 import { type EnvRequirement, fetchAccountStatus } from '../lib/api'
 import { TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract'
 import {
@@ -153,6 +154,8 @@ function AiAccessNotice() {
 
   const { data: status, isLoading, error } = useSystemStatus()
   const { envRequirements, isTrialSource, trialStatus } = useTrialSource()
+  // With AI turned off, nothing asks for an AI sign-in or key.
+  const aiOff = useAiConsent().off
   const account = useQuery({
     queryKey: ['account-status'],
     queryFn: fetchAccountStatus,
@@ -188,7 +191,7 @@ function AiAccessNotice() {
     }
   }, [missingAnthropicRequirements, trialState, dismissed])
 
-  if (isLoading || account.isPending) {
+  if (isLoading || account.isPending || aiOff) {
     return null
   }
 

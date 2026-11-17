@@ -19,6 +19,7 @@ import { RADAR_STATE, Radar, RadarTooltip } from '../features/monitor-kit/Radar'
 import { useMonitorPulse } from '../features/monitor-kit/useMonitorPulse'
 import { DATABASE_WORD } from '../features/shared/filters/DatabaseFilter'
 import { useDefaultTarget } from '../hooks/useTarget'
+import { useAiConsent } from '../lib/aiConsent'
 import { trackEvent } from '../lib/analytics'
 import {
   reattachBackgroundRuns,
@@ -151,6 +152,26 @@ function NavLink({
       {live && <LiveDot label={live} />}
       {!!badge?.count && <Badge {...badge} />}
       {!badge?.count && !!count && <Count title={countTitle}>{count}</Count>}
+    </Link>
+  )
+}
+
+/** Says AI is off wherever the user is, and leads to the switch that turns it on. */
+function AiOffItem() {
+  const ai = useAiConsent()
+  if (!ai.off) return null
+  return (
+    <Link
+      to="/configure"
+      search={{ panel: 'ai' } as never}
+      className={navItemStyles({ active: false, group: 'secondary' })}
+      data-testid="sidebar-ai-off"
+    >
+      <span
+        aria-hidden
+        className="mx-1 h-2 w-2 shrink-0 rounded-full bg-surface-warning-solid"
+      />
+      <span>AI off</span>
     </Link>
   )
 }
@@ -371,6 +392,7 @@ export function Sidebar() {
             count={item.to === '/agent-activity' ? running : undefined}
           />
         ))}
+        <AiOffItem />
         <SidebarAccountMenu />
       </nav>
     </aside>

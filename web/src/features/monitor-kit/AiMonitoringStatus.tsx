@@ -5,6 +5,7 @@ import { Text } from '@rs/ui-new/text'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
+import { AllowAiDialog } from '@/components/AiConsent'
 import { TrialRegistrationDialog } from '@/components/TrialRegistrationDialog'
 import { releaseMonitoringSlot } from '@/lib/monitor/api'
 import { useClaimAiMonitoring, useMonitoringLimit } from '@/lib/monitor/hooks'
@@ -96,6 +97,7 @@ export function MonitoringStatusAction({
   const navigate = useNavigate()
   const claim = useClaimAiMonitoring(target)
   const [signInOpen, setSignInOpen] = useState(false)
+  const [allowAiOpen, setAllowAiOpen] = useState(false)
   const action = status.action
   if (!action) return null
   const common = { size, modifier: 'outline' as const, label: action.label }
@@ -104,6 +106,16 @@ export function MonitoringStatusAction({
       return onTurnOn ? <Button {...common} onClick={onTurnOn} /> : null
     case 'check_connection':
       return onCheckAgain ? <Button {...common} onClick={onCheckAgain} /> : null
+    case 'turn_on_ai':
+      return (
+        <>
+          <Button {...common} onClick={() => setAllowAiOpen(true)} />
+          <AllowAiDialog
+            isOpen={allowAiOpen}
+            onClose={() => setAllowAiOpen(false)}
+          />
+        </>
+      )
     case 'retry':
       return (
         <Button
@@ -325,7 +337,7 @@ export function AiMonitoringPanel({
         </Text>
         <MonitoringStatusBadge status={status} />
       </div>
-      {needsUserAction(status) ? (
+      {needsUserAction(status) && status.reason !== 'declined' ? (
         <Text
           as="p"
           level="body-small"
@@ -349,7 +361,7 @@ export function AiMonitoringPanel({
       ) : null}
       <MonitoringLimitLine limit={limit.data} quiet />
       <AllowanceNotice limit={limit.data} />
-      {state === 'local' ? (
+      {state === 'local' && status.reason === 'limit' ? (
         <div className="space-y-2">
           <Text as="p" level="caption" className="text-content-layout-3">
             {FREE_A_SLOT}

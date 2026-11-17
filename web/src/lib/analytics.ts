@@ -41,7 +41,7 @@ export async function initAnalytics(serverEnabled = true): Promise<void> {
   if (!buildKey) return
   const person = await fetchTelemetryIdentity()
   const key = person && reportingKey(buildKey, person)
-  if (!person || !key) return
+  if (!person || !key || withdrawn) return
   activeKey = key
 
   posthog.init(key, {
@@ -78,6 +78,27 @@ export async function initAnalytics(serverEnabled = true): Promise<void> {
   analyticsEnabled = true
   applyAnalyticsIdentity(person)
   installAppErrorCapture((event) => trackEvent('app_error', event))
+}
+
+// Diagnostics were withdrawn in this session: a start already under way stays stopped.
+let withdrawn = false
+
+/**
+ * Follows a diagnostics choice made in the app: capture and replay stop at once when it's
+ * withdrawn, without waiting on the backend, and start when it's given.
+ */
+export function syncAnalyticsConsent(allowed: boolean): Promise<void> {
+  withdrawn = !allowed
+  if (!allowed) {
+    identityRequest++
+    if (activeKey) {
+      analyticsEnabled = false
+      posthog.opt_out_capturing()
+      posthog.stopSessionRecording()
+    }
+    return Promise.resolve()
+  }
+  return activeKey ? refreshAnalyticsIdentity() : initAnalytics(true)
 }
 
 /** Refresh the local person identity after account state changes. */
@@ -629,7 +650,7 @@ export type RdstEventProperties = {
    * on once the sign-in finished, `without_ai` turned it on with no AI.
    */
   monitoring_signin_gate_choice: {
-    choice: 'sign_in' | 'signed_in_after' | 'without_ai'
+    choice: 'sign_in' | 'signed_in_after' | 'without_ai' | 'own_key'
   }
   /** `source` names the screen that asked for the sign-in, when one did. */
   signin_started: { method: 'google' | 'email'; source?: SigninSource }

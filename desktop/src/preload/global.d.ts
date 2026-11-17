@@ -15,6 +15,9 @@ declare global {
       files: {
         selectSshKey: () => Promise<string | null>
       }
+      data: {
+        clearStorage: () => Promise<void>
+      }
       updates: {
         getState: () => Promise<UpdateStatePayload | null>
         install: () => void
@@ -42,6 +45,7 @@ declare global {
           callback: (state: BackendRunState) => void
         ) => () => void
       }
+      getWindowOpens: () => Promise<number>
       getStartAtLogin: () => Promise<LoginStatus>
       setStartAtLogin: (enabled: boolean) => Promise<LoginStatus>
       getNotificationsEnabled: () => Promise<boolean>

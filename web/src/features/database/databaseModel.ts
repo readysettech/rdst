@@ -93,10 +93,18 @@ export function barState(
       connectionReason: pulse.connectionProblem?.reason,
     }
   )
-  const state: SwitcherState =
-    line?.monitored && line.tone !== 'negative' && apiState === 'ai_paused'
-      ? { word: 'AI checks paused', tone: 'warning' }
-      : (switcherState(line) ?? { word: 'Watching', tone: 'live' })
+  const aiHeld =
+    line?.monitored &&
+    line.tone !== 'negative' &&
+    (apiState === 'ai_paused' || settings?.ai_reason === 'declined')
+  const state: SwitcherState = aiHeld
+    ? {
+        // Turned off by the user rather than paused by something RDST waits on.
+        word:
+          settings?.ai_reason === 'declined' ? 'AI off' : 'AI checks paused',
+        tone: 'warning',
+      }
+    : (switcherState(line) ?? { word: 'Watching', tone: 'live' })
   const outage = health?.outages?.find((entry) => entry.end === null)
   return {
     ...state,

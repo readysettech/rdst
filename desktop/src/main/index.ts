@@ -45,6 +45,7 @@ import {
   superviseBackendStart,
 } from './backend-supervisor.js'
 import { DesktopSettings } from './desktop-settings.js'
+import { distributionRules } from './distribution.js'
 import {
   startInboxNotifications,
   systemNotificationOptions,
@@ -57,7 +58,13 @@ import {
   productName,
   urlScheme,
 } from './instance.js'
-import { getStartAtLogin, isHiddenLaunch, setStartAtLogin } from './login.js'
+import { clearRdstRendererStorage } from './local-data.js'
+import {
+  getStartAtLogin,
+  isHiddenLaunch,
+  setStartAtLogin,
+  withLoginAsk,
+} from './login.js'
 import {
   allPaused,
   applyPauseAction,
@@ -106,6 +113,10 @@ import { DEFAULT_ZOOM_FACTOR, zoomShortcuts } from './zoom.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RENDERER_DIR = path.resolve(__dirname, '../renderer')
 const PACKAGED = packagedMetadata()
+// The rules of the channel this build ships through (distributions.json).
+const DISTRIBUTION = distributionRules(
+  app.isPackaged ? PACKAGED.distribution : undefined
+)
 // A staging or change build's own identity; unpackaged development is production's.
 const INSTANCE = app.isPackaged ? parseInstance(PACKAGED.instance) : ''
 const OAUTH_PROTOCOL = urlScheme(INSTANCE, app.isPackaged)
@@ -113,6 +124,8 @@ const OAUTH_PROTOCOL = urlScheme(INSTANCE, app.isPackaged)
 // the NSIS installer sets to the electron-builder appId; the process must claim the same one.
 const APP_USER_MODEL_ID = appId(INSTANCE)
 const PRODUCT_NAME = productName(INSTANCE)
+// The Store requires consent before an app adds itself to the user's login items.
+const ASKS_START_AT_LOGIN = DISTRIBUTION.startAtLogin === 'ask'
 const LOGIN_IDENTITY = { appId: APP_USER_MODEL_ID, productName: PRODUCT_NAME }
 const DATA_DIR = dataDir(INSTANCE)
 
@@ -170,6 +183,7 @@ let deepLinkPending = false
 let pendingInboxRoute: string | null = null
 let stopInboxStream: (() => void) | null = null
 let settings: DesktopSettings
+let windowOpenCounted = false
 let rendererUrl = ''
 let starting = true
 let trayMenu: Menu | null = null
@@ -256,6 +270,10 @@ function startBackendOnce(
     keyservice: PACKAGED.keyservice,
     identity: { instance: INSTANCE, protocol: OAUTH_PROTOCOL },
     token: BACKEND_TOKEN,
+    distribution: {
+      consent: DISTRIBUTION.consent,
+      hostedReports: DISTRIBUTION.hostedReports === 'enabled',
+    },
     log: backendLog,
     onPhase,
     onSpawn: (handle) => {
@@ -300,15 +318,27 @@ async function resolveRendererUrl(): Promise<string> {
   return APP_ORIGIN
 }
 
-/** The keyservice and instance a change or staging build was packaged for (CI bakes them in). */
-function packagedMetadata(): { keyservice?: string; instance?: unknown } {
+/**
+ * The keyservice and instance a change or staging build was packaged for, and the
+ * distribution it ships through (CI bakes them in).
+ */
+function packagedMetadata(): {
+  keyservice?: string
+  instance?: unknown
+  distribution?: string
+} {
   try {
     const packageJson = JSON.parse(
       fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')
-    ) as { rdstKeyservice?: string; rdstInstance?: unknown }
+    ) as {
+      rdstKeyservice?: string
+      rdstInstance?: unknown
+      rdstDistribution?: string
+    }
     return {
       keyservice: packageJson.rdstKeyservice || undefined,
       instance: packageJson.rdstInstance,
+      distribution: packageJson.rdstDistribution || undefined,
     }
   } catch {
     return {}
@@ -453,6 +483,9 @@ function registerWindowControlHandlers(): void {
       : await dialog.showOpenDialog(options)
     return result.canceled ? null : (result.filePaths[0] ?? null)
   })
+  handleIpc('data:clear-storage', (event) =>
+    clearRdstRendererStorage(event.sender.session)
+  )
 }
 
 // The title strip the window controls sit in, in device-independent pixels: the system's
@@ -553,6 +586,9 @@ async function createWindow(
   )
 
   mainWindow = window
+  // The Store build asks its consent questions the second time someone opens RDST.
+  if (startHidden) window.once('show', countWindowOpen)
+  else countWindowOpen()
   hideWindowOnClose(window, () => quitState.started || SMOKE_MODE)
   // Windows shutting down or signing out: quit the normal way, so the background service
   // stops cleanly and its exit isn't taken for a failure.
@@ -700,6 +736,12 @@ function errorMessage(error: unknown): string {
 // Boot-stage breadcrumbs so a CI hang pinpoints the stalled phase.
 function smokeLog(stage: string): void {
   if (SMOKE_MODE) console.log(`[rdst-desktop] smoke: ${stage}`)
+}
+
+function countWindowOpen(): void {
+  if (windowOpenCounted) return
+  windowOpenCounted = true
+  settings.recordWindowOpen()
 }
 
 function focusMainWindow(): void {
@@ -1178,7 +1220,11 @@ function configureStartAtLogin(
 }
 
 function startAtLoginStatus(): ReturnType<typeof getStartAtLogin> {
-  return getStartAtLogin(app, process.platform, process.env, LOGIN_IDENTITY)
+  return withLoginAsk(
+    getStartAtLogin(app, process.platform, process.env, LOGIN_IDENTITY),
+    ASKS_START_AT_LOGIN,
+    settings.startAtLoginConfigured
+  )
 }
 
 function handleDeepLink(url: string): void {
@@ -1233,16 +1279,20 @@ async function startApplication(): Promise<void> {
     }, SMOKE_TIMEOUT_MS)
   }
 
+  const directTelemetryOptions = {
+    env: process.env,
+    packaged: app.isPackaged,
+    appVersion: app.getVersion(),
+    dataDir: DATA_DIR,
+    requireConsent: DISTRIBUTION.consent === 'opt_in',
+  }
   telemetry = new DesktopTelemetry(
     path.join(app.getPath('userData'), 'telemetry-queue.json'),
     telemetryDisabled(process.env, app.isPackaged),
     undefined,
-    loadDirectTelemetryConfig({
-      env: process.env,
-      packaged: app.isPackaged,
-      appVersion: app.getVersion(),
-      dataDir: DATA_DIR,
-    })
+    loadDirectTelemetryConfig(directTelemetryOptions),
+    undefined,
+    () => !loadDirectTelemetryConfig(directTelemetryOptions).disabled
   )
 
   await app.whenReady()
@@ -1262,6 +1312,7 @@ async function startApplication(): Promise<void> {
   if (
     app.isPackaged &&
     !SMOKE_MODE &&
+    !ASKS_START_AT_LOGIN &&
     !settings.startAtLoginConfigured &&
     startAtLoginStatus().available
   ) {
@@ -1283,6 +1334,7 @@ async function startApplication(): Promise<void> {
   // A coding agent changed monitoring through RDST's MCP server, out of the proxy's sight.
   onIpc('desktop:refresh-tray', () => refreshTrayMenu())
   handleIpc('desktop:get-start-at-login', startAtLoginStatus)
+  handleIpc('desktop:get-window-opens', () => settings.windowOpens)
   handleIpc('desktop:set-start-at-login', (_event, enabled: boolean) => {
     const result = configureStartAtLogin(enabled)
     settings.markStartAtLoginConfigured()

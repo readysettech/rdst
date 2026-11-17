@@ -1,6 +1,56 @@
 {
   "components": {
     "schemas": {
+      "AIDataSettingsRequest": {
+        "properties": {
+          "consent": {
+            "enum": [
+              "granted",
+              "denied"
+            ],
+            "title": "Consent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consent"
+        ],
+        "title": "AIDataSettingsRequest",
+        "type": "object"
+      },
+      "AIDataSettingsResponse": {
+        "properties": {
+          "consent": {
+            "enum": [
+              "pending",
+              "granted",
+              "denied"
+            ],
+            "title": "Consent",
+            "type": "string"
+          },
+          "consent_required": {
+            "title": "Consent Required",
+            "type": "boolean"
+          },
+          "consent_version": {
+            "title": "Consent Version",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "consent",
+          "enabled",
+          "consent_version",
+          "consent_required"
+        ],
+        "title": "AIDataSettingsResponse",
+        "type": "object"
+      },
       "AccountBrowserCallbackStatusResponse": {
         "properties": {
           "code": {
@@ -2754,7 +2804,8 @@
                   "outside_top",
                   "ai_paused",
                   "automatic_off",
-                  "over_allowance"
+                  "over_allowance",
+                  "ai_off"
                 ],
                 "type": "string"
               },
@@ -3007,7 +3058,8 @@
                   "outside_top",
                   "ai_paused",
                   "automatic_off",
-                  "over_allowance"
+                  "over_allowance",
+                  "ai_off"
                 ],
                 "type": "string"
               },
@@ -6669,7 +6721,8 @@
               {
                 "enum": [
                   "limit",
-                  "quota"
+                  "quota",
+                  "declined"
                 ],
                 "type": "string"
               },
@@ -12654,6 +12707,30 @@
         "title": "HomeStripRow",
         "type": "object"
       },
+      "HostedReportSettingsResponse": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "HostedReportSettingsResponse",
+        "type": "object"
+      },
       "ImportQueriesRequest": {
         "properties": {
           "file": {
@@ -15217,7 +15294,8 @@
                   "outside_top",
                   "ai_paused",
                   "automatic_off",
-                  "over_allowance"
+                  "over_allowance",
+                  "ai_off"
                 ],
                 "type": "string"
               },
@@ -17247,7 +17325,8 @@
                   "unreachable",
                   "service_error",
                   "limit",
-                  "quota"
+                  "quota",
+                  "declined"
                 ],
                 "type": "string"
               },
@@ -17969,7 +18048,8 @@
                   "unreachable",
                   "service_error",
                   "limit",
-                  "quota"
+                  "quota",
+                  "declined"
                 ],
                 "type": "string"
               },
@@ -22288,8 +22368,49 @@
       "ReportRequest": {
         "description": "Request body for submitting feedback.",
         "properties": {
+          "ai_output": {
+            "anyOf": [
+              {
+                "maxLength": 50000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Output"
+          },
           "email": {
-            "title": "Email",
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "feature": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature"
+          },
+          "feedback_kind": {
+            "default": "general",
+            "enum": [
+              "general",
+              "ai_output"
+            ],
+            "title": "Feedback Kind",
             "type": "string"
           },
           "include_plan": {
@@ -22315,6 +22436,7 @@
           "query_hash": {
             "anyOf": [
               {
+                "maxLength": 128,
                 "type": "string"
               },
               {
@@ -22324,6 +22446,8 @@
             "title": "Query Hash"
           },
           "reason": {
+            "maxLength": 10000,
+            "minLength": 1,
             "title": "Reason",
             "type": "string"
           },
@@ -22351,8 +22475,7 @@
           }
         },
         "required": [
-          "reason",
-          "email"
+          "reason"
         ],
         "title": "ReportRequest",
         "type": "object"
@@ -27275,6 +27398,67 @@
           "success"
         ],
         "title": "TargetValidationResult",
+        "type": "object"
+      },
+      "TelemetrySettingsRequest": {
+        "properties": {
+          "consent": {
+            "enum": [
+              "granted",
+              "denied"
+            ],
+            "title": "Consent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consent"
+        ],
+        "title": "TelemetrySettingsRequest",
+        "type": "object"
+      },
+      "TelemetrySettingsResponse": {
+        "properties": {
+          "consent": {
+            "enum": [
+              "pending",
+              "granted",
+              "denied"
+            ],
+            "title": "Consent",
+            "type": "string"
+          },
+          "consent_required": {
+            "title": "Consent Required",
+            "type": "boolean"
+          },
+          "consent_version": {
+            "title": "Consent Version",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "forced_off_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forced Off Reason"
+          }
+        },
+        "required": [
+          "consent",
+          "enabled",
+          "consent_version",
+          "consent_required"
+        ],
+        "title": "TelemetrySettingsResponse",
         "type": "object"
       },
       "TestTunnelRequest": {
@@ -39554,6 +39738,66 @@
         ]
       }
     },
+    "/api/settings/ai-data": {
+      "get": {
+        "operationId": "get_ai_data_settings_api_settings_ai_data_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIDataSettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Ai Data Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "set_ai_data_settings_api_settings_ai_data_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AIDataSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIDataSettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Ai Data Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/settings/email": {
       "get": {
         "operationId": "get_email_api_settings_email_get",
@@ -39636,6 +39880,27 @@
         ]
       }
     },
+    "/api/settings/hosted-reports": {
+      "get": {
+        "operationId": "get_hosted_report_settings_api_settings_hosted_reports_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedReportSettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Hosted Report Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/settings/preferences": {
       "get": {
         "operationId": "get_preferences_api_settings_preferences_get",
@@ -39699,7 +39964,7 @@
     },
     "/api/settings/reset-local-data": {
       "post": {
-        "description": "Delete the local RDST data directory (~/.rdst) and stored secrets.\n\nRemoves connection configs, saved queries, semantic layer, analysis\nhistory, trial/identity state, and keyring-persisted keys, returning\nthis install to a fresh state. Server-side accounts (trial\nregistration) are untouched - re-entering a registered email recovers\nthe trial token by email.",
+        "description": "Delete RDST-owned local files, credentials, and managed runtimes.",
         "operationId": "reset_local_data_api_settings_reset_local_data_post",
         "responses": {
           "200": {
@@ -39714,6 +39979,66 @@
           }
         },
         "summary": "Reset Local Data",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/telemetry": {
+      "get": {
+        "operationId": "get_telemetry_settings_api_settings_telemetry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetrySettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Telemetry Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "set_telemetry_settings_api_settings_telemetry_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelemetrySettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetrySettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Telemetry Settings",
         "tags": [
           "settings"
         ]

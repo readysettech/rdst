@@ -6,6 +6,8 @@ interface DesktopSettingsData {
   pausedTargets: string[]
   startAtLoginConfigured: boolean
   welcomeNotificationSent: boolean
+  /** Runs that showed the window, counted up to the second. */
+  windowOpens: number
 }
 
 export class DesktopSettings {
@@ -23,11 +25,14 @@ export class DesktopSettings {
           : [],
         startAtLoginConfigured: saved.startAtLoginConfigured === true,
         welcomeNotificationSent: saved.welcomeNotificationSent === true,
+        windowOpens: typeof saved.windowOpens === 'number' && saved.windowOpens > 0
+          ? Math.min(Math.floor(saved.windowOpens), 2)
+          : 0,
       }
     } catch {
       this.data = {
         notificationsEnabled: true, pausedTargets: [], startAtLoginConfigured: false,
-        welcomeNotificationSent: false,
+        welcomeNotificationSent: false, windowOpens: 0,
       }
     }
   }
@@ -46,6 +51,16 @@ export class DesktopSettings {
 
   get welcomeNotificationSent(): boolean {
     return this.data.welcomeNotificationSent
+  }
+
+  get windowOpens(): number {
+    return this.data.windowOpens
+  }
+
+  recordWindowOpen(): void {
+    if (this.data.windowOpens >= 2) return
+    this.data.windowOpens += 1
+    this.save()
   }
 
   markWelcomeNotificationSent(): void {

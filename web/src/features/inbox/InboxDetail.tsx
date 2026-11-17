@@ -12,6 +12,8 @@ import { Text } from '@rs/ui-new/text'
 import { Verdict } from '@rs/ui-new/verdict'
 import { Link } from '@tanstack/react-router'
 import { type ComponentProps, type ReactNode, useState } from 'react'
+import { ReportAIOutputButton } from '@/components/ReportAIOutputButton'
+import { reportAiOutput } from '@/features/database/reports/reportAiOutput'
 import { useMonitorSettings, useReport } from '@/lib/monitor/hooks'
 import type {
   DatabaseReport,
@@ -613,6 +615,12 @@ function ReportReady({
           {report.data.verdict.rest}
         </Verdict>
       )}
+      <div className="mt-3">
+        <ReportAIOutputButton
+          feature="inbox_report"
+          output={reportAiOutput(report.data)}
+        />
+      </div>
       <MetricRow className="mt-7">
         <Metric
           label="Fixes ready"

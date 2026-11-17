@@ -23,6 +23,7 @@ import { useToast } from '@rs/ui-new/use-toast'
 import { Verdict } from '@rs/ui-new/verdict'
 import { Link } from '@tanstack/react-router'
 import { type ReactNode, useCallback, useMemo, useState } from 'react'
+import { ReportAIOutputButton } from '@/components/ReportAIOutputButton'
 import {
   type AiCanRun,
   aiCanRun,
@@ -57,6 +58,7 @@ import { activityLabel } from '../analyze/runModel'
 import { healthMetrics } from '../databaseModel'
 import { DayChart } from './DayChart'
 import { DayPicker } from './DayPicker'
+import { reportAiOutput } from './reportAiOutput'
 import {
   CHANGED_TAG,
   changedMeta,
@@ -1297,6 +1299,12 @@ function ReportDocument({
             <Foot report={report} signedOut={signedOut} />
           </>
         )}
+        <div className="mt-6 flex justify-end print:hidden">
+          <ReportAIOutputButton
+            feature="database_report"
+            output={reportAiOutput(report)}
+          />
+        </div>
       </div>
     </div>
   )

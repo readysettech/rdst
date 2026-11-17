@@ -13,6 +13,7 @@ import { Text } from '@rs/ui-new/text'
 import { useToast } from '@rs/ui-new/use-toast'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ReportAIOutputButton } from '@/components/ReportAIOutputButton'
 import { TargetConnectivityNotice } from '@/components/TargetConnectivityNotice'
 import { TargetLockNotice } from '@/components/TargetLockNotice'
 import { ParameterDialog } from '@/components/top'
@@ -47,6 +48,7 @@ import {
   viewFromDigest,
   viewFromResults,
 } from './analysisView'
+import { llmAnalysisText } from './llmAnalysisText'
 import { ResultsError } from './ResultsError'
 import type { ResultsSearch } from './types'
 import { useResultsController } from './useResultsController'
@@ -264,6 +266,14 @@ export function ResultsPage({ search }: { search: ResultsSearch }) {
                 })
               }
             />
+            {analysis.state === 'complete' &&
+              analysis.results?.llm_analysis && (
+                <ReportAIOutputButton
+                  feature="analyze"
+                  output={llmAnalysisText(analysis.results.llm_analysis)}
+                  queryHash={analysis.results.query_hash ?? undefined}
+                />
+              )}
           </>
         )
       }

@@ -11,6 +11,9 @@ vi.mock('@tanstack/react-router', () => ({
   useRouterState: () => state.path,
 }))
 vi.mock('../lib/useAiGate', () => ({ useAiGate: () => state.gate }))
+vi.mock('./AiConsent', () => ({
+  AiOffGate: ({ path }: { path: string }) => <div>AI off at {path}</div>,
+}))
 vi.mock('./AiProviderGate', () => ({
   AiProviderGate: ({ gate, title }: { gate: AiGate; title: string }) => (
     <div>
@@ -22,6 +25,7 @@ vi.mock('./AiProviderGate', () => ({
 afterEach(() => {
   cleanup()
   state.path = '/ask'
+  state.gate = { status: 'checking' }
 })
 
 describe('AI startup boundary', () => {
@@ -144,4 +148,36 @@ it.each([
   )
   expect(screen.getByTestId('shell').textContent).toContain('Setup blocked')
   expect(screen.getByTestId('gate-title').textContent).toBe(title)
+})
+
+describe('with AI turned off', () => {
+  it.each([
+    '/ask',
+    '/results',
+  ])('stands in for %s, which needs AI, while AI is off', (path) => {
+    state.path = path
+    state.gate = { status: 'off' }
+    render(
+      <AiAccessBoundary>
+        <div>Application</div>
+      </AiAccessBoundary>
+    )
+    expect(screen.queryByText('Application')).toBeNull()
+    expect(screen.getByText(`AI off at ${path}`)).toBeTruthy()
+  })
+
+  it.each([
+    '/help',
+    '/agent-activity',
+    '/database',
+  ])('keeps %s, which works without AI, while AI is off', (path) => {
+    state.path = path
+    state.gate = { status: 'off' }
+    render(
+      <AiAccessBoundary>
+        <div>Application</div>
+      </AiAccessBoundary>
+    )
+    expect(screen.getByText('Application')).toBeTruthy()
+  })
 })

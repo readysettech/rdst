@@ -153,7 +153,7 @@ describe('Radar', () => {
         state="paused"
         name="demo"
         label="demo, AI checks paused"
-        note="AI checks need a Readyset sign-in, even with your own key."
+        note="AI checks need a Readyset sign-in or your own Anthropic key."
       />
     )
     act(() =>
@@ -162,7 +162,7 @@ describe('Radar', () => {
     const tip = await screen.findByRole('tooltip')
     expect(tip.textContent).toContain('demo, AI checks paused')
     expect(tip.textContent).toContain(
-      'AI checks need a Readyset sign-in, even with your own key.'
+      'AI checks need a Readyset sign-in or your own Anthropic key.'
     )
   })
 })

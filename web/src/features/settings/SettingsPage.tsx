@@ -26,6 +26,7 @@ import {
 } from 'react'
 import { SlotsElsewhere } from '@/features/monitor-kit/AiMonitoringStatus'
 import { useMonitoringLimit, useMonitorSettings } from '@/lib/monitor/hooks'
+import { AIDataSettingsControl } from '../../components/AIDataSettingsControl'
 import { AddDatabaseDialog } from '../../components/configure/AddDatabaseDialog'
 import {
   notifyDatabasesChanged,
@@ -35,9 +36,11 @@ import {
 import type { AddTab } from '../../components/configure/addTabs'
 import { EnvSecretsDialog } from '../../components/EnvSecretsDialog'
 import { FeedbackChat } from '../../components/FeedbackChat'
+import { TelemetrySettingsControl } from '../../components/TelemetrySettingsControl'
 import { TrialRegistrationDialog } from '../../components/TrialRegistrationDialog'
 import { useTarget } from '../../hooks/useTarget'
 import { isSignedInAccount } from '../../lib/accountStatus'
+import { useAiConsent } from '../../lib/aiConsent'
 import {
   type AnthropicKeyValidation,
   type EnvRequirement,
@@ -70,7 +73,13 @@ import { AiKeyRouting } from './AiKeyRouting'
 import { ClearKeyringRow } from './ClearKeyringRow'
 import { CodingAgentsGroup } from './CodingAgentsGroup'
 import { DatabaseRows, type TunnelTest } from './DatabaseRows'
-import { DISCORD_INVITE_URL, DOCS_URL } from './links'
+import {
+  DATA_DELETION_REQUEST_URL,
+  DISCORD_INVITE_URL,
+  DOCS_URL,
+  PRIVACY_POLICY_URL,
+  TERMS_URL,
+} from './links'
 import { PreferenceMenu } from './PreferenceMenu'
 import {
   KEEP_READINGS,
@@ -80,6 +89,7 @@ import {
   useUpdatePreferences,
 } from './preferences'
 import { SettingsGroup, SettingsRow } from './SettingsGroup'
+import { StartAtLoginGroup } from './StartAtLoginGroup'
 
 // Deep-link params for the routable notices (configure-and-identity return
 // trips): `edit` opens a connection's edit form, `section=ai` opens the AI
@@ -331,7 +341,12 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   // only when a real Anthropic key is the active source.
   const hasAnthropicKey =
     anthropicKeyConfigured && activeAiProvider === 'claude'
-  const keyValidityQuery = useAnthropicValidity(hasAnthropicKey)
+  // The key is tested only once AI is known to be on: with AI off it isn't used, and a build
+  // that asks first hasn't answered until its choice has loaded.
+  const ai = useAiConsent()
+  const aiOff = ai.off
+  const keyTestable = hasAnthropicKey && !ai.loading && !ai.failed && !ai.off
+  const keyValidityQuery = useAnthropicValidity(keyTestable)
   const keyValidity = keyValidityQuery.data
 
   const anthropicDialogRequirements: EnvRequirement[] = useMemo(() => {
@@ -557,70 +572,73 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
         </SettingsGroup>
 
         <SettingsGroup id="ai" title="AI">
-          <SettingsRow
-            title="Hosted by Readyset"
-            line={
-              readysetAccountConnected
-                ? 'Analyze, Ask, and Health check use your Readyset account.'
-                : usingReadyset
-                  ? 'Sign in again to use the included AI.'
-                  : undefined
-            }
-          >
-            <BaseInputSwitch
-              name="ai-hosted"
-              aria-label="Hosted by Readyset"
-              checked={usingReadyset}
-              disabled={aiProviderMutation.isPending}
-              onCheckedChange={handleHostedChange}
-            />
-          </SettingsRow>
-          <SettingsRow
-            title="Use my own key"
-            line="Your provider bills you directly."
-          >
-            <Show when={hasAnthropicKey}>
+          <AIDataSettingsControl />
+          <Show when={!aiOff}>
+            <SettingsRow
+              title="Hosted by Readyset"
+              line={
+                readysetAccountConnected
+                  ? 'Analyze, Ask, and Health check use your Readyset account.'
+                  : usingReadyset
+                    ? 'Sign in again to use the included AI.'
+                    : undefined
+              }
+            >
+              <BaseInputSwitch
+                name="ai-hosted"
+                aria-label="Hosted by Readyset"
+                checked={usingReadyset}
+                disabled={aiProviderMutation.isPending}
+                onCheckedChange={handleHostedChange}
+              />
+            </SettingsRow>
+            <SettingsRow
+              title="Use my own key"
+              line="Your provider bills you directly."
+            >
+              <Show when={keyTestable}>
+                <Button
+                  variant="primary"
+                  modifier="ghost"
+                  size="small"
+                  label="Test key"
+                  loading={keyValidityQuery.isFetching}
+                  onClick={() => void keyValidityQuery.refetch()}
+                />
+              </Show>
               <Button
                 variant="primary"
                 modifier="ghost"
                 size="small"
-                label="Test key"
-                loading={keyValidityQuery.isFetching}
-                onClick={() => void keyValidityQuery.refetch()}
+                label={anthropicKeyConfigured ? 'Update key' : 'Add key'}
+                onClick={() => setShowAnthropicDialog(true)}
               />
+            </SettingsRow>
+            <Show
+              when={
+                Boolean(keyValidity) &&
+                hasAnthropicKey &&
+                !keyValidityQuery.isFetching
+              }
+            >
+              {keyValidity ? (
+                <div className="mt-3">
+                  <Alert
+                    tone="quiet"
+                    variant={keyValidationVariant(keyValidity)}
+                    label={keyValidationLabel(keyValidity)}
+                  />
+                </div>
+              ) : null}
             </Show>
-            <Button
-              variant="primary"
-              modifier="ghost"
-              size="small"
-              label={anthropicKeyConfigured ? 'Update key' : 'Add key'}
-              onClick={() => setShowAnthropicDialog(true)}
-            />
-          </SettingsRow>
-          <Show
-            when={
-              Boolean(keyValidity) &&
-              hasAnthropicKey &&
-              !keyValidityQuery.isFetching
-            }
-          >
-            {keyValidity ? (
-              <div className="mt-3">
-                <Alert
-                  tone="quiet"
-                  variant={keyValidationVariant(keyValidity)}
-                  label={keyValidationLabel(keyValidity)}
-                />
-              </div>
-            ) : null}
+            <div className="mt-3">
+              <AiKeyRouting
+                provider={activeAiProvider}
+                signedIn={Boolean(readysetAccountAvailable)}
+                keyConfigured={Boolean(anthropicKeyConfigured)}
+              />
+            </div>
           </Show>
-          <div className="mt-3">
-            <AiKeyRouting
-              provider={activeAiProvider}
-              signedIn={Boolean(readysetAccountAvailable)}
-              keyConfigured={Boolean(anthropicKeyConfigured)}
-            />
-          </div>
         </SettingsGroup>
 
         <SettingsGroup id="notifications" title="Notifications">
@@ -647,6 +665,8 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
             .
           </Text>
         </SettingsGroup>
+
+        <StartAtLoginGroup />
 
         <SettingsGroup title="Appearance">
           {/* RDST draws dark only; a stored light, system or font size choice is kept but
@@ -682,6 +702,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
               }
             />
           </SettingsRow>
+          <TelemetrySettingsControl />
           <SettingsRow
             title="Local data"
             line={`Readings, reports and analyses on ${thisComputer()}.`}
@@ -710,6 +731,31 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
               />
             </div>
           )}
+          <Text
+            as="p"
+            level="caption"
+            className="mt-1.5 flex gap-3 text-content-layout-3"
+          >
+            <a
+              className={quietLink}
+              href={PRIVACY_POLICY_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Privacy Policy
+            </a>
+            <a
+              className={quietLink}
+              href={TERMS_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Terms of Use
+            </a>
+            <a className={quietLink} href={DATA_DELETION_REQUEST_URL}>
+              Request data deletion
+            </a>
+          </Text>
         </SettingsGroup>
 
         <SettingsGroup
@@ -843,9 +889,9 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
         blockCloseWhileLoading
         notice={{
           accent: 'negative',
-          title: "This can't be undone",
+          title: "This can't be undone.",
           message:
-            "This deletes RDST's local configuration and history. It also deletes schema descriptions and stored RDST keys. Your ~/.ssh directory is unchanged.",
+            "This deletes RDST's local configuration, history, schema descriptions, keys saved by RDST, the app's browser storage, and RDST-managed demo and comparison containers. Close other RDST processes first. ~/.ssh, ~/.aws, provider-managed credentials and inherited environment variables are unchanged.",
         }}
       >
         {resetMutation.error instanceof Error ? (

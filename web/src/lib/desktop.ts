@@ -54,6 +54,14 @@ export interface DesktopBackend {
   onStateChange: (callback: (state: DesktopBackendState) => void) => () => void
 }
 
+export interface DesktopLoginStatus {
+  enabled: boolean
+  available: boolean
+  note?: string
+  /** This build asks before starting at login, and the user hasn't answered yet. */
+  ask?: boolean
+}
+
 declare global {
   interface Window {
     rdstDesktop?: {
@@ -68,6 +76,9 @@ declare global {
       files?: {
         selectSshKey: () => Promise<string | null>
       }
+      data?: {
+        clearStorage: () => Promise<void>
+      }
       updates?: DesktopUpdates
       notifications?: DesktopNotifications
       backend?: DesktopBackend
@@ -80,6 +91,11 @@ declare global {
       startup?: {
         openLogs: () => void
       }
+      /** Runs that showed the window, counted up to the second. */
+      getWindowOpens?: () => Promise<number>
+      /** Start at login, the same switch as in the tray menu. */
+      getStartAtLogin?: () => Promise<DesktopLoginStatus>
+      setStartAtLogin?: (enabled: boolean) => Promise<DesktopLoginStatus>
       /** The desktop app's own system notifications switch (the tray's Notifications). */
       getNotificationsEnabled?: () => Promise<boolean>
       setNotificationsEnabled?: (enabled: boolean) => Promise<boolean>
@@ -150,4 +166,13 @@ export function getDesktopBackend(): DesktopBackend | undefined {
 /** Opens the desktop app's logs folder; undefined outside the desktop app. */
 export function getDesktopOpenLogs(): (() => void) | undefined {
   return window.rdstDesktop?.startup?.openLogs
+}
+
+export function clearBrowserStorage() {
+  window.localStorage.clear()
+  window.sessionStorage.clear()
+}
+
+export function clearDesktopStorage(): Promise<void> | undefined {
+  return window.rdstDesktop?.data?.clearStorage()
 }

@@ -18,7 +18,7 @@ ScopedRange = Literal["5m", "15m", "1h", "24h", "7d", "30d", "90d", "all", "cust
 StepState = Literal["queued", "running", "done", "skipped", "failed"]
 # Why a queued analysis won't start on its own.
 HeldReason = Literal["sign_in", "monitoring_off", "outside_top", "ai_paused", "automatic_off",
-                     "over_allowance"]
+                     "over_allowance", "ai_off"]
 
 
 class ResolutionStart(BaseModel):
@@ -1684,7 +1684,8 @@ class QuietHours(BaseModel):
 
 
 AIMonitoringState = Literal["off", "on", "local", "pending", "paused"]
-AIMonitoringReason = Literal["signed_out", "unreachable", "service_error", "limit", "quota"]
+AIMonitoringReason = Literal["signed_out", "unreachable", "service_error", "limit", "quota",
+                             "declined"]
 
 
 class MonitorSettings(BaseModel):
@@ -2009,8 +2010,8 @@ class CheckupState(BaseModel):
     held: Literal["sign_in", "ai_paused"] | None = None
     held_text: str | None = None
     # With ai_paused: limit when the account's AI slots are all in use, quota when its AI
-    # usage ran out.
-    ai_reason: Literal["limit", "quota"] | None = None
+    # usage ran out, declined when the user turned AI off.
+    ai_reason: Literal["limit", "quota", "declined"] | None = None
 
 
 class StoryFact(BaseModel):

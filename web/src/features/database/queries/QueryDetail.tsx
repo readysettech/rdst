@@ -10,6 +10,7 @@ import { Text } from '@rs/ui-new/text'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { type ReactNode, useState } from 'react'
+import { ReportAIOutputButton } from '@/components/ReportAIOutputButton'
 import { MiniTrend } from '@/features/monitor-kit/charts'
 import { formatRelative } from '@/features/monitor-kit/format'
 import { paramSourceText } from '@/features/queries/results/analysisView'
@@ -488,6 +489,21 @@ export function QueryDetail({
                 Builds without blocking writes.
               </Text>
             )}
+            <div className="ml-auto">
+              {/* The analysis's own fix and reason are the AI's; the index planner's statement is
+                  computed, so beside it only the reason is. */}
+              {fix && (
+                <ReportAIOutputButton
+                  feature="query_fix"
+                  output={[
+                    fix.sql === fixSql ? `Fix:\n${fix.sql}` : '',
+                    fix.why,
+                  ]
+                    .filter(Boolean)
+                    .join('\n\n')}
+                />
+              )}
+            </div>
           </div>
           {fix?.why && (
             <Text

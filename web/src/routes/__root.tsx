@@ -16,6 +16,7 @@ import { BackendDownBanner } from '../components/BackendDownBanner'
 // Direct import: the components barrel re-exports the SQL editor stack,
 // which would statically pull CodeMirror into the eager entry chunk.
 import { ConfigWarning } from '../components/ConfigWarning'
+import { ConsentChoicesDialog } from '../components/ConsentChoicesDialog'
 import { DesktopNotificationsBanner } from '../components/DesktopNotificationsBanner'
 import { FeedbackNudge } from '../components/FeedbackNudge'
 import { hydrateSelectedTarget } from '../features/database/selectedTarget'
@@ -147,6 +148,7 @@ function ReadyRoot() {
         {/* Outside the notice slot: pages without a PageBar open it too. */}
         <AddDatabaseHost />
         <OnboardingTourHost />
+        <ConsentChoicesDialog />
       </AppShell>
     </PageNoticesProvider>
   )

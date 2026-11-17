@@ -130,7 +130,7 @@ describe('FirstPlanPointer', () => {
     const pointer = screen.getByTestId('first-plan-pointer')
     expect(screen.getByText('Sign in to run the first analyses')).toBeTruthy()
     expect(pointer.textContent).toContain(
-      'AI checks need a Readyset sign-in, even with your own key.'
+      'AI checks need a Readyset sign-in or your own Anthropic key.'
     )
     expect(pointer.textContent).not.toContain('Building your first plan')
     expect(pointer.textContent).not.toContain('of 10 done')

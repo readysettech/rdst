@@ -74,6 +74,29 @@ describe('analytics', () => {
     vi.unstubAllGlobals()
   })
 
+  it('stops capture and replay at once when diagnostics are withdrawn', async () => {
+    vi.stubEnv('VITE_POSTHOG_KEY', 'test-key')
+    const posthog = (await import('posthog-js')).default
+    const { initAnalytics, syncAnalyticsConsent } = await import('./analytics')
+    await initAnalytics()
+    fetchMock.mockClear()
+    // Withdrawal doesn't wait on the backend, which may not answer.
+    fetchMock.mockRejectedValue(new Error('backend restarting'))
+    void syncAnalyticsConsent(false)
+    expect(posthog.opt_out_capturing).toHaveBeenCalled()
+    expect(posthog.stopSessionRecording).toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('stays stopped when a start was under way as diagnostics were withdrawn', async () => {
+    vi.stubEnv('VITE_POSTHOG_KEY', 'test-key')
+    const { syncAnalyticsConsent } = await import('./analytics')
+    const starting = syncAnalyticsConsent(true)
+    void syncAnalyticsConsent(false)
+    await starting
+    expect(initMock).not.toHaveBeenCalled()
+  })
+
   it('does not capture events before analytics is initialized', async () => {
     const { trackEvent } = await import('./analytics')
     trackEvent('compare_run', { query_count: 1 })

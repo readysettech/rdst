@@ -114,6 +114,32 @@ describe('DesktopTelemetry', () => {
     expect(fs.existsSync(file)).toBe(false)
   })
 
+  it('sends nothing queued once diagnostics are withdrawn while the app runs', async () => {
+    const post = vi.fn<EventPoster>(async () => false)
+    const file = path.join(dir, 'queue.json')
+    let allowed = true
+    const telemetry = new DesktopTelemetry(
+      file,
+      false,
+      post,
+      undefined,
+      undefined,
+      () => allowed
+    )
+    telemetry.setBackend('http://127.0.0.1:9999')
+    telemetry.capture('tray_quit', { uptime_hours: 2 })
+    await telemetry.flush()
+    expect(telemetry.pending).toHaveLength(1)
+
+    allowed = false
+    post.mockClear()
+    await telemetry.flush()
+    telemetry.capture('tray_quit', { uptime_hours: 3 })
+    expect(post).not.toHaveBeenCalled()
+    expect(telemetry.pending).toHaveLength(0)
+    expect(fs.existsSync(file)).toBe(false)
+  })
+
   it('keeps events when the backend refuses them, and marks them delayed on the next launch', async () => {
     const file = path.join(dir, 'queue.json')
     const first = new DesktopTelemetry(file, false, async () => false)
@@ -424,6 +450,32 @@ describe('sidecar config and install identity', () => {
       'telemetry_enabled = false\n'
     )
     expect(load().disabled).toBe(true)
+  })
+
+  it('honors a declined diagnostics choice', () => {
+    fs.writeFileSync(
+      path.join(dir, 'config.toml'),
+      '[privacy]\ntelemetry_consent = "denied"\ntelemetry_consent_version = 1\n'
+    )
+    expect(load().disabled).toBe(true)
+  })
+
+  it('sends nothing from a Store build until diagnostics are allowed', () => {
+    const store = () =>
+      loadDirectTelemetryConfig({
+        env: {},
+        packaged: true,
+        dataDir: dir,
+        appVersion: '1.2.3',
+        requireConsent: true,
+        defaults,
+      })
+    expect(store().disabled).toBe(true)
+    fs.writeFileSync(
+      path.join(dir, 'config.toml'),
+      '[privacy]\ntelemetry_consent = "granted"\ntelemetry_consent_version = 1\n'
+    )
+    expect(store().disabled).toBe(false)
   })
 })
 

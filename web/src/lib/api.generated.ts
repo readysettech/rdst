@@ -4041,6 +4041,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/ai-data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ai Data Settings */
+        get: operations["get_ai_data_settings_api_settings_ai_data_get"];
+        /** Set Ai Data Settings */
+        put: operations["set_ai_data_settings_api_settings_ai_data_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/email": {
         parameters: {
             query?: never;
@@ -4081,6 +4099,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/hosted-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Hosted Report Settings */
+        get: operations["get_hosted_report_settings_api_settings_hosted_reports_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/preferences": {
         parameters: {
             query?: never;
@@ -4113,15 +4148,27 @@ export interface paths {
         put?: never;
         /**
          * Reset Local Data
-         * @description Delete the local RDST data directory (~/.rdst) and stored secrets.
-         *
-         *     Removes connection configs, saved queries, semantic layer, analysis
-         *     history, trial/identity state, and keyring-persisted keys, returning
-         *     this install to a fresh state. Server-side accounts (trial
-         *     registration) are untouched - re-entering a registered email recovers
-         *     the trial token by email.
+         * @description Delete RDST-owned local files, credentials, and managed runtimes.
          */
         post: operations["reset_local_data_api_settings_reset_local_data_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/telemetry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Telemetry Settings */
+        get: operations["get_telemetry_settings_api_settings_telemetry_get"];
+        /** Set Telemetry Settings */
+        put: operations["set_telemetry_settings_api_settings_telemetry_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4534,6 +4581,28 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AIDataSettingsRequest */
+        AIDataSettingsRequest: {
+            /**
+             * Consent
+             * @enum {string}
+             */
+            consent: "granted" | "denied";
+        };
+        /** AIDataSettingsResponse */
+        AIDataSettingsResponse: {
+            /**
+             * Consent
+             * @enum {string}
+             */
+            consent: "pending" | "granted" | "denied";
+            /** Consent Required */
+            consent_required: boolean;
+            /** Consent Version */
+            consent_version: number;
+            /** Enabled */
+            enabled: boolean;
+        };
         /** AccountBrowserCallbackStatusResponse */
         AccountBrowserCallbackStatusResponse: {
             /** Code */
@@ -5455,7 +5524,7 @@ export interface components {
             /** Finished At */
             finished_at: number | null;
             /** Held Reason */
-            held_reason?: ("sign_in" | "monitoring_off" | "outside_top" | "ai_paused" | "automatic_off" | "over_allowance") | null;
+            held_reason?: ("sign_in" | "monitoring_off" | "outside_top" | "ai_paused" | "automatic_off" | "over_allowance" | "ai_off") | null;
             /** Id */
             id: number;
             /** Mode */
@@ -5515,7 +5584,7 @@ export interface components {
             /** Finished At */
             finished_at: number | null;
             /** Held Reason */
-            held_reason?: ("sign_in" | "monitoring_off" | "outside_top" | "ai_paused" | "automatic_off" | "over_allowance") | null;
+            held_reason?: ("sign_in" | "monitoring_off" | "outside_top" | "ai_paused" | "automatic_off" | "over_allowance" | "ai_off") | null;
             /** Id */
             id: number;
             /** Mode */
@@ -6971,7 +7040,7 @@ export interface components {
         /** CheckupState */
         CheckupState: {
             /** Ai Reason */
-            ai_reason?: ("limit" | "quota") | null;
+            ai_reason?: ("limit" | "quota" | "declined") | null;
             /** Analyzed */
             analyzed: number;
             /** Due By */
@@ -9017,6 +9086,13 @@ export interface components {
             /** To Do */
             to_do: number;
         };
+        /** HostedReportSettingsResponse */
+        HostedReportSettingsResponse: {
+            /** Enabled */
+            enabled: boolean;
+            /** Reason */
+            reason?: string | null;
+        };
         /** ImportQueriesRequest */
         ImportQueriesRequest: {
             /** File */
@@ -9930,7 +10006,7 @@ export interface components {
             /** Finished At */
             finished_at: number | null;
             /** Held Reason */
-            held_reason?: ("sign_in" | "monitoring_off" | "outside_top" | "ai_paused" | "automatic_off" | "over_allowance") | null;
+            held_reason?: ("sign_in" | "monitoring_off" | "outside_top" | "ai_paused" | "automatic_off" | "over_allowance" | "ai_off") | null;
             /** Mode */
             mode: string;
             /** Mode Label */
@@ -10532,7 +10608,7 @@ export interface components {
              */
             ai_monitoring?: "off" | "on" | "local" | "pending" | "paused";
             /** Ai Reason */
-            ai_reason?: ("signed_out" | "unreachable" | "service_error" | "limit" | "quota") | null;
+            ai_reason?: ("signed_out" | "unreachable" | "service_error" | "limit" | "quota" | "declined") | null;
             /** Ai Since */
             ai_since?: number | null;
             /** Analysis Daily Cap */
@@ -10769,7 +10845,7 @@ export interface components {
              */
             ai: "off" | "on" | "local" | "pending" | "paused";
             /** Reason */
-            reason?: ("signed_out" | "unreachable" | "service_error" | "limit" | "quota") | null;
+            reason?: ("signed_out" | "unreachable" | "service_error" | "limit" | "quota" | "declined") | null;
             /** Since */
             since?: number | null;
             /** Target */
@@ -12358,8 +12434,18 @@ export interface components {
          * @description Request body for submitting feedback.
          */
         ReportRequest: {
+            /** Ai Output */
+            ai_output?: string | null;
             /** Email */
-            email: string;
+            email?: string | null;
+            /** Feature */
+            feature?: string | null;
+            /**
+             * Feedback Kind
+             * @default general
+             * @enum {string}
+             */
+            feedback_kind?: "general" | "ai_output";
             /**
              * Include Plan
              * @default false
@@ -14090,6 +14176,30 @@ export interface components {
             success: boolean;
             /** Version */
             version?: string | null;
+        };
+        /** TelemetrySettingsRequest */
+        TelemetrySettingsRequest: {
+            /**
+             * Consent
+             * @enum {string}
+             */
+            consent: "granted" | "denied";
+        };
+        /** TelemetrySettingsResponse */
+        TelemetrySettingsResponse: {
+            /**
+             * Consent
+             * @enum {string}
+             */
+            consent: "pending" | "granted" | "denied";
+            /** Consent Required */
+            consent_required: boolean;
+            /** Consent Version */
+            consent_version: number;
+            /** Enabled */
+            enabled: boolean;
+            /** Forced Off Reason */
+            forced_off_reason?: string | null;
         };
         /** TestTunnelRequest */
         TestTunnelRequest: {
@@ -21469,6 +21579,59 @@ export interface operations {
             };
         };
     };
+    get_ai_data_settings_api_settings_ai_data_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIDataSettingsResponse"];
+                };
+            };
+        };
+    };
+    set_ai_data_settings_api_settings_ai_data_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIDataSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIDataSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_email_api_settings_email_get: {
         parameters: {
             query?: never;
@@ -21542,6 +21705,26 @@ export interface operations {
             };
         };
     };
+    get_hosted_report_settings_api_settings_hosted_reports_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedReportSettingsResponse"];
+                };
+            };
+        };
+    };
     get_preferences_api_settings_preferences_get: {
         parameters: {
             query?: never;
@@ -21611,6 +21794,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResetLocalDataResponse"];
+                };
+            };
+        };
+    };
+    get_telemetry_settings_api_settings_telemetry_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelemetrySettingsResponse"];
+                };
+            };
+        };
+    };
+    set_telemetry_settings_api_settings_telemetry_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TelemetrySettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelemetrySettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

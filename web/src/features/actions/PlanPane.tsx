@@ -12,6 +12,7 @@ import { Text } from '@rs/ui-new/text'
 import { useToast } from '@rs/ui-new/use-toast'
 import { Link } from '@tanstack/react-router'
 import { useId, useState } from 'react'
+import { ReportAIOutputButton } from '@/components/ReportAIOutputButton'
 import { SqlCode } from '@/features/database/queries/SqlCode'
 import { type PlanCard, usePlanVerb } from '@/lib/monitor/actions'
 import {
@@ -112,9 +113,18 @@ function PlanDetail({ card }: { card: PlanCard }) {
         </DetailBlock>
       </div>
       {card.why ? (
-        <Text as="p" level="body-small" className="mt-6 text-content-layout-1">
-          {card.why}
-        </Text>
+        <>
+          <Text
+            as="p"
+            level="body-small"
+            className="mt-6 text-content-layout-1"
+          >
+            {card.why}
+          </Text>
+          <div className="mt-1">
+            <ReportAIOutputButton feature="actions" output={card.why} />
+          </div>
+        </>
       ) : null}
       {card.evidence.length ? (
         <dl

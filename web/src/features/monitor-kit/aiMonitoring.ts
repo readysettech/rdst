@@ -144,11 +144,13 @@ export type AiOffReason =
   | 'service_error'
   | 'limit'
   | 'quota'
+  | 'declined'
   | 'not_started'
 
 /** What the user can do about the state. Callers wire the ones that need their context. */
 export type MonitoringActionKind =
   | 'turn_on'
+  | 'turn_on_ai'
   | 'sign_in'
   | 'free_slot'
   | 'contact'
@@ -228,6 +230,15 @@ const REASON_COPY: Record<
     detail:
       "Your account's AI slots are all in use. Charts and alerts keep running.",
     action: { kind: 'free_slot', label: 'Manage databases' },
+  },
+  declined: {
+    label: 'AI off',
+    short: 'AI off',
+    reasonLabel: 'AI is off on this computer',
+    headline: 'Turn on AI to get slow-query alerts and fixes',
+    detail:
+      'AI is off, so RDST shows charts and alerts for connections, stuck queries and locks only. Turn on AI to get slow-query alerts and fixes.',
+    action: { kind: 'turn_on_ai', label: 'Turn on AI' },
   },
   quota: {
     label: 'AI paused: out of usage',
@@ -354,6 +365,7 @@ export function monitoringStatus(
 
 function aiOffReason(input: MonitoringStatusInput): AiOffReason | null {
   const { ai, reason, since } = input
+  if (reason === 'declined') return 'declined'
   if (ai === 'local') return 'limit'
   if (ai === 'paused') return 'quota'
   // Signed out, a full account or a used-up allowance are known causes: say so at once.
@@ -483,7 +495,7 @@ function waitCopy(blocker: AiBlocker): Omit<AiWaitCopy, 'line'> {
       return {
         title: 'Sign in to run AI checks',
         detail:
-          'AI checks need a Readyset sign-in, even with your own key. They start once you sign in.',
+          'AI checks need a Readyset sign-in or your own Anthropic key. They start once you add one.',
         signIn: true,
       }
     case 'monitoring_off':

@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { GetStartedStrip } from './GetStarted'
+import { markTourDone } from '../features/onboarding/onboardingState'
+import { claimFirstRunPopup, GetStartedStrip } from './GetStarted'
 
 afterEach(cleanup)
 
@@ -22,5 +23,23 @@ describe('GetStartedStrip', () => {
       'Step 2 of 2 · Turn on monitoring'
     )
     expect(screen.queryByText(/^Next:/)).toBeNull()
+  })
+})
+
+describe('claimFirstRunPopup', () => {
+  afterEach(() => {
+    sessionStorage.clear()
+    localStorage.clear()
+  })
+
+  it('opens the add-database prompt once a session, never over another dialog', () => {
+    markTourDone()
+    const other = document.createElement('div')
+    other.setAttribute('role', 'dialog')
+    document.body.append(other)
+    expect(claimFirstRunPopup('add-database')).toBe(false)
+    other.remove()
+    expect(claimFirstRunPopup('add-database')).toBe(true)
+    expect(claimFirstRunPopup('add-database')).toBe(false)
   })
 })

@@ -306,7 +306,7 @@ export function PlanView({
         <EmptyState
           tone="quiet"
           title="Sign in to run the first analyses"
-          body="AI checks need a Readyset sign-in, even with your own key. Changes show up here once they run."
+          body="AI checks need a Readyset sign-in or your own Anthropic key. Changes show up here once they run."
           action={{
             label: 'Sign in',
             onClick: () => void navigate({ to: '/account-login' }),

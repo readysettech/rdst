@@ -15,7 +15,12 @@ import {
   renderWithClient,
 } from '@/test-utils'
 import { SettingsPage } from '../features/settings/SettingsPage'
-import { fetchAccountStatus, setAiProvider, setEnvSecret } from '../lib/api'
+import {
+  fetchAccountStatus,
+  fetchAIDataSettings,
+  setAiProvider,
+  setEnvSecret,
+} from '../lib/api'
 import { useTrialSource } from '../lib/trialQueries'
 import { testTunnel } from '../lib/tunnels'
 import { useConfigure } from '../lib/useConfigure'
@@ -51,6 +56,7 @@ vi.mock('@tanstack/react-router', () =>
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
   fetchAccountStatus: vi.fn(),
+  fetchAIDataSettings: vi.fn(),
   setAiProvider: vi.fn(),
   setEnvSecret: vi.fn(),
 }))
@@ -330,6 +336,27 @@ describe('Settings row password save', () => {
     await waitFor(() =>
       expect(vi.mocked(setAiProvider).mock.calls[0]?.[0]).toBe('readyset')
     )
+  })
+
+  it('shows no AI provider rows while AI is off', async () => {
+    mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    vi.mocked(fetchAIDataSettings).mockResolvedValue({
+      consent: 'denied',
+      enabled: false,
+      consent_version: 1,
+      consent_required: true,
+    })
+
+    renderWithClient(<SettingsPage search={{ panel: 'ai' }} />)
+
+    await screen.findByRole('switch', { name: 'AI' })
+    expect(
+      screen.queryByRole('switch', { name: 'Hosted by Readyset' })
+    ).toBeNull()
+    expect(screen.queryByText('Use my own key')).toBeNull()
   })
 
   it('offers a connected account, not a new sign-in, from Update key', async () => {

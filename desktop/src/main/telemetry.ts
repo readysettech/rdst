@@ -107,6 +107,8 @@ export function loadDirectTelemetryConfig(options: {
   packaged: boolean
   appVersion: string
   dataDir: string
+  /** A Microsoft Store build: nothing is sent until diagnostics are allowed. */
+  requireConsent?: boolean
   defaults?: Pick<
     DirectTelemetryConfig,
     'key' | 'host' | 'internalProbeUrl' | 'previewKey'
@@ -123,10 +125,20 @@ export function loadDirectTelemetryConfig(options: {
   try {
     const config = fs.readFileSync(path.join(dataDir, 'config.toml'), 'utf8')
     disabled ||= /telemetry_enabled\s*=\s*false/i.test(config)
+    // The backend's [privacy] consent; version 1 is its current CONSENT_VERSION.
+    const privacy =
+      config.match(/^\[privacy\]\s*\n([\s\S]*?)(?=^\[|$(?![\s\S]))/m)?.[1] ?? ''
+    const consent = privacy.match(/^telemetry_consent\s*=\s*"(\w+)"/m)?.[1]
+    const granted =
+      consent === 'granted' &&
+      /^telemetry_consent_version\s*=\s*1\s*$/m.test(privacy)
+    disabled ||=
+      consent === 'denied' || (options.requireConsent === true && !granted)
     account =
       config.match(/^\[account\]\s*\n([\s\S]*?)(?=^\[|$(?![\s\S]))/m)?.[1] ?? ''
   } catch {
     // A new installation can start before config.toml exists.
+    disabled ||= options.requireConsent === true
   }
   const key = options.env.RDST_POSTHOG_KEY ?? defaults.key
   disabled ||= !key
@@ -314,7 +326,12 @@ export class DesktopTelemetry {
       } catch {
         return false
       }
-    }
+    },
+    /**
+     * Whether diagnostics are still allowed, read again before anything is queued or sent:
+     * they can be withdrawn while the app runs, and the launch-time config wouldn't know.
+     */
+    private readonly stillAllowed: () => boolean = () => true
   ) {
     if (disabled || direct?.disabled) return
     try {
@@ -346,7 +363,8 @@ export class DesktopTelemetry {
   }
 
   capture(event: string, properties: EventProperties = {}): void {
-    if (this.disabled || this.direct?.disabled) return
+    if (this.disabled || this.direct?.disabled || !this.withdrawnCleared())
+      return
     const context: EventProperties =
       event === 'desktop_startup_failed' && this.direct
         ? {
@@ -387,7 +405,16 @@ export class DesktopTelemetry {
     return this.flushing
   }
 
+  /** False once diagnostics were withdrawn, after dropping what was queued. */
+  private withdrawnCleared(): boolean {
+    if (this.stillAllowed()) return true
+    this.queue = []
+    this.save()
+    return false
+  }
+
   private async send(): Promise<void> {
+    if (!this.withdrawnCleared()) return
     if (this.direct && !this.direct.disabled) {
       const config = this.direct
       for (const item of this.queue.filter(

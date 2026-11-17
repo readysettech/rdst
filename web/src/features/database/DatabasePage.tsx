@@ -124,7 +124,7 @@ const SEEN_KEY = 'rdst_report_seen'
 const PLAN_SEEN_KEY = 'rdst_actions_seen'
 const DAY = 86400
 const SIGN_IN_NOTE =
-  'AI checks need a Readyset sign-in, even with your own key.'
+  'AI checks need a Readyset sign-in or your own Anthropic key.'
 const TOOLBAR_RANGES: readonly LiveRange[] = [
   '15m',
   '1h',

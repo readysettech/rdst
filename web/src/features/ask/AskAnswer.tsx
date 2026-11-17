@@ -9,6 +9,7 @@ import { Icon } from '@rs/ui-new/icon'
 import { Pressable } from '@rs/ui-new/pressable'
 import { Text } from '@rs/ui-new/text'
 import { type ReactNode, useId, useMemo, useState } from 'react'
+import { ReportAIOutputButton } from '@/components/ReportAIOutputButton'
 import { SqlCode } from '@/features/database/queries/SqlCode'
 import type { AskResultEvent } from '@/lib/ask'
 import { createCsvFilename, downloadCsv, toCsv } from '@/lib/csv'
@@ -310,6 +311,18 @@ export function AskAnswer({
             />
           </>
         )}
+        <div className="ml-auto">
+          <ReportAIOutputButton
+            feature="ask"
+            output={[
+              explanation ? `Explanation:\n${explanation}` : '',
+              executedSql ? `Generated SQL:\n${executedSql}` : '',
+            ]
+              .filter(Boolean)
+              .join('\n\n')}
+            queryHash={result.query_hash || undefined}
+          />
+        </div>
       </div>
       {executedSql && (noRows ? sqlOpen : true) && (
         <SqlDisclosure
