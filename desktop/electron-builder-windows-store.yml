@@ -1,0 +1,31 @@
+# Microsoft Store EXE distribution: a machine-wide, unattended NSIS installer. The Store installs
+# it from a versioned Partner Center package URL and leaves updates to the app, so Store installs
+# update in place from their own channel, which carries only certified Store installers.
+# build_rdst_desktop_windows.ps1 -Distribution Store puts it over the flavor's config (and its
+# signing settings), filling in ${RDST_DESKTOP_NAME}, ${RDST_DESKTOP_FEED} and, from the
+# distribution's rules in distributions.json, ${RDST_DESKTOP_WINDOWS_UPDATES}; the same rules
+# set the install scope.
+extraMetadata:
+  rdstDistribution: microsoft-store
+
+win:
+  artifactName: "${RDST_DESKTOP_NAME}-${version}-${arch}-store.${ext}"
+  # One entry, not a list: extending a config appends lists, which would keep the flavor's
+  # regular Windows channel first; an object replaces it.
+  publish:
+    provider: generic
+    url: "${RDST_DESKTOP_FEED}/${RDST_DESKTOP_WINDOWS_UPDATES}/update"
+  signExts:
+    - .dll
+    - .node
+    - .pyd
+
+nsis:
+  oneClick: true
+  differentialPackage: false
+  uninstallDisplayName: "${productName}"
+  createDesktopShortcut: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: false
+  runAfterFinish: false
+  deleteAppDataOnUninstall: false

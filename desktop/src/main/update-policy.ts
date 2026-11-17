@@ -54,6 +54,12 @@ export interface UpdateEnvironment {
   appImagePath: string | undefined
   /** The build's flavor name (flavors.json), which names its channel and packages. */
   packageName: string
+  /**
+   * A machine-wide install (installScope 'machine' in distributions.json, the Microsoft Store
+   * build) needs administrator rights to update, so it installs only when the user restarts
+   * to update, never silently on quit.
+   */
+  installOnQuit?: boolean
 }
 
 /**

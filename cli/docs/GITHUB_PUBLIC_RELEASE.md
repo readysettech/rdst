@@ -4,10 +4,10 @@ This document explains what is published to the public GitHub repository at [git
 
 ## Overview
 
-RDST (Readyset Data and SQL Toolkit) is a CLI tool for database diagnostics,
-query analysis, and caching optimization with Readyset. The authoritative
-license is the `LICENSE` file at the repo root; `pyproject.toml` must agree
-with it, since that is what PyPI shows.
+RDST (Readyset Data and SQL Toolkit) is an open-source CLI tool for database
+diagnostics, query analysis, and caching optimization with Readyset. The
+authoritative license is the `LICENSE` file at the repo root; `pyproject.toml`
+must agree with it, since that is what PyPI shows.
 
 **Public Repository**: https://github.com/readysettech/rdst
 
@@ -200,8 +200,8 @@ named by `$JOSH_IMAGE` (build one from `josh/Dockerfile`).
 
 ## License
 
-See [LICENSE](../LICENSE). Keep `pyproject.toml`'s `license` field and its
-OSI classifier in step with that file -- they are published to PyPI and are
-what users actually read.
+RDST is released under the Apache License 2.0. See [LICENSE](../LICENSE). Keep
+`pyproject.toml`'s `license` field and its OSI classifier in step with that file
+-- they are published to PyPI and are what users actually read.
 
-Copyright (c) 2024-2025 Readyset Technology, Inc.
+Copyright (c) 2026 Readyset, Inc.

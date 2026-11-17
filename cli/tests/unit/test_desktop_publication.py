@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 UPLOAD = Path(__file__).parents[2] / ".buildkite" / "upload_rdst_desktop_artifacts.sh"
+STORE_PUBLISH = Path(__file__).parents[2] / ".buildkite" / "publish_rdst_desktop_store.sh"
 
 
 def _write_text(path: Path, contents: str) -> None:
@@ -392,3 +393,121 @@ def test_unnotarized_macos_packages_are_never_published(publication_env):
     published = publish()
     assert published.returncode == 0, published.stderr
     assert (store / "packages/rdst-desktop-staging/macos/update/latest-mac.yml").is_file()
+
+
+def _stage_store_candidate(root: Path, payload: bytes, recorded: bytes | None = None) -> str:
+    installer = "RDST-Desktop-0.1.900-x64-store.exe"
+    (root / installer).write_bytes(payload)
+    _write_text(root / "latest.yml", f"version: 0.1.900\npath: {installer}\n")
+    digest = hashlib.sha256(payload if recorded is None else recorded).hexdigest()
+    _write_text(
+        root / "store-candidate.json",
+        f'{{"status": "internal_validation_passed", "installer": "{installer}", '
+        f'"sha256": "{digest}"}}\n',
+    )
+    return installer
+
+
+def _publish_store(env: dict[str, str], build: int, mode: str = "build"):
+    return subprocess.run(
+        [os.environ.get("BASH", "bash"), str(STORE_PUBLISH), mode],
+        env=env | {"BUILDKITE_BUILD_NUMBER": str(build)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_store_installer_publishes_at_its_own_versioned_url(publication_env):
+    env, store, artifacts, _ = publication_env
+    installer = _stage_store_candidate(artifacts, b"certified")
+
+    published = _publish_store(env, 900)
+    assert published.returncode == 0, published.stderr
+
+    build = store / "packages/rdst-desktop/windows-store/main/build-900"
+    assert (build / installer).read_bytes() == b"certified"
+    digest = hashlib.sha256(b"certified").hexdigest()
+    assert (build / "SHA256SUMS").read_text() == f"{digest}  {installer}\n"
+    assert (build / "store-candidate.json").is_file()
+    assert "https://example.test/rdst-desktop/windows-store/main/build-900/" in published.stdout
+    # Store installs see it only once the release step advances their channel.
+    channel = store / "packages/rdst-desktop/windows-store/update"
+    assert not channel.exists()
+    released = _publish_store(env, 900, "channel")
+    assert released.returncode == 0, released.stderr
+    assert (channel / installer).read_bytes() == b"certified"
+    assert (channel / "latest.yml").read_text() == f"version: 0.1.900\npath: {installer}\n"
+    assert (channel / "latest-build").read_text() == "900\n"
+
+    # Publishing the same build again is a no-op; different bytes are refused.
+    assert _publish_store(env, 900).returncode == 0
+    _stage_store_candidate(artifacts, b"different")
+    refused = _publish_store(env, 900)
+    assert refused.returncode != 0
+    assert (build / installer).read_bytes() == b"certified"
+
+
+def test_store_installer_needs_a_certified_candidate(publication_env):
+    env, store, artifacts, _ = publication_env
+    (artifacts / "RDST-Desktop-0.1.900-x64-store.exe").write_bytes(b"uncertified")
+    missing = _publish_store(env, 900)
+    assert missing.returncode != 0
+    assert "no certified Store candidate" in missing.stderr
+
+    _stage_store_candidate(artifacts, b"swapped", recorded=b"certified")
+    swapped = _publish_store(env, 901)
+    assert swapped.returncode != 0
+    assert "differs from the certified candidate" in swapped.stderr
+    assert not (store / "packages").exists()
+
+
+def test_store_installer_publishes_only_from_main(publication_env):
+    env, store, artifacts, _ = publication_env
+    _stage_store_candidate(artifacts, b"certified")
+    change = _publish_store(env | {"RDST_DESKTOP_IS_MAIN": "false"}, 900)
+    assert change.returncode != 0
+    assert not (store / "packages").exists()
+
+
+def test_older_store_build_cannot_rewind_the_store_channel(publication_env):
+    env, store, artifacts, _ = publication_env
+    _stage_store_candidate(artifacts, b"newer")
+    assert _publish_store(env, 901, "channel").returncode == 0
+
+    for child in artifacts.iterdir():
+        child.unlink()
+    older = "RDST-Desktop-0.1.899-x64-store.exe"
+    (artifacts / older).write_bytes(b"older")
+    _write_text(artifacts / "latest.yml", f"version: 0.1.899\npath: {older}\n")
+    digest = hashlib.sha256(b"older").hexdigest()
+    _write_text(
+        artifacts / "store-candidate.json",
+        f'{{"status": "internal_validation_passed", "installer": "{older}", '
+        f'"sha256": "{digest}"}}\n',
+    )
+    published = _publish_store(env, 900, "channel")
+    assert published.returncode == 0, published.stderr
+    assert _publish_store(env, 900).returncode == 0
+
+    channel = store / "packages/rdst-desktop/windows-store/update"
+    assert "0.1.900" in (channel / "latest.yml").read_text()
+    assert (channel / "latest-build").read_text() == "901\n"
+    assert (store / "packages/rdst-desktop/windows-store/main/build-900" / older).is_file()
+
+
+def test_store_installer_needs_its_channel_metadata(publication_env):
+    env, store, artifacts, _ = publication_env
+    _stage_store_candidate(artifacts, b"certified")
+    (artifacts / "latest.yml").unlink()
+    missing = _publish_store(env, 900)
+    assert missing.returncode != 0
+    assert "no Store channel metadata" in missing.stderr
+    assert not (store / "packages").exists()
+
+
+def test_store_publish_needs_a_mode(publication_env):
+    env, store, artifacts, _ = publication_env
+    _stage_store_candidate(artifacts, b"certified")
+    assert _publish_store(env, 900, "").returncode == 2
+    assert not (store / "packages").exists()

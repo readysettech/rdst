@@ -20,6 +20,17 @@ describe('distributionRules', () => {
     })
   })
 
+  it('installs the Store build machine-wide, updating from a channel of its own', () => {
+    expect(distributionRules('direct')).toMatchObject({
+      installScope: 'user',
+      windowsUpdates: 'windows',
+    })
+    expect(distributionRules('microsoft-store')).toMatchObject({
+      installScope: 'machine',
+      windowsUpdates: 'windows-store',
+    })
+  })
+
   it('refuses a distribution the file does not list', () => {
     expect(() => distributionRules('mac-app-store')).toThrow(
       'Unknown RDST Desktop distribution: mac-app-store'

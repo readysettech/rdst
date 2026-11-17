@@ -46,9 +46,17 @@
 
     ; Electron's profile and the updater's download cache. The uninstaller's own
     ; deleteAppDataOnUninstall covers the first two; the rest guards a renamed product.
+    ; Electron keeps them per user, so a machine-wide install (the Microsoft Store build)
+    ; looks in the user's folders, not the all-users ones.
+    ${if} $installMode == "all"
+      SetShellVarContext current
+    ${endIf}
     RMDir /r "$APPDATA\${RDST_ELECTRON_NAME}"
     RMDir /r "$APPDATA\${PRODUCT_NAME}"
     RMDir /r "$LOCALAPPDATA\${RDST_ELECTRON_NAME}-updater"
+    ${if} $installMode == "all"
+      SetShellVarContext all
+    ${endIf}
 
     ; Start at login. Electron names the Run value after the AppUserModelID.
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_ID}"

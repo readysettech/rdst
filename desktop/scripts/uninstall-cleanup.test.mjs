@@ -104,6 +104,15 @@ describe("Windows uninstall cleanup", () => {
     expect(macro).toContain('RMDir /r "$LOCALAPPDATA\\${RDST_ELECTRON_NAME}-updater"');
   });
 
+  it("removes Electron's per-user folders from a machine-wide install too", () => {
+    const appData = macro.indexOf('RMDir /r "$APPDATA\\${RDST_ELECTRON_NAME}"');
+    const current = macro.lastIndexOf("SetShellVarContext current", appData);
+    const restored = macro.indexOf("SetShellVarContext all", appData);
+    expect(current).toBeGreaterThan(-1);
+    expect(macro.slice(current, appData)).not.toContain("SetShellVarContext all");
+    expect(restored).toBeGreaterThan(macro.indexOf("-updater", appData));
+  });
+
   it("removes the start-at-login value Electron names after the AppUserModelID", () => {
     expect(macro).toContain(`${run} "\${APP_ID}"`);
   });

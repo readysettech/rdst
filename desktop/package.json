@@ -2,6 +2,7 @@
   "name": "rdst-desktop",
   "version": "0.1.0",
   "description": "RDST desktop application",
+  "license": "Apache-2.0",
   "author": {
     "name": "Readyset",
     "email": "support@readyset.io"

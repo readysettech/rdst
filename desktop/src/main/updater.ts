@@ -71,7 +71,7 @@ function scheduleChecks(check: () => void): void {
 }
 
 /** In-place updates through electron-updater; macOS, Windows, and AppImage installs. */
-function setupInPlaceUpdates(): void {
+function setupInPlaceUpdates(installOnQuit: boolean): void {
   let downloadingVersion: string | null = null
   // On macOS, Squirrel fetches each update again once electron-updater has it, and can install
   // it only after that; Restart is offered from then on.
@@ -79,7 +79,7 @@ function setupInPlaceUpdates(): void {
   let squirrelVersion: string | null = null
   let pendingVersion: string | null = null
   autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.autoInstallOnAppQuit = installOnQuit
   autoUpdater.on('error', (error) => {
     console.warn('[rdst-desktop] update error:', error.message)
   })
@@ -215,7 +215,7 @@ export function setupAutoUpdates(
   })
 
   if (mode === 'auto') {
-    setupInPlaceUpdates()
+    setupInPlaceUpdates(env.installOnQuit ?? true)
   } else if (mode === 'notify') {
     setupUpdateNotifications(env)
   }

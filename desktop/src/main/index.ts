@@ -326,6 +326,7 @@ function packagedMetadata(): {
   keyservice?: string
   instance?: unknown
   distribution?: string
+  updates?: string
 } {
   try {
     const packageJson = JSON.parse(
@@ -334,15 +335,98 @@ function packagedMetadata(): {
       rdstKeyservice?: string
       rdstInstance?: unknown
       rdstDistribution?: string
+      rdstUpdates?: string
     }
     return {
       keyservice: packageJson.rdstKeyservice || undefined,
       instance: packageJson.rdstInstance,
       distribution: packageJson.rdstDistribution || undefined,
+      updates: packageJson.rdstUpdates,
     }
   } catch {
     return {}
   }
+}
+
+async function certificationApiRequest(pathName: string, init?: RequestInit) {
+  if (!backend) throw new Error('Certification check requires the backend')
+  // The backend accepts only requests carrying its token.
+  const response = await backendFetch(`${backend.apiBaseUrl}${pathName}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!response.ok) {
+    throw new Error(
+      `Certification API request failed: ${pathName} (${response.status})`
+    )
+  }
+  return response.json() as Promise<{ consent?: string; success?: boolean }>
+}
+
+async function runCertificationPrivacyCheck(window: BrowserWindow) {
+  if (process.env.RDST_DESKTOP_CERTIFICATION !== '1') return false
+
+  const initialTelemetry = await certificationApiRequest(
+    '/api/settings/telemetry'
+  )
+  const initialAiData = await certificationApiRequest('/api/settings/ai-data')
+  if (
+    initialTelemetry.consent !== 'pending' ||
+    initialAiData.consent !== 'pending'
+  ) {
+    throw new Error('Certification state did not start with pending consent')
+  }
+
+  await certificationApiRequest('/api/settings/telemetry', {
+    method: 'PUT',
+    body: JSON.stringify({ consent: 'granted' }),
+  })
+  await certificationApiRequest('/api/settings/ai-data', {
+    method: 'PUT',
+    body: JSON.stringify({ consent: 'denied' }),
+  })
+  const grantedTelemetry = await certificationApiRequest(
+    '/api/settings/telemetry'
+  )
+  const deniedAiData = await certificationApiRequest('/api/settings/ai-data')
+  if (
+    grantedTelemetry.consent !== 'granted' ||
+    deniedAiData.consent !== 'denied'
+  ) {
+    throw new Error('Certification consent categories were not independent')
+  }
+
+  await window.webContents.executeJavaScript(
+    "localStorage.setItem('rdst-certification-state', 'present')"
+  )
+  const reset = await certificationApiRequest(
+    '/api/settings/reset-local-data',
+    {
+      method: 'POST',
+    }
+  )
+  if (reset.success !== true) {
+    throw new Error('Certification local-data reset was not acknowledged')
+  }
+  await clearRdstRendererStorage(window.webContents.session)
+
+  const resetTelemetry = await certificationApiRequest(
+    '/api/settings/telemetry'
+  )
+  const resetAiData = await certificationApiRequest('/api/settings/ai-data')
+  const rendererState = await window.webContents.executeJavaScript(
+    "localStorage.getItem('rdst-certification-state')"
+  )
+  if (
+    resetTelemetry.consent !== 'pending' ||
+    resetAiData.consent !== 'pending' ||
+    rendererState !== null
+  ) {
+    throw new Error(
+      'Certification reset left RDST-owned consent or browser state'
+    )
+  }
+  return true
 }
 
 function logsDirectory(): string {
@@ -1246,7 +1330,16 @@ function exitSmoke(code: number): void {
 async function runSmokeCheck(window: BrowserWindow): Promise<void> {
   await checkPackagedWorkflow(window, rendererUrl)
   const title = await window.webContents.executeJavaScript('document.title')
-  const result = `SMOKE_OK workflow=ok title=${String(title)}`
+  const privacyResetPassed = await runCertificationPrivacyCheck(window)
+  const result = [
+    'SMOKE_OK',
+    'workflow=ok',
+    `title=${String(title)}`,
+    `distribution=${PACKAGED.distribution ?? 'desktop'}`,
+    `updates=${PACKAGED.updates ?? 'disabled'}`,
+    `hostedReports=${DISTRIBUTION.hostedReports}`,
+    `privacyReset=${privacyResetPassed ? 'passed' : 'not-run'}`,
+  ].join(' ')
   const markerPath = process.env.RDST_DESKTOP_SMOKE_MARKER
   if (markerPath) fs.writeFileSync(markerPath, `${result}\n`, 'utf8')
   console.log(result)
@@ -1353,8 +1446,9 @@ async function startApplication(): Promise<void> {
   })
   installApplicationMenu()
 
-  // Smoke builds expose update IPC with delivery disabled.
-  if (SMOKE_MODE) {
+  // Smoke builds expose update IPC with delivery disabled; a Store package's smoke runs its
+  // packaged update policy instead.
+  if (SMOKE_MODE && PACKAGED.distribution !== 'microsoft-store') {
     handleIpc('updates:get-state', () => null)
   } else {
     onUpdateStateChange((state) => {
@@ -1378,6 +1472,7 @@ async function startApplication(): Promise<void> {
         platform: process.platform,
         appImagePath: process.env.APPIMAGE,
         packageName: packageName(INSTANCE),
+        installOnQuit: DISTRIBUTION.installScope === 'user',
       },
       (install) => cleanUpThen(quitState, cleanup, install),
       trustedSender

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -16,6 +18,17 @@ WINDOWS_DESKTOP_BUILD = RDST_DIR / ".buildkite" / "build_rdst_desktop_windows.ps
 WINDOWS_DESKTOP_SIGNING_CONFIG = (
     RDST_DIR / ".buildkite" / "electron-builder-windows-signed.yml"
 )
+DESKTOP_APP_DIR = RDST_DIR.parent / "web-apps" / "apps" / "rdst-desktop"
+DESKTOP_PACKAGE = DESKTOP_APP_DIR / "package.json"
+DESKTOP_BUILDER_CONFIG = DESKTOP_APP_DIR / "electron-builder.yml"
+DESKTOP_PIPELINE_STEPS = RDST_DIR / ".buildkite" / "desktop.yml"
+RDST_WEB_PACKAGE = RDST_DIR.parent / "web-apps" / "apps" / "rdst" / "package.json"
+WINDOWS_DESKTOP_STORE_CONFIG = DESKTOP_APP_DIR / "electron-builder-windows-store.yml"
+WINDOWS_STORE_CERTIFY = DESKTOP_APP_DIR / "scripts" / "certify-win-store.ps1"
+WINDOWS_STORE_VERIFY = DESKTOP_APP_DIR / "scripts" / "verify-win-store-candidate.py"
+DESKTOP_DISTRIBUTIONS = DESKTOP_APP_DIR / "distributions.json"
+STORE_PUBLISH = RDST_DIR / ".buildkite" / "publish_rdst_desktop_store.sh"
+WINDOWS_STORE_SCRIPT_CHECK = DESKTOP_APP_DIR / "scripts" / "verify-win-store-scripts.ps1"
 PREPARE = RDST_DIR / ".buildkite" / "prepare_installer.sh"
 PUBLISH = RDST_DIR / ".buildkite" / "publish_installer.sh"
 
@@ -633,6 +646,392 @@ def generate_pipeline(
 
     assert result.returncode == 0, result.stderr
     return yaml.safe_load(result.stdout)
+
+
+def test_rdst_packages_declare_and_ship_apache_license():
+    license_text = (RDST_DIR / "LICENSE").read_text(encoding="utf-8")
+    assert "Apache License" in license_text and "Version 2.0, January 2004" in license_text
+    assert 'license = { text = "Apache-2.0" }' in (RDST_DIR / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+    assert json.loads(DESKTOP_PACKAGE.read_text(encoding="utf-8"))["license"] == "Apache-2.0"
+    assert json.loads(RDST_WEB_PACKAGE.read_text(encoding="utf-8"))["license"] == "Apache-2.0"
+    builder_config = yaml.safe_load(DESKTOP_BUILDER_CONFIG.read_text(encoding="utf-8"))
+    assert {"from": "../../../rdst/LICENSE", "to": "LICENSE"} in builder_config["extraFiles"]
+
+def load_store_verifier():
+    spec = importlib.util.spec_from_file_location("store_verifier", WINDOWS_STORE_VERIFY)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def stage_store_evidence(tmp_path: Path):
+    artifact_root = tmp_path / "rdst-desktop-windows-store"
+    evidence_dir = artifact_root / "evidence"
+    certification_dir = tmp_path / "rdst-desktop-windows-store-certification"
+    evidence_dir.mkdir(parents=True)
+    certification_dir.mkdir()
+
+    installer = artifact_root / "rdst-desktop-1.2.3-x64-store.exe"
+    installer.write_bytes(b"signed installer")
+    installer_hash = hashlib.sha256(installer.read_bytes()).hexdigest()
+    provenance = {
+        "version": "1.2.3",
+        "distribution": "microsoft-store",
+        "checks": {
+            "authenticode": "passed",
+            "hostedReportUpload": "disabled",
+            "inAppUpdates": "enabled",
+            "updateFeed": "https://downloads.readyset.io/packages/rdst-desktop/windows-store/update",
+        },
+        "buildkite": {"commit": "abc", "jobId": "build-job"},
+    }
+    provenance_path = evidence_dir / "provenance.json"
+    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+    latest = artifact_root / "update" / "latest.yml"
+    latest.parent.mkdir()
+    sha512 = base64.b64encode(hashlib.sha512(installer.read_bytes()).digest()).decode()
+    size = installer.stat().st_size
+    latest.write_text(
+        f"version: 1.2.3\nfiles:\n  - url: {installer.name}\n    sha512: {sha512}\n"
+        f"    size: {size}\npath: {installer.name}\nsha512: {sha512}\n"
+        "releaseDate: '2026-11-16T00:00:00.000Z'\n",
+        encoding="utf-8",
+    )
+    manifest = []
+    for path in (installer, provenance_path, latest):
+        manifest.append(
+            {
+                "path": path.relative_to(artifact_root).as_posix(),
+                "size": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    (artifact_root / "artifacts.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+    (artifact_root / "SHA256SUMS").write_text(
+        f"{installer_hash}  {installer.name}\n", encoding="ascii"
+    )
+    certification = {
+        "status": "passed",
+        "version": "1.2.3",
+        "executionEnvironment": {
+            "isolation": "persistent_agent_rdst_state_checked",
+            "globallyCleanMachine": False,
+        },
+        "installerSha256": installer_hash,
+        "checks": {
+            "artifactManifest": "passed",
+            "authenticode": "passed",
+            "defender": "passed",
+            "networkIsolation": "passed",
+            "machineInstall": "passed",
+            "launch": "passed",
+            "privacyReset": "passed",
+            "silentUninstall": "passed",
+            "cleanup": "passed",
+        },
+        "buildkite": {"commit": "abc", "jobId": "certification-job"},
+    }
+    certification_path = certification_dir / "certification.json"
+    certification_path.write_text(json.dumps(certification), encoding="utf-8")
+    for name in (
+        "defender-signature-update.log",
+        "defender-installer.log",
+        "defender-installed.log",
+        "installed-authenticode.json",
+        "network-isolation.json",
+        "smoke.stdout.log",
+        "smoke.stderr.log",
+    ):
+        (certification_dir / name).write_text(f"{name}\n", encoding="utf-8")
+    certification_evidence = []
+    for path in certification_dir.iterdir():
+        certification_evidence.append(
+            {
+                "path": path.name,
+                "size": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    (certification_dir / "certification-evidence.json").write_text(
+        json.dumps(certification_evidence), encoding="utf-8"
+    )
+    return installer, certification_path
+
+def test_store_candidate_gate_binds_build_and_certification(tmp_path: Path, monkeypatch):
+    verifier = load_store_verifier()
+    installer, _ = stage_store_evidence(tmp_path)
+    output = tmp_path / "output" / "store-candidate.json"
+    monkeypatch.setenv("BUILDKITE_COMMIT", "abc")
+
+    candidate = verifier.verify_candidate(tmp_path, output)
+
+    assert candidate["status"] == "internal_validation_passed"
+    assert candidate["partnerCenterPackageValidation"] == "required"
+    assert candidate["executionEnvironment"] == {
+        "isolation": "persistent_agent_rdst_state_checked",
+        "globallyCleanMachine": False,
+    }
+    assert candidate["sha256"] == hashlib.sha256(installer.read_bytes()).hexdigest()
+    staged_installer = output.parent / candidate["installer"]
+    assert staged_installer.read_bytes() == installer.read_bytes()
+    assert candidate["certificationJobId"] == "certification-job"
+    evidence_manifest = output.parent / candidate["evidenceManifest"]
+    assert hashlib.sha256(evidence_manifest.read_bytes()).hexdigest() == candidate[
+        "evidenceManifestSha256"
+    ]
+    assert json.loads(output.read_text(encoding="utf-8")) == candidate
+    assert candidate["inAppUpdates"] is True
+    assert candidate["updateFeed"].endswith("/windows-store/update")
+    assert (output.parent / "latest.yml").read_text(encoding="utf-8").startswith("version: 1.2.3")
+
+
+@pytest.mark.parametrize("replace", [
+    lambda text, name: text.replace(name, "other.exe"),
+    # The updater downloads from files[]; a matching top-level path doesn't make it safe.
+    lambda text, name: text.replace(f"- url: {name}", "- url: rdst-desktop-1.2.3-x64.exe"),
+    lambda text, name: text.replace("version: 1.2.3", "version: 1.2.4"),
+])
+def test_store_candidate_gate_rejects_metadata_for_another_installer(tmp_path: Path, replace):
+    verifier = load_store_verifier()
+    installer, _ = stage_store_evidence(tmp_path)
+    latest = installer.parent / "update" / "latest.yml"
+    latest.write_text(replace(latest.read_text(), installer.name))
+    manifest_path = installer.parent / "artifacts.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for entry in manifest:
+        if entry["path"] == "update/latest.yml":
+            entry["size"] = latest.stat().st_size
+            entry["sha256"] = hashlib.sha256(latest.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="does not describe the Store installer|different version"):
+        verifier.verify_candidate(tmp_path, tmp_path / "output" / "candidate.json")
+
+
+def test_store_candidate_gate_rejects_incomplete_certification(tmp_path: Path):
+    verifier = load_store_verifier()
+    _, certification_path = stage_store_evidence(tmp_path)
+    certification = json.loads(certification_path.read_text(encoding="utf-8"))
+    certification["checks"]["defender"] = "not_run"
+    certification_path.write_text(json.dumps(certification), encoding="utf-8")
+    manifest_path = certification_path.parent / "certification-evidence.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    certification_entry = next(
+        entry for entry in manifest if entry["path"] == "certification.json"
+    )
+    certification_entry["size"] = certification_path.stat().st_size
+    certification_entry["sha256"] = hashlib.sha256(
+        certification_path.read_bytes()
+    ).hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="checks did not pass"):
+        verifier.verify_candidate(tmp_path, tmp_path / "candidate.json")
+
+
+def test_store_candidate_gate_rejects_unmanifested_build_file(tmp_path: Path):
+    verifier = load_store_verifier()
+    installer, _ = stage_store_evidence(tmp_path)
+    (installer.parent / "unexpected.bin").write_bytes(b"not manifested")
+
+    with pytest.raises(ValueError, match="manifest file set differs"):
+        verifier.verify_candidate(tmp_path, tmp_path / "output" / "candidate.json")
+
+
+def test_store_candidate_gate_rejects_unmanifested_certification_file(tmp_path: Path):
+    verifier = load_store_verifier()
+    _, certification_path = stage_store_evidence(tmp_path)
+    (certification_path.parent / "unexpected.log").write_text(
+        "not manifested", encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="evidence manifest file set differs"):
+        verifier.verify_candidate(tmp_path, tmp_path / "output" / "candidate.json")
+
+def test_windows_store_scripts_are_parsed_and_task_safe():
+    checks = WINDOWS_STORE_SCRIPT_CHECK.read_text(encoding="utf-8")
+
+    assert "Management.Automation.Language.Parser" in checks
+    assert "Unrelated COM task" in checks
+    assert "verify-win-store-shape.ps1" not in checks
+
+def test_windows_store_certification_is_fail_closed():
+    script = WINDOWS_STORE_CERTIFY.read_text(encoding="utf-8")
+
+    assert "Store certification must run from an elevated Windows agent" in script
+    assert "persistent_agent_rdst_state_checked" in script
+    assert "globallyCleanMachine = $false" in script
+    assert "Store certification must run from main" in script
+    assert "Store SHA256SUMS must contain only the exact installer hash" in script
+    assert "Store artifacts must carry only the Store channel's latest.yml" in script
+    assert "Microsoft Defender command-line scanner is unavailable" in script
+    assert "PSObject.Properties['DisplayName']" in script
+    assert "PSObject.Properties['Execute']" in script
+    assert "Get-RdstProtocolKeys" in script
+    assert "Expected one Add/Remove Programs entry" in script
+    assert "Expected one RDST Desktop Start Menu shortcut" in script
+    assert "unexpected service or scheduled task" in script
+    assert "Installed portable executable differs from the signed build tree" in script
+    assert "distribution=microsoft-store" in script
+    assert "updates=enabled" in script
+    assert "hostedReports=disabled" in script
+    assert "privacyReset=passed" in script
+    assert "Invoke-BoundedProcess" in script
+    assert "Invoke-RdstUninstall" in script
+    assert "Enable-NetworkIsolation" in script
+    assert "Disable-NetworkIsolation" in script
+    assert "Get-RdstStateFindings" in script
+    assert "Get-RdstProfilePaths" in script
+    assert "rdst-desktop-updater" in script
+    # An interrupted run's own install is removed before the next run's preflight.
+    assert "Clear-CertificationInstall $installRoot $uninstaller" in script
+    assert "Remove-Item -LiteralPath $certificationMarker" in script
+    assert "Read-JsonArray $manifests[0].FullName" in script
+    assert "Get-RdstCredentialTargets" in script
+    assert "if ($preflightPassed) {" in script
+    assert "Get-NetFirewallApplicationFilter" in script
+    assert "Set-NetFirewallProfile" not in script
+    assert "Disable-NetFirewallRule" not in script
+    assert "certification-evidence.json" in script
+    assert "windowsAppCertificationKit" not in script
+    assert "sbom" not in script.lower()
+    assert "vulnerability" not in script.lower()
+
+
+
+def test_windows_store_profile_is_silent_and_updates_from_its_own_channel():
+    config = yaml.safe_load(WINDOWS_DESKTOP_STORE_CONFIG.read_text(encoding="utf-8"))
+    script = WINDOWS_DESKTOP_BUILD.read_text(encoding="utf-8")
+
+    # A layer the build puts over the flavor's (signed) config, not a config of its own.
+    assert "extends" not in config
+    assert config["extraMetadata"] == {"rdstDistribution": "microsoft-store"}
+    # Store installs update in place from a channel of their own.
+    assert config["win"] == {
+        "artifactName": "${RDST_DESKTOP_NAME}-${version}-${arch}-store.${ext}",
+        "publish": {"provider": "generic",
+                    "url": "${RDST_DESKTOP_FEED}/${RDST_DESKTOP_WINDOWS_UPDATES}/update"},
+        "signExts": [".dll", ".node", ".pyd"],
+    }
+    assert config["nsis"] == {
+        "oneClick": True,
+        "differentialPackage": False,
+        "uninstallDisplayName": "${productName}",
+        "createDesktopShortcut": False,
+        "allowElevation": True,
+        "allowToChangeInstallationDirectory": False,
+        "runAfterFinish": False,
+        "deleteAppDataOnUninstall": False,
+    }
+    assert "[ValidateSet('Standard', 'Store')][string]$Distribution = 'Standard'" in script
+    assert '"extends: ./$builderConfig`n$storeConfig"' in script
+    assert "$updates = 'disabled'" not in script
+    assert ('Assert-UpdateFeed $distDir '
+            '"$($facts.RDST_DESKTOP_FEED)/$($distributionRules.windowsUpdates)/update"') in script
+    assert "$storeConfig.Replace('${RDST_DESKTOP_FEED}', $facts.RDST_DESKTOP_FEED)" in script
+    assert ("$storeConfig.Replace('${RDST_DESKTOP_WINDOWS_UPDATES}', "
+            "$distributionRules.windowsUpdates)") in script
+    # Every build is checked for its own distribution: none for a regular build.
+    assert "Assert-PackagedMetadata $distDir 'rdstDistribution' $packagedDistribution" in script
+    assert "-c.nsis.perMachine=" in script
+
+    assert "Require-FirstPartySignature $path" in script
+    assert "Authenticode signature has no trusted timestamp" in script
+    for evidence in ("authenticode.json", "pnpm-licenses.json", "provenance.json"):
+        assert evidence in script
+    assert "artifacts.json" in script
+    assert "Store publication blocked: RDST license files must declare Apache 2.0" in script
+
+
+def test_store_tooling_follows_the_store_distribution_rules():
+    rules = json.loads(DESKTOP_DISTRIBUTIONS.read_text(encoding="utf-8"))
+    store, direct = rules["microsoft-store"], rules["direct"]
+    assert set(store) == set(direct)
+    assert (store["installScope"], direct["installScope"]) == ("machine", "user")
+    # The Store channel the rules name is the one publication, verification and
+    # certification use.
+    channel = f"/{store['windowsUpdates']}/update"
+    assert store["windowsUpdates"] != direct["windowsUpdates"]
+    assert f"{{flavor_name}}{channel}" in STORE_PUBLISH.read_text(encoding="utf-8")
+    assert f'endswith("{channel}")' in WINDOWS_STORE_VERIFY.read_text(encoding="utf-8")
+    assert f"-notlike '*{channel}'" in WINDOWS_STORE_CERTIFY.read_text(encoding="utf-8")
+    assert f"hostedReports={store['hostedReports']}" in WINDOWS_STORE_CERTIFY.read_text(
+        encoding="utf-8")
+    regular = yaml.safe_load(DESKTOP_BUILDER_CONFIG.read_text(encoding="utf-8"))
+    assert regular["win"]["publish"][0]["url"].endswith(f"/{direct['windowsUpdates']}/update")
+
+
+def test_change_pipeline_packages_the_store_installer_without_certifying(tmp_path: Path):
+    pipeline = generate_pipeline(
+        tmp_path,
+        branch="cl/desktop-store",
+        changed=("web-apps/apps/rdst-desktop/electron-builder-windows-store.yml",),
+    )
+    steps = {step["key"]: step for step in flatten_steps(pipeline["steps"]) if "key" in step}
+
+    store = steps["package-rdst-desktop-windows-store"]
+    windows = steps["package-rdst-desktop-windows-cl"]
+    assert "-Distribution Store" not in windows["command"]
+    assert "-Mode Package -Flavor cl -Distribution Store" in store["command"]
+    assert "verify-win-store-scripts.ps1" in store["command"]
+    assert store["depends_on"] == "prepare-rdst-desktop-windows"
+    assert store["agents"]["queue"] == "windows-c6a-2xlarge"
+    assert "certify-rdst-desktop-windows-store" not in steps
+    assert "verify-rdst-desktop-windows-store" not in steps
+    assert "publish-rdst-desktop-windows-store" not in steps
+    assert "publish-rdst-desktop-windows-store-channel" not in steps
+
+
+def test_main_pipeline_certifies_the_release_store_installer(tmp_path: Path):
+    pipeline = generate_pipeline(tmp_path, branch="main")
+    steps = {step["key"]: step for step in flatten_steps(pipeline["steps"]) if "key" in step}
+
+    store = steps["package-rdst-desktop-windows-store"]
+    assert "-Mode Package -Flavor release -Distribution Store" in store["command"]
+
+    certify = steps["certify-rdst-desktop-windows-store"]
+    assert certify["depends_on"] == "package-rdst-desktop-windows-store"
+    assert certify["agents"]["queue"] == "windows-c6a-2xlarge"
+    assert certify["concurrency"] == 1
+    assert certify["concurrency_group"] == "rdst-desktop-store-certification"
+    assert "certify-win-store.ps1" in certify["command"]
+
+    verify = steps["verify-rdst-desktop-windows-store"]
+    assert verify["depends_on"] == "certify-rdst-desktop-windows-store"
+    assert verify["agents"]["queue"] == "t3a-small"
+    assert "verify-win-store-candidate.py" in verify["command"]
+    assert "--step package-rdst-desktop-windows-store" in verify["command"]
+    assert 'artifact upload "$$output_dir/*"' in verify["command"]
+    assert 'artifact upload "$$output_dir/evidence/**/*"' in verify["command"]
+    # Off the release path until certification has passed on main.
+    assert certify["soft_fail"] is True and verify["soft_fail"] is True
+    assert "verify-rdst-desktop-windows-store" not in steps["release-approval"]["depends_on"]
+
+    publish = steps["publish-rdst-desktop-windows-store"]
+    assert publish["depends_on"] == "verify-rdst-desktop-windows-store"
+    assert publish["env"]["RDST_DESKTOP_FLAVOR"] == "release"
+    assert "publish_rdst_desktop_store.sh" in publish["command"]
+    assert publish["soft_fail"] is True
+    assert publish["concurrency_group"] == "rdst-desktop-upload-windows-store"
+    assert "publish-rdst-desktop-windows-store" not in steps["release-approval"]["depends_on"]
+    # Store installs update to a build only once its release is approved.
+    channel = steps["publish-rdst-desktop-windows-store-channel"]
+    assert channel["depends_on"] == ["publish-rdst-desktop-windows-store", "release-approval"]
+    assert channel["command"].endswith("publish_rdst_desktop_store.sh channel")
+    assert channel["concurrency_group"] == publish["concurrency_group"]
+
+
+def test_promotion_packages_no_store_installer(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("RDST_PIPELINE_MODE", "promote-staging")
+    pipeline = generate_pipeline(tmp_path, branch="refs/changes/13/14413/1")
+    keys = {step["key"] for step in flatten_steps(pipeline["steps"]) if "key" in step}
+
+    assert not any(key.endswith("windows-store") for key in keys)
 
 
 @pytest.mark.parametrize(

@@ -2,11 +2,15 @@
   "direct": {
     "consent": "opt_out",
     "startAtLogin": "on",
-    "hostedReports": "disabled"
+    "hostedReports": "disabled",
+    "installScope": "user",
+    "windowsUpdates": "windows"
   },
   "microsoft-store": {
     "consent": "opt_in",
     "startAtLogin": "ask",
-    "hostedReports": "disabled"
+    "hostedReports": "disabled",
+    "installScope": "machine",
+    "windowsUpdates": "windows-store"
   }
 }
