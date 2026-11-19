@@ -28,8 +28,6 @@ extraFiles:
   # Tells a directly launched sidecar which build it is.
   - from: "${RDST_DESKTOP_MARKER}"
     to: sidecar/rdst/instance.json
-  - from: "../../../rdst/LICENSE"
-    to: "LICENSE"
 # Flipped in the Electron binary just before signing: the app runs only its own app.asar,
 # checked against the hash embedded at packaging (macOS and Windows), and ELECTRON_RUN_AS_NODE,
 # NODE_OPTIONS and (in flavors that ship to users) --inspect can't turn it into a general Node
@@ -53,6 +51,10 @@ extraResources:
     to: icons/tray.png
   - from: resources/iconTemplate.png
     to: icons/iconTemplate.png
+  # In Resources, macOS seals it as data. A file directly in Contents/ is sealed as nested code,
+  # which Gatekeeper rejects unless it carries the app's Developer ID signature.
+  - from: "../../../rdst/LICENSE"
+    to: "LICENSE"
 # Each platform's publish feed is the flavor's own update channel, the one updateFeedUrl in
 # src/main/update-policy.ts checks.
 mac:

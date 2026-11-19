@@ -657,7 +657,7 @@ def test_rdst_packages_declare_and_ship_apache_license():
     assert json.loads(DESKTOP_PACKAGE.read_text(encoding="utf-8"))["license"] == "Apache-2.0"
     assert json.loads(RDST_WEB_PACKAGE.read_text(encoding="utf-8"))["license"] == "Apache-2.0"
     builder_config = yaml.safe_load(DESKTOP_BUILDER_CONFIG.read_text(encoding="utf-8"))
-    assert {"from": "../../../rdst/LICENSE", "to": "LICENSE"} in builder_config["extraFiles"]
+    assert {"from": "../../../rdst/LICENSE", "to": "LICENSE"} in builder_config["extraResources"]
 
 def load_store_verifier():
     spec = importlib.util.spec_from_file_location("store_verifier", WINDOWS_STORE_VERIFY)
