@@ -308,8 +308,9 @@ function Get-RdstStateFindings {
         @(Get-RdstDesktopShortcuts).Count -gt 0) {
         $findings += 'shortcut'
     }
-    if (@(Get-RdstProfilePaths).Count -gt 0) {
-        $findings += 'RDST data in the agent profile'
+    $profilePaths = @(Get-RdstProfilePaths)
+    if ($profilePaths.Count -gt 0) {
+        $findings += "RDST data in the agent profile ($($profilePaths -join ', '))"
     }
     if (@(Get-RdstCredentialTargets).Count -gt 0) {
         $findings += 'Credential Manager entry'
@@ -699,6 +700,18 @@ try {
     Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'rdst-store-cert-*' `
         -ErrorAction SilentlyContinue | Where-Object { $_.FullName -ne $workDir } |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    # Packaging used to run the sidecar's --version check against this profile, which left a data
+    # directory that is empty or holds only an empty keyring lock: no RDST data, so clear exactly that.
+    $profileDataDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.rdst'
+    if (Test-Path -LiteralPath $profileDataDir -PathType Container) {
+        $profileDataItems = @(Get-ChildItem -LiteralPath $profileDataDir -Force -Recurse)
+        $onlyEmptyLock = $profileDataItems.Count -eq 1 -and $profileDataItems[0].Name -eq '.keyring.lock' -and
+            -not $profileDataItems[0].PSIsContainer -and $profileDataItems[0].Length -eq 0
+        if ($profileDataItems.Count -eq 0 -or $onlyEmptyLock) {
+            Write-Host "Removing the empty RDST data directory an earlier package build left: $profileDataDir"
+            Remove-Item -LiteralPath $profileDataDir -Recurse -Force
+        }
+    }
     if (Test-Path -LiteralPath $certificationMarker -PathType Leaf) {
         Write-Host 'An earlier certification run was interrupted; removing its installation'
         Clear-CertificationInstall $installRoot $uninstaller

@@ -27,6 +27,25 @@ _ai_consent_apply: threading.Thread | None = None
 __all__ = ["router", "_EMAIL_RE", "_normalized_email"]
 
 
+async def _stop_monitoring_services(state) -> None:
+    """Stop the background monitoring services and close the observation store, in the
+    order app shutdown uses, so nothing holds a file in the data directory open: Windows
+    can't delete an open file. Turning a database on starts the services again."""
+    from features.query_registry.discovery import query_discovery
+
+    report_tasks = list(getattr(state, "report_tasks", ()))
+    for task in report_tasks:
+        task.cancel()
+    if report_tasks:
+        await asyncio.gather(*report_tasks, return_exceptions=True)
+    for name in ("report_scheduler", "analyze_queue", "monitor_loop", "monitor_scheduler"):
+        service = getattr(state, name, None)
+        if service is not None:
+            await service.stop()
+            setattr(state, name, None)
+    await query_discovery.close()
+
+
 class EmailRequest(BaseModel):
     email: str
     # Optional lead enrichment: stored locally and attached to telemetry
@@ -537,6 +556,10 @@ async def reset_local_data(request: Request) -> ResetLocalDataResponse:
             await sandbox_manager.reset_local_data()
         except Exception as exc:
             errors.append(f"Readyset sandbox: {exc}")
+        try:
+            await _stop_monitoring_services(request.app.state)
+        except Exception as exc:
+            errors.append(f"Monitoring: {exc}")
 
         provider_common.reset_runtime_state()
         provider_identity.reset_runtime_state()
@@ -544,11 +567,22 @@ async def reset_local_data(request: Request) -> ResetLocalDataResponse:
         supabase_oauth.reset_runtime_state()
         telemetry.reset_runtime_state()
 
+        # The running sandbox manager holds its lifecycle lock file in the data directory, which
+        # Windows can't delete; it lets go while stopped and takes a fresh one after.
+        sandbox_running = sandbox_manager.is_running()
         try:
+            if sandbox_running:
+                await sandbox_manager.stop()
             if data_dir.exists():
                 shutil.rmtree(data_dir)
         except Exception as exc:
             errors.append(f"Local files: {exc}")
+        finally:
+            if sandbox_running:
+                try:
+                    await sandbox_manager.start()
+                except Exception as exc:
+                    errors.append(f"Readyset sandbox: {exc}")
 
         if errors:
             logger.error("Local RDST data reset incomplete: %s", "; ".join(errors))

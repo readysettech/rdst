@@ -147,14 +147,16 @@ def verify_build_artifacts(root: Path):
         raise ValueError(f"Store artifacts must carry only update/latest.yml; found {updater_files}")
     metadata = (artifact_root / "update" / "latest.yml").read_text(encoding="utf-8")
     installer_sha512 = sha512_base64(installer)
-    expected_file = {"url": installer.name, "sha512": installer_sha512,
-                     "size": str(installer.stat().st_size)}
+    expected_file = {"url": installer.name, "sha512": installer_sha512}
+    # electron-builder writes a file's size only alongside a blockmap, which Store builds omit.
+    installer_size = str(installer.stat().st_size)
     files = metadata_files(metadata)
     if (
         metadata_field(metadata, "path") != installer.name
         or metadata_field(metadata, "sha512") != installer_sha512
         or not files
         or any({key: entry.get(key) for key in expected_file} != expected_file
+               or entry.get("size", installer_size) != installer_size
                for entry in files)
     ):
         raise ValueError("Store latest.yml does not describe the Store installer")

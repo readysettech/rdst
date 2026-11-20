@@ -112,6 +112,53 @@ def test_reset_removes_local_data_and_owned_credentials(reset_app):
     telemetry.reset_runtime_state.assert_called_once_with()
 
 
+def test_reset_lets_go_of_open_files_before_removing_them(reset_app, monkeypatch):
+    # Windows refuses to delete a file the process still holds open, like cache.db and the
+    # sandbox manager's lifecycle lock.
+    app, data_dir, _ = reset_app
+    _seed_config(data_dir)
+    order: list[str] = []
+
+    class _Service:
+        def __init__(self, name: str):
+            self.name = name
+
+        async def stop(self):
+            order.append(self.name)
+
+    services = ("report_scheduler", "analyze_queue", "monitor_loop", "monitor_scheduler")
+    for name in services:
+        setattr(app.state, name, _Service(name))
+    import features.query_registry.discovery as discovery_module
+
+    monkeypatch.setattr(
+        discovery_module.query_discovery,
+        "close",
+        AsyncMock(side_effect=lambda: order.append("observation store")),
+    )
+    import shared.deploy.sandbox_manager as sandbox_module
+
+    sandbox = sandbox_module.sandbox_manager
+    monkeypatch.setattr(sandbox, "is_running", lambda: True)
+    monkeypatch.setattr(sandbox, "stop", AsyncMock(side_effect=lambda: order.append("sandbox stopped")))
+    monkeypatch.setattr(sandbox, "start", AsyncMock(side_effect=lambda: order.append("sandbox started")))
+    rmtree = settings_mod.shutil.rmtree
+    monkeypatch.setattr(
+        settings_mod.shutil,
+        "rmtree",
+        lambda path: (order.append("files"), rmtree(path)),
+    )
+
+    response = asyncio.run(_reset(app))
+
+    assert response.status_code == 200
+    assert order == [
+        *services, "observation store", "sandbox stopped", "files", "sandbox started"
+    ]
+    # Turning a database on again starts each service afresh.
+    assert all(getattr(app.state, name) is None for name in services)
+
+
 def test_credential_failure_preserves_local_files_for_retry(reset_app):
     app, data_dir, _ = reset_app
     _seed_config(data_dir)
@@ -145,6 +192,23 @@ def test_filesystem_failure_is_reported(reset_app, monkeypatch):
     assert response.status_code == 500
     assert response.json()["detail"]["code"] == "local_data_reset_incomplete"
     assert data_dir.exists()
+
+
+def test_sandbox_restarts_when_files_cannot_be_removed(reset_app, monkeypatch):
+    app, data_dir, _ = reset_app
+    _seed_config(data_dir)
+    import shared.deploy.sandbox_manager as sandbox_module
+
+    sandbox = sandbox_module.sandbox_manager
+    monkeypatch.setattr(sandbox, "is_running", lambda: True)
+    monkeypatch.setattr(sandbox, "stop", AsyncMock())
+    monkeypatch.setattr(sandbox, "start", AsyncMock())
+    monkeypatch.setattr(settings_mod.shutil, "rmtree", MagicMock(side_effect=OSError("busy")))
+
+    response = asyncio.run(_reset(app))
+
+    assert response.status_code == 500
+    sandbox.start.assert_awaited_once_with()
 
 
 def test_a_named_instance_clears_only_its_own_keyring_services(reset_app, monkeypatch):

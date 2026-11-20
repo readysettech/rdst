@@ -595,6 +595,10 @@ class ReadysetSandboxManager:
         self._start_count = 0
         self._ownership_release_task: asyncio.Task[None] | None = None
 
+    def is_running(self) -> bool:
+        """Whether the manager is started, holding its lifecycle lock in the data directory."""
+        return self._start_count > 0
+
     async def start(self) -> None:
         """Reconcile a labeled sandbox left warm by a previous web process."""
         async with self._start_lock:

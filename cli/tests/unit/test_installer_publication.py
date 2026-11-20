@@ -693,10 +693,10 @@ def stage_store_evidence(tmp_path: Path):
     latest = artifact_root / "update" / "latest.yml"
     latest.parent.mkdir()
     sha512 = base64.b64encode(hashlib.sha512(installer.read_bytes()).digest()).decode()
-    size = installer.stat().st_size
+    # As electron-builder writes it without a blockmap: no size.
     latest.write_text(
         f"version: 1.2.3\nfiles:\n  - url: {installer.name}\n    sha512: {sha512}\n"
-        f"    size: {size}\npath: {installer.name}\nsha512: {sha512}\n"
+        f"path: {installer.name}\nsha512: {sha512}\n"
         "releaseDate: '2026-11-16T00:00:00.000Z'\n",
         encoding="utf-8",
     )
@@ -795,6 +795,7 @@ def test_store_candidate_gate_binds_build_and_certification(tmp_path: Path, monk
     # The updater downloads from files[]; a matching top-level path doesn't make it safe.
     lambda text, name: text.replace(f"- url: {name}", "- url: rdst-desktop-1.2.3-x64.exe"),
     lambda text, name: text.replace("version: 1.2.3", "version: 1.2.4"),
+    lambda text, name: text.replace("\npath:", "\n    size: 1\npath:"),
 ])
 def test_store_candidate_gate_rejects_metadata_for_another_installer(tmp_path: Path, replace):
     verifier = load_store_verifier()
