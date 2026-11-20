@@ -502,7 +502,9 @@ class DemoService:
         (point them to install Docker) from 'installed but daemon down' (point
         them to start Docker) on the preflight checklist."""
         import shutil
-        return shutil.which("docker") is not None
+
+        from shared import server_mode
+        return not server_mode.enabled() and shutil.which("docker") is not None
 
     def _container_state(self, name: str) -> str:
         try:

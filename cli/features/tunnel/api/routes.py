@@ -164,7 +164,10 @@ async def browse_files(
     http_request: Request, path: Optional[str] = None
 ) -> FileBrowserResponse:
     """List local paths for the browser SSH key picker."""
+    from shared import server_mode
+
     require_local_request(http_request)
+    server_mode.require_local_files()
 
     home = Path.home().resolve()
     directory = _resolve_browse_directory(path)

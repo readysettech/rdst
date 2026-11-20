@@ -143,6 +143,9 @@ async def _docker_runtime_status() -> dict:
 
 
 async def _require_readyset_runtime() -> None:
+    from shared import server_mode
+
+    server_mode.require_containers()
     runtime = await _docker_runtime_status()
     if not runtime.get("installed"):
         raise HTTPException(

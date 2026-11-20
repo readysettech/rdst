@@ -55,6 +55,7 @@ import psutil
 
 import shared.constants as shared_constants
 from shared import startup_status
+from shared.sqlite_check import quick_check
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,9 @@ def _dead_collection_owner(owner: str) -> bool:
     try:
         host, pid, started, _ = json.loads(owner[len("rdst-process:"):])
         if host != socket.gethostname():
-            return False
+            from shared.server_mode import reclaim_foreign_leases
+
+            return reclaim_foreign_leases()
         process = psutil.Process(pid)
         return process.status() == psutil.STATUS_ZOMBIE or process.create_time() != started
     except psutil.NoSuchProcess:
@@ -695,7 +698,7 @@ class ObservationStore:
             else:
                 # An existing file follows this runtime's journal strategy,
                 # in both directions (WAL upgrade and DELETE fallback).
-                check = conn.execute("PRAGMA quick_check").fetchone()[0]
+                check = quick_check(conn)
                 if check != "ok":
                     logger.warning(
                         "cache.db failed quick_check (%s); rebuilding from "

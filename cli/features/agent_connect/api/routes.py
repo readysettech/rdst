@@ -31,7 +31,7 @@ from features.agent_connect.prompt import (
     render_setup_prompt,
     render_triage_prompt,
 )
-from shared import product_telemetry
+from shared import product_telemetry, server_mode
 from shared.api.guards import is_loopback_host, is_loopback_request, require_local_request
 
 router = APIRouter()
@@ -69,6 +69,10 @@ class McpConfigResponse(BaseModel):
 
 def _server(request: Request) -> dict[str, Any]:
     """This server's advertised addresses, falling back to the address the caller used."""
+    if server_mode.enabled():
+        # Agents reach a server the way the browser did, at its public address.
+        url = server_mode.public_origin(request) or str(request.base_url).rstrip("/")
+        return {"url": url, "wsl_url": None}
     info = getattr(request.app.state, "agent_connect", None) or {}
     url = info.get("url") or str(request.base_url).rstrip("/")
     return {"url": url, "wsl_url": info.get("wsl_url")}
@@ -84,7 +88,8 @@ async def agent_connect_prompt(request: Request) -> PromptResponse:
     product_telemetry.agent_connect_step(
         "prompt_issued", attempt_id=product_telemetry.agent_attempt_id(attempt))
     return PromptResponse(
-        prompt=render_prompt(server["url"], attempt, server["wsl_url"]),
+        prompt=render_prompt(server["url"], attempt, server["wsl_url"],
+                             server=server_mode.enabled()),
         attempt=attempt, issued_at=int(now), url=server["url"],
         mcp_url=mcp_url(server["url"], attempt), wsl_url=server["wsl_url"])
 
@@ -148,6 +153,8 @@ class ContinueRequest(BaseModel):
 def _require_this_computer(request: Request) -> None:
     """Starting a process is for the person at this computer, never a remote browser."""
     require_local_request(request)
+    # A port-forward reaches a server's pod from 127.0.0.1, so loopback alone can't tell.
+    server_mode.require_local_apps()
     if not is_loopback_request(request):
         raise HTTPException(403, "Only RDST on this computer can start a coding agent")
 
@@ -189,17 +196,21 @@ def _free_name(base: str, also: set[str] | None = None) -> str:
 
 @router.get("/agent-connect/agents")
 async def agent_connect_agents(request: Request, refresh: bool = False) -> dict:
-    """The coding agents RDST can run to search for databases."""
+    """The coding agents RDST can run to search for databases, and whether its own search
+    covers a Kubernetes cluster (a server-mode RDST in a pod) instead of this computer."""
     require_local_request(request)
+    from features.agent_connect import kubernetes
     from shared.ai_data_consent import ai_data_sharing_allowed
 
-    # With AI off RDST offers no coding agent, so its own paths (adding a database by hand,
-    # searching this computer) are the ones shown.
-    if not ai_data_sharing_allowed():
-        return {"agents": [], "apps": []}
+    cluster = kubernetes.available()
+    # A server's coding agents aren't the user's, and its desktop apps don't exist. With AI
+    # off RDST offers no coding agent either, so its own paths (adding a database by hand,
+    # searching) are the ones shown.
+    if server_mode.enabled() or not ai_data_sharing_allowed():
+        return {"agents": [], "apps": [], "kubernetes": cluster}
     agents = await asyncio.to_thread(discover.detect, refresh)
     return {"agents": [agent.as_dict() for agent in agents],
-            "apps": await asyncio.to_thread(discover.desktop_apps)}
+            "apps": await asyncio.to_thread(discover.desktop_apps), "kubernetes": cluster}
 
 
 @router.post("/agent-connect/agents/{key}/sign-in")
@@ -301,7 +312,7 @@ async def agent_connect_scan(request: Request) -> dict:
     run = discover.Run(id=f"scan-{secrets.token_hex(6)}", agent=None, kind="scan",
                        methods=[{"method": method, "label": label, "state": "running",
                                  "found": 0, "looked": [], "seconds": None}
-                                for method, label, _ in scan.METHODS])
+                                for method, label, _ in scan.methods()])
 
     def follow(steps: list[dict[str, Any]]) -> None:
         run.methods = steps
@@ -315,6 +326,8 @@ async def agent_connect_scan(request: Request) -> dict:
             discover.mark_saved(found)
             run.candidates = found
             run.methods = result["steps"]
+            run.message = next((step["message"] for step in result["steps"]
+                                if step.get("message")), None)
             run.state = "done"
             product_telemetry.database_scan_finished(
                 seconds=result["seconds"], candidates=found,
@@ -641,7 +654,8 @@ async def agent_connect_ask_prompt(request: Request, body: FixPromptRequest) -> 
         "prompt_issued", attempt_id=product_telemetry.agent_attempt_id(attempt),
         tool="rdst_ask_prompt")
     return PromptResponse(
-        prompt=render_ask_prompt(server["url"], body.target, attempt, server["wsl_url"]),
+        prompt=render_ask_prompt(server["url"], body.target, attempt, server["wsl_url"],
+                                 server=server_mode.enabled()),
         attempt=attempt, issued_at=int(now), url=server["url"],
         mcp_url=mcp_url(server["url"], attempt), wsl_url=server["wsl_url"])
 
@@ -909,7 +923,17 @@ def _authorize(request: Request) -> None:
     """Admit local agents only: no browser pages, no other machines, no rebound DNS names.
 
     An Authorization header is ignored, so agents registered with one keep working.
+    A server-mode RDST is never local to the agent: it admits an agent on another machine
+    that sends the agent key (or the access token) as a Bearer header, and nothing else (a
+    browser's session cookie included), so a web page still can't drive /mcp.
     """
+    if server_mode.enabled():
+        if not (server_mode.agent_key_authenticated(request)
+                or server_mode.bearer_authenticated(request)):
+            raise HTTPException(401, "Send this server's agent key as a Bearer header")
+        if request.headers.get("origin"):
+            raise HTTPException(403, "Origin not allowed")
+        return
     wsl_url = _server(request)["wsl_url"]
     wsl_host = _hostname(wsl_url)
     host = _hostname(request.headers.get("host"))

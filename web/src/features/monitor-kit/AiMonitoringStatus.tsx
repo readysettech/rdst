@@ -7,6 +7,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { AllowAiDialog } from '@/components/AiConsent'
 import { TrialRegistrationDialog } from '@/components/TrialRegistrationDialog'
+import { isContainerRuntime, thisComputer } from '@/lib/desktop'
 import { releaseMonitoringSlot } from '@/lib/monitor/api'
 import { useClaimAiMonitoring, useMonitoringLimit } from '@/lib/monitor/hooks'
 import { monitorKeys } from '@/lib/monitor/keys'
@@ -227,9 +228,10 @@ export function SlotsElsewhere({
     <div data-testid="slots-elsewhere" className="space-y-2 pt-2">
       <Text as="p" level="body-small" className="text-content-layout-2">
         {slots.length === 1
-          ? "One AI slot is held by a database that isn't on this computer."
-          : `${slots.length} AI slots are held by databases that aren't on this computer.`}{' '}
-        A computer still monitoring one takes it back when a slot is free.
+          ? `One AI slot is held by a database that isn't on ${thisComputer()}.`
+          : `${slots.length} AI slots are held by databases that aren't on ${thisComputer()}.`}{' '}
+        {isContainerRuntime() ? 'Another RDST' : 'A computer'} still monitoring
+        one takes it back when a slot is free.
       </Text>
       <ul className="divide-y divide-border-layout-2 rounded-panel border border-border-layout-2">
         {slots.map((slot) => (

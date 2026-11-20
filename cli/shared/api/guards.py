@@ -262,10 +262,12 @@ def _origin(value: str) -> tuple[str, str, int] | None:
 
 
 def _request_origin(request: Request) -> tuple[str, str, int] | None:
-    host = request.headers.get("host")
+    from shared.server_mode import forwarded_scheme_and_host
+
+    scheme, host = forwarded_scheme_and_host(request)
     if not host:
         return None
-    return _origin(f"{request.url.scheme}://{host}")
+    return _origin(f"{scheme}://{host}")
 
 
 def is_loopback_request(request: Request) -> bool:
@@ -287,13 +289,20 @@ def same_host_from_headers(request: Request) -> bool:
     port exactly.  This supports the same-origin UI served by ``rdst web`` while
     rejecting cross-site browser requests.
     """
+    from shared import server_mode
+
+    if server_mode.bearer_authenticated(request):
+        return True
+
     expected = _request_origin(request)
     expected_host = expected[1] if expected else ""
     host_is_loopback = bool(expected_host) and is_loopback_host(expected_host)
-    if host_is_loopback and not is_loopback_request(request):
+    if host_is_loopback and not is_loopback_request(request) and not server_mode.enabled():
         # A remote peer cannot become local by forging loopback Host/Origin
         # headers. This matters for non-browser clients and misconfigured
-        # reverse proxies.
+        # reverse proxies. A server in a container is reached on localhost
+        # through a published port, and its access token, not the peer
+        # address, is what admits a caller.
         return False
 
     found_source = False

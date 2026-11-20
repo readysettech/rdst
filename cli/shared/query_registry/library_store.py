@@ -64,6 +64,7 @@ from shared.query_registry.observation_store import (
     _storage_guard,
     _storage_message,
 )
+from shared.sqlite_check import quick_check
 
 logger = logging.getLogger(__name__)
 
@@ -1387,7 +1388,7 @@ class LibraryStore:
                     # Instance lock precedes validation lock; validation never takes cache.db locks.
                     with _integrity_lock:
                         if generation not in _validated_files:
-                            check = conn.execute("PRAGMA quick_check").fetchone()[0]
+                            check = quick_check(conn)
                             if check != "ok":
                                 raise StorageError(
                                     f"library.db at {self._db_path} failed integrity "

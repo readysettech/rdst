@@ -228,3 +228,16 @@ def test_offline_session_refresh_is_a_network_error_not_signed_out(monkeypatch):
         key_resolution.resolve_api_key()
     assert exc.value.code == "HOSTED_INFERENCE_UNAVAILABLE"
     assert str(exc.value).startswith("Couldn't reach RDST's AI service.")
+
+
+def test_server_mode_login_hint_points_at_the_server_environment(monkeypatch):
+    _patch_config(monkeypatch, None)
+    _patch_store(monkeypatch, {})
+    monkeypatch.setenv("RDST_SERVER", "1")
+
+    with pytest.raises(LLMError) as exc:
+        key_resolution.resolve_api_key()
+
+    assert exc.value.code == "LOGIN_REQUIRED"
+    assert "Sign in to Readyset" in str(exc.value)
+    assert "server's environment" in str(exc.value) and "export" not in str(exc.value)

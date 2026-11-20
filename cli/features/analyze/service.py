@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, Optional, Tuple
 
+from shared import server_mode
 from shared.config.targets import TargetsConfig
 from shared.query_safety import is_plain_explainable_write, validate_query_safety
 from shared.workflow_manager import get_workflow_components
@@ -317,7 +318,10 @@ class AnalyzeService:
             workflow_result = result_holder
 
         readyset_result = None
-        if options.readyset_cache and workflow_result.get("success"):
+        containers_off = server_mode.containers_unavailable_reason()
+        if options.readyset_cache and workflow_result.get("success") and containers_off:
+            readyset_result = {"success": False, "error": containers_off}
+        elif options.readyset_cache and workflow_result.get("success"):
             try:
                 readyset_result = await asyncio.to_thread(
                     self._run_readyset_analysis_sync,

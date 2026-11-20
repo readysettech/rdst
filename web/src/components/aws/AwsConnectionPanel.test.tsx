@@ -277,3 +277,48 @@ describe('AwsConnectionPanel', () => {
     expect(await screen.findByText(/Signed in to AWS as mike/)).toBeTruthy()
   })
 })
+
+describe('credentials the server provides', () => {
+  const IRSA = {
+    has_credentials: true,
+    method: 'web_identity',
+    identity_arn:
+      'arn:aws:sts::123456789012:assumed-role/rdst-irsa/botocore-session-1795206441',
+    account: '123456789012',
+    active_profile: null,
+    available_profiles: [],
+    region: 'us-east-2',
+  }
+
+  afterEach(() => {
+    document.head.querySelector('meta[name="rdst-runtime"]')?.remove()
+    cleanup()
+  })
+
+  it("names the server's role and offers no sign-out", async () => {
+    const meta = document.createElement('meta')
+    meta.name = 'rdst-runtime'
+    meta.content = 'container'
+    document.head.appendChild(meta)
+    vi.mocked(fetchFleetAwsStatus).mockResolvedValue(IRSA)
+    renderWithClient(<AwsConnectionPanel />)
+    expect(
+      await screen.findByText("Using this server's AWS role rdst-irsa")
+    ).toBeTruthy()
+    expect(screen.queryByText(/botocore-session/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull()
+  })
+
+  it('says environment credentials come from the environment', async () => {
+    vi.mocked(fetchFleetAwsStatus).mockResolvedValue({
+      ...IRSA,
+      method: 'env',
+      identity_arn: 'arn:aws:iam::123456789012:user/ci',
+    })
+    renderWithClient(<AwsConnectionPanel />)
+    expect(
+      await screen.findByText('Using AWS credentials from the environment')
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull()
+  })
+})

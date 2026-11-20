@@ -76,6 +76,9 @@ vi.mock('@/lib/aiConsent', () => ({
 
 vi.mock('@/lib/accountStatus', () => ({
   useSignedOut: () => !account.signedIn,
+  useAccountStatus: () => ({ data: { signed_in: account.signedIn } }),
+  isSignedInAccount: (status?: { signed_in?: boolean }) =>
+    Boolean(status?.signed_in),
 }))
 
 // Sign-in itself is the dialog's own business; here it opens and finishes on a click.
@@ -191,6 +194,7 @@ afterEach(() => {
   account.limit = {}
   prereq.phase = 'ready'
   saved.value = {}
+  localStorage.removeItem('rdst_enable_after_signin')
   aiConsent.required = false
   aiConsent.consent = 'granted'
 })
@@ -467,6 +471,50 @@ it('signed out, signing in turns monitoring on with the choices made', async () 
   expect(screen.queryByTestId('sign-in-dialog')).toBeNull()
 })
 
+it('back signed in from a sign-in that left the page, turns on with the choices made', async () => {
+  account.signedIn = false
+  const first = renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  fireEvent.click(screen.getByRole('button', { name: /Advanced/ }))
+  fireEvent.click(screen.getByRole('switch', { name: 'Measure real timings' }))
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Get started with Readyset' })
+  )
+  // Google sign-in replaces the page: this dialog and its state are gone.
+  first.unmount()
+  expect(mutate).not.toHaveBeenCalled()
+
+  account.signedIn = true
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  await waitFor(() =>
+    expect(mutate).toHaveBeenCalledWith(
+      { enabled: true, deep_analysis: true, analysis_mode: 'plans_only' },
+      expect.anything()
+    )
+  )
+  expect(mutate).toHaveBeenCalledTimes(1)
+  expect(localStorage.getItem('rdst_enable_after_signin')).toBeNull()
+})
+
+it('signed in, an earlier sign-in for another database turns nothing on here', () => {
+  localStorage.setItem(
+    'rdst_enable_after_signin',
+    JSON.stringify({
+      target: 'other',
+      automatic: true,
+      measure: true,
+      at: Date.now(),
+    })
+  )
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  expect(mutate).not.toHaveBeenCalled()
+})
+
 it('signed out, closing sign-in leaves monitoring off', () => {
   account.signedIn = false
   renderWithClient(
@@ -477,6 +525,7 @@ it('signed out, closing sign-in leaves monitoring off', () => {
   )
   fireEvent.click(screen.getByRole('button', { name: 'Close sign-in' }))
   expect(mutate).not.toHaveBeenCalled()
+  expect(localStorage.getItem('rdst_enable_after_signin')).toBeNull()
 })
 
 it("signed out, the agent's turn-on request names the sign-in button", () => {

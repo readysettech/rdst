@@ -307,7 +307,7 @@ test('completes the signed-out AWS SSO browser flow and polls to success', async
   ).toBeVisible()
   await page.getByRole('button', { name: 'Sign in with AWS SSO' }).click()
   await expect(
-    page.getByText('Complete the sign-in in the browser window we opened', {
+    page.getByText('Approve the sign-in on the AWS page in your browser', {
       exact: true,
     })
   ).toBeVisible()

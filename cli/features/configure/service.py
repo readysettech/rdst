@@ -206,6 +206,9 @@ class ConfigureService:
                 return
 
             cfg.upsert(name, target_data)
+            # The first database becomes the default, so routes that fall back to it work.
+            if not cfg.get_default():
+                cfg.set_default(name)
             cfg.save()
 
             yield ConfigureSuccessEvent(
@@ -763,6 +766,7 @@ class ConfigureService:
                 connection_failure_category,
                 provider_network_hint,
             )
+            from shared import server_mode
 
             provider_category = connection_failure_category(config, error_msg)
             provider_network_failure = provider_category is not None
@@ -779,6 +783,7 @@ class ConfigureService:
                         provider_network_hint(config)
                         if provider_network_failure
                         else "Check that the database is running and accessible."
+                        + server_mode.network_hint()
                     ),
                     "category": (
                         provider_category if provider_network_failure else None
@@ -807,6 +812,7 @@ class ConfigureService:
                         provider_network_hint(config)
                         if provider_network_failure
                         else "Check network connectivity and firewall rules."
+                        + server_mode.network_hint()
                     ),
                     "category": (
                         provider_category if provider_network_failure else None

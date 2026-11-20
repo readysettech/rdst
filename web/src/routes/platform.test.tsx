@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@tanstack/react-router', async () => {
@@ -19,6 +20,31 @@ describe('Readyset Platform route', () => {
     expect(
       (PlatformRoute as unknown as { component: unknown }).component
     ).toBeTypeOf('function')
+  })
+
+  it('shows a desktop-app notice instead of the demo in a container', async () => {
+    const { render, screen } = await import('@testing-library/react')
+    const meta = document.createElement('meta')
+    meta.name = 'rdst-runtime'
+    meta.content = 'container'
+    document.head.appendChild(meta)
+    try {
+      // The route declares its component as a split-module loader.
+      const load = (
+        PlatformRoute as unknown as {
+          component: () => Promise<{ component: () => ReactElement }>
+        }
+      ).component
+      const Component = (await load()).component
+      render(<Component />)
+      expect(
+        await screen.findByText(
+          'The Readyset Platform demo runs in the desktop app'
+        )
+      ).toBeTruthy()
+    } finally {
+      meta.remove()
+    }
   })
 
   it('keeps the old demo URL working by redirecting to /platform', () => {

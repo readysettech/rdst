@@ -155,3 +155,23 @@ describe('AgentFix', () => {
     )
   })
 })
+
+describe('AgentFix in server mode', () => {
+  it('points at the Connect card instead of copying a prompt', () => {
+    const meta = document.createElement('meta')
+    meta.name = 'rdst-runtime'
+    meta.content = 'container'
+    document.head.appendChild(meta)
+    try {
+      routeFetch([], ['claude'])
+      renderWithClient(<AgentFix target="shop" onFinished={() => {}} />)
+      expect(screen.getByTestId('agent-fix-server').textContent).toMatch(
+        /Connect Claude or\s+Codex/
+      )
+      expect(screen.queryByTestId('agent-fix-copy')).toBeNull()
+    } finally {
+      meta.remove()
+      cleanup()
+    }
+  })
+})

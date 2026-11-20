@@ -16,10 +16,12 @@ import {
   secondsSince,
   trackEvent,
 } from '../../lib/analytics'
+import { isContainerRuntime } from '../../lib/desktop'
 import {
   FleetAwsLoginError,
   type FleetAwsLoginStatus,
   type FleetAwsSsoAccount,
+  type FleetAwsStatus,
   fetchFleetAwsLogin,
   fetchFleetAwsSsoAccounts,
   fetchFleetAwsSsoRoles,
@@ -45,6 +47,27 @@ const awsRoleFromArn = (arn: string | null): string | null => {
   const match = arn.match(/assumed-role\/([^/]+)\//)
   return match ? match[1] : null
 }
+
+// Credentials the machine itself provides (IRSA, EKS Pod Identity, an instance
+// role, AWS_* variables) rather than a sign-in: there's nothing to sign out of.
+const AMBIENT_METHODS = new Set(['web_identity', 'instance', 'env'])
+
+/** What the panel says about the credentials RDST is using. */
+export function awsCredentialLabel(aws: FleetAwsStatus): string {
+  if (!aws.active_profile && aws.method && AMBIENT_METHODS.has(aws.method)) {
+    if (aws.method === 'env')
+      return 'Using AWS credentials from the environment'
+    const role = awsRoleFromArn(aws.identity_arn)
+    const whose = isContainerRuntime()
+      ? "this server's AWS role"
+      : 'the AWS role'
+    return role ? `Using ${whose} ${role}` : `Using ${whose}`
+  }
+  return `Signed in to AWS as ${awsIdentityLabel(aws.identity_arn)}`
+}
+
+const isAmbient = (aws: FleetAwsStatus): boolean =>
+  !aws.active_profile && !!aws.method && AMBIENT_METHODS.has(aws.method)
 
 // The wizard's connect step and the profile picker share this: names the failure and
 // offers the AWS CLI fallback command to copy. Signing in again retries.
@@ -373,7 +396,7 @@ function AwsSsoWizard({
           <HStack className="gap-2 items-center">
             <Spinner size="base" />
             <Text level="body-small" className="text-content-layout-1">
-              Complete the sign-in in the browser window we opened
+              Approve the sign-in on the AWS page in your browser
             </Text>
           </HStack>
           <Text level="caption" className="text-content-layout-3">
@@ -880,21 +903,23 @@ export function AwsConnectionPanel({
               className="shrink-0 text-content-positive-soft"
             />
             <Text level="caption" className="text-content-positive-soft">
-              Signed in to AWS as {awsIdentityLabel(aws.identity_arn)}
+              {awsCredentialLabel(aws)}
             </Text>
           </HStack>
           {profileField('w-full')}
-          <Button
-            variant="primary"
-            modifier="outline"
-            fullWidth
-            className="mt-auto"
-            icon="logout"
-            iconPosition="left"
-            label="Sign out"
-            loading={signingOut}
-            onClick={signOut}
-          />
+          {!isAmbient(aws) && (
+            <Button
+              variant="primary"
+              modifier="outline"
+              fullWidth
+              className="mt-auto"
+              icon="logout"
+              iconPosition="left"
+              label="Sign out"
+              loading={signingOut}
+              onClick={signOut}
+            />
+          )}
         </div>
       )
     return (
@@ -908,17 +933,19 @@ export function AwsConnectionPanel({
             level="body-small"
             className="min-w-0 flex-1 truncate text-content-layout-1"
           >
-            Signed in to AWS as {awsIdentityLabel(aws.identity_arn)}
+            {awsCredentialLabel(aws)}
           </Text>
-          <Button
-            variant="primary"
-            modifier="ghost"
-            size="small"
-            icon="logout"
-            label="Sign out"
-            loading={signingOut}
-            onClick={signOut}
-          />
+          {!isAmbient(aws) && (
+            <Button
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              icon="logout"
+              label="Sign out"
+              loading={signingOut}
+              onClick={signOut}
+            />
+          )}
         </HStack>
         {profileField('w-full')}
         <Button
@@ -969,7 +996,7 @@ export function AwsConnectionPanel({
           <HStack className="gap-2 items-center">
             <Spinner size="base" />
             <Text level="body-small" className="text-content-layout-1">
-              Complete the sign-in in the browser window we opened
+              Approve the sign-in on the AWS page in your browser
             </Text>
           </HStack>
           <Text level="caption" className="text-content-layout-3">

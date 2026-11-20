@@ -191,6 +191,7 @@ def test_sixth_turn_on_returns_clear_message_before_ai_claim(monkeypatch, tmp_pa
     for index in range(5):
         store.set_settings(str(index), {"enabled": True})
     monkeypatch.setattr(routes, "_store", lambda: store)
+    monkeypatch.setattr(routes, "_target_configured", lambda target: True)
     app = FastAPI()
     app.include_router(routes.router)
     response = TestClient(app, client=("127.0.0.1", 50000)).put('/targets/sixth/settings', json={"enabled": True})
@@ -315,3 +316,15 @@ def test_forget_target_drops_only_that_targets_data(tmp_path):
     assert [item["target"] for item in store.inbox()] == ["kept"]
     assert store.read("SELECT COUNT(*) n FROM inbox_event e JOIN inbox_item i ON i.id=e.item_id "
                       "WHERE i.target='gone'")[0]["n"] == 0
+
+
+def test_turning_on_an_unconfigured_target_is_404_and_uses_no_slot(monkeypatch, tmp_path):
+    store = MonitorStore(tmp_path / "monitor.db")
+    monkeypatch.setattr(routes, "_store", lambda: store)
+    monkeypatch.setattr(routes, "_target_configured", lambda target: target == "real")
+    app = FastAPI()
+    app.include_router(routes.router)
+    client = TestClient(app, client=("127.0.0.1", 50000))
+    response = client.put('/targets/phantom/settings', json={"enabled": True})
+    assert response.status_code == 404
+    assert not store.levers("phantom")["enabled"]

@@ -613,6 +613,32 @@ describe('Settings row password save', () => {
     })
   })
 
+  it("warns a server's reset clears data for everyone who uses it", async () => {
+    const meta = document.createElement('meta')
+    meta.name = 'rdst-runtime'
+    meta.content = 'container'
+    document.head.appendChild(meta)
+    try {
+      mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+      vi.mocked(useFleetStatus).mockReturnValue(
+        fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+      )
+      vi.mocked(useSystemStatus).mockReturnValue({
+        data: { data_directory: '/data/.rdst' },
+        isError: false,
+        refetch: vi.fn(),
+      } as unknown as ReturnType<typeof useSystemStatus>)
+      renderWithClient(<SettingsPage search={{}} />)
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Clear local data' })
+      )
+      expect(await screen.findByText("Clear this server's data?")).toBeTruthy()
+      expect(screen.getByText(/for everyone who uses it/)).toBeTruthy()
+    } finally {
+      meta.remove()
+    }
+  })
+
   it('shows a recoverable privacy error instead of an endless loading state', async () => {
     const refetch = vi.fn()
     vi.mocked(useSystemStatus).mockReturnValue({

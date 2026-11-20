@@ -700,3 +700,36 @@ def test_query_capture_probe_accepts_mysql_performance_schema():
         "title": "Historical query discovery is ready",
         "instructions": [],
     }
+
+
+@pytest.mark.asyncio
+async def test_first_added_target_becomes_the_default(monkeypatch):
+    from features.configure.service import ConfigureService
+    from features.configure.models import ConfigureInput, ConfigureOptions
+
+    class Config:
+        def __init__(self):
+            self.targets, self.default, self.saved = {}, None, False
+
+        def get(self, name):
+            return self.targets.get(name)
+
+        def upsert(self, name, entry):
+            self.targets[name] = entry
+
+        def get_default(self):
+            return self.default
+
+        def set_default(self, name):
+            self.default = name
+
+        def save(self):
+            self.saved = True
+
+    config = Config()
+    service = ConfigureService()
+    monkeypatch.setattr(service, "_load_config", lambda: config)
+    data = {"engine": "postgresql", "host": "db", "port": 5432, "database": "app", "user": "u"}
+    for name in ("first", "second"):
+        _ = [e async for e in service.add_target(ConfigureInput(target_name=name), ConfigureOptions(target_data=data))]
+    assert config.default == "first" and set(config.targets) == {"first", "second"}

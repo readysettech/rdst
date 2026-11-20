@@ -586,13 +586,15 @@ describe('AgentConnect finding databases', () => {
     ).toBeTruthy()
   })
 
-  it('offers a new search once one has finished', async () => {
-    routeFetch([])
+  it('searches again once one has finished', async () => {
+    const calls = routeFetch([])
     renderFull()
     await look()
+    const scans = () => calls.filter(([url]) => url.endsWith('/scan')).length
+    const before = scans()
     fireEvent.click(screen.getByTestId('search-again'))
-    expect(await screen.findByTestId('scan-computer')).toBeTruthy()
-    expect(screen.queryAllByTestId('found-database')).toHaveLength(0)
+    await waitFor(() => expect(scans()).toBe(before + 1))
+    expect(screen.queryByTestId('scan-computer')).toBeNull()
   })
 
   it('imports local databases on a click, and connects one manually with what it found', async () => {
@@ -1306,5 +1308,68 @@ describe('AgentConnect finding databases', () => {
       { timeout: 5000 }
     )
     expect(navigate).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('AgentConnect on a server', () => {
+  const SERVER_PROMPT =
+    'RDST runs as a server in my Kubernetes cluster. curl -H "Authorization: Bearer RDST_AGENT_KEY_HERE"'
+  let meta: HTMLMetaElement
+  let keys = 0
+
+  beforeEach(() => {
+    meta = document.createElement('meta')
+    meta.name = 'rdst-runtime'
+    meta.content = 'container'
+    document.head.appendChild(meta)
+    keys = 0
+    const reply = (body: object) =>
+      new Response(JSON.stringify(body), {
+        headers: { 'content-type': 'application/json' },
+      })
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      const path = String(url)
+      if (path.includes('/api/agent-connect/agents'))
+        return reply({ agents: [], apps: [], kubernetes: true })
+      if (path.includes('/api/server/agent-key') && init?.method === 'POST') {
+        keys += 1
+        return reply({
+          key: `rdst_ak_${keys}`,
+          exists: true,
+          created_at: 1700000000,
+          last_used_at: null,
+        })
+      }
+      return reply({ prompt: SERVER_PROMPT, issued_at: 1700000000 })
+    })
+  })
+
+  afterEach(() => meta.remove())
+
+  it('puts a new agent key in the copied prompt once, and says it replaces the old one', async () => {
+    renderWithClient(<AgentConnect onAddByHand={vi.fn()} />)
+    fireEvent.click(await screen.findByTestId('agent-prompt-reveal'))
+    expect(
+      (await screen.findByTestId('agent-prompt-summary')).textContent
+    ).toMatch(/in this cluster/)
+    expect(screen.getByTestId('agent-prompt-key-note').textContent).toMatch(
+      /replaces any earlier key/
+    )
+    // The key isn't made until the prompt is copied, so the card shows where it goes.
+    expect(screen.getByTestId('agent-prompt').textContent).toContain(
+      '[agent key, added when you copy]'
+    )
+    expect(keys).toBe(0)
+    fireEvent.click(screen.getByTestId('agent-copy-prompt'))
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        SERVER_PROMPT.replace('RDST_AGENT_KEY_HERE', 'rdst_ak_1')
+      )
+    )
+    fireEvent.click(screen.getByTestId('agent-copy-prompt'))
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2))
+    // Copying again reuses the key: a second key would cut off the prompt just pasted.
+    expect(keys).toBe(1)
+    expect(writeText.mock.calls[1][0]).toContain('rdst_ak_1')
   })
 })

@@ -139,6 +139,8 @@ def app_version() -> str:
 def surface() -> str:
     if os.environ.get("RDST_DESKTOP") == "1":
         return "desktop"
+    if os.environ.get("RDST_SERVER", "").strip().lower() in {"1", "true", "yes"}:
+        return "container"
     if "RDST_WEB_SERVE_STATIC" in os.environ:
         return "web"
     return "cli"

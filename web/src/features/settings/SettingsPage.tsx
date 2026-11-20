@@ -50,7 +50,12 @@ import {
   setAiProvider,
 } from '../../lib/api'
 import { clearAllBackgroundRuns } from '../../lib/backgroundRuns'
-import { isDesktopRuntime, thisComputer } from '../../lib/desktop'
+import {
+  isContainerRuntime,
+  isDesktopRuntime,
+  thisComputer,
+  thisDevice,
+} from '../../lib/desktop'
 import { classifyError } from '../../lib/errorContract'
 import { invalidateTargetQueries } from '../../lib/targetQueries'
 import {
@@ -643,7 +648,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
 
         <SettingsGroup id="notifications" title="Notifications">
           <SettingsRow
-            title={`Push to ${thisComputer()}`}
+            title={`Push to ${thisDevice()}`}
             line={
               isDesktopRuntime()
                 ? 'Act now items and the daily report. The same switch as Notifications in the tray menu.'
@@ -652,7 +657,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
           >
             <BaseInputSwitch
               name="push"
-              aria-label={`Push to ${thisComputer()}`}
+              aria-label={`Push to ${thisDevice()}`}
               checked={pushOn}
               onCheckedChange={(on) => void setDesktopNotifications(on)}
             />
@@ -869,7 +874,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
           </div>
         </SettingsGroup>
 
-        {import.meta.env.DEV ? (
+        {import.meta.env.DEV && !isContainerRuntime() ? (
           <SettingsGroup id="dev" title="Developer settings">
             <ClearKeyringRow />
           </SettingsGroup>
@@ -881,7 +886,11 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
         isOpen={confirmClear}
         onClose={() => setConfirmClear(false)}
         onConfirm={() => resetMutation.mutate()}
-        title="Clear local data?"
+        title={
+          isContainerRuntime()
+            ? "Clear this server's data?"
+            : 'Clear local data?'
+        }
         subtitle={dataDirectory ?? undefined}
         confirmLabel="Clear local data"
         confirmVariant="negative"
@@ -890,8 +899,9 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
         notice={{
           accent: 'negative',
           title: "This can't be undone.",
-          message:
-            "This deletes RDST's local configuration, history, schema descriptions, keys saved by RDST, the app's browser storage, and RDST-managed demo and comparison containers. Close other RDST processes first. ~/.ssh, ~/.aws, provider-managed credentials and inherited environment variables are unchanged.",
+          message: isContainerRuntime()
+            ? "This deletes this server's data for everyone who uses it: its databases, monitoring history, reports, schema descriptions, Readyset and provider sign-ins, and saved passwords and keys. Environment variables and Kubernetes Secrets are unchanged."
+            : "This deletes RDST's local configuration, history, schema descriptions, keys saved by RDST, the app's browser storage, and RDST-managed demo and comparison containers. Close other RDST processes first. ~/.ssh, ~/.aws, provider-managed credentials and inherited environment variables are unchanged.",
         }}
       >
         {resetMutation.error instanceof Error ? (

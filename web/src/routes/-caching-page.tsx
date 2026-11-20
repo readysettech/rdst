@@ -8,10 +8,11 @@ import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { useNavigate } from '@tanstack/react-router'
 import { WorkspaceLayout } from '../components/workspace/WorkspaceLayout'
 import { ComparePage } from '../features/caching/compare/ComparePage'
+import { isContainerRuntime } from '../lib/desktop'
 import { BenchmarkPage } from './-benchmark-page'
 import type { PerformanceTestView } from './cache'
 
-const TEST_VIEWS: Array<{
+const ALL_TEST_VIEWS: Array<{
   value: PerformanceTestView
   label: string
   icon: IconStrokeName
@@ -19,6 +20,12 @@ const TEST_VIEWS: Array<{
   { value: 'compare', label: 'Compare against Readyset', icon: 'play' },
   { value: 'load-test', label: 'Load test', icon: 'layers' },
 ]
+
+// Compare starts a Readyset container, which a containerized server can't do,
+// so there the page holds Load test alone.
+const TEST_VIEWS = ALL_TEST_VIEWS.filter(
+  (item) => !(item.value === 'compare' && isContainerRuntime())
+)
 
 const PANEL_ID = 'caching-panel'
 

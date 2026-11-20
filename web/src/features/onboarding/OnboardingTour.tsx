@@ -21,6 +21,7 @@ import {
 import { useOpenAddDatabase } from '../../components/configure/addDatabase'
 import { markFirstRunPopupShown } from '../../components/GetStarted'
 import { type OnboardingStep, trackEventOnce } from '../../lib/analytics'
+import { isContainerRuntime } from '../../lib/desktop'
 import { useSystemStatus } from '../../lib/useSystemStatus'
 import {
   clearTourStep,
@@ -44,6 +45,10 @@ interface TourStep {
   key: OnboardingStep
   title: string
   body: string
+  /** The body for a server-mode RDST, where the user's coding agent isn't beside it. */
+  serverBody?: string
+  /** A still that replaces the video and scene in server mode, where they'd show the desktop flow. */
+  serverStill?: { caption: string; lines: string[] }
   /** Shows who's behind RDST, where people decide whether to trust it. */
   authority?: boolean
   /** The scene's video, by file stem under /onboarding (webm and a poster png). */
@@ -64,6 +69,15 @@ export const TOUR_STEPS: TourStep[] = [
     key: 'tour-connect',
     title: 'Connect your database',
     body: "Paste a connection string, or hand the job to Claude or any coding agent that's open in your project. It finds the database your app uses and sets it up for you.",
+    serverBody:
+      "Paste a connection string, or sign in to where it's hosted. On Kubernetes, RDST can also search its cluster for the PostgreSQL and MySQL databases it can reach.",
+    serverStill: {
+      caption: 'Search this cluster',
+      lines: [
+        'pg-rw.database.svc.cluster.local:5432',
+        'mysql.inventory.svc.cluster.local:3306',
+      ],
+    },
     authority: true,
     video: 'tour-connect',
     duration: CONNECT_DURATION,
@@ -89,6 +103,16 @@ export const TOUR_STEPS: TourStep[] = [
     key: 'tour-agent',
     title: 'Ask your coding agent what RDST found',
     body: "Claude or any coding agent can ask RDST what's slow through RDST's own tools. It gets the query and the fix, writes the change into your project, and marks the Inbox item resolved.",
+    serverBody:
+      'Claude Code or Codex on your own computer connects to this server from "Connect Claude or Codex" on a database\'s page, which hands you a command with an agent key. It gets the query and the fix, writes the change into your project, and marks the Inbox item resolved.',
+    serverStill: {
+      caption: 'Connect Claude Code to this server',
+      lines: [
+        'claude mcp add --transport http rdst \\',
+        '  https://rdst.example.com/mcp \\',
+        '  --header "Authorization: Bearer rdst_ak_…"',
+      ],
+    },
     video: 'tour-agent',
     duration: AGENT_DURATION,
     Scene: AgentScene,
@@ -169,6 +193,23 @@ function StepBars({
 
 const quietLink =
   'underline decoration-border-layout-2 underline-offset-2 transition-colors duration-fast hover:text-content-layout-1'
+
+/** A static frame for a step whose video shows the desktop flow. */
+function ServerStill({ caption, lines }: { caption: string; lines: string[] }) {
+  return (
+    <div
+      className="w-full rounded-lg border border-border-layout-2 bg-surface-layout-1 p-5"
+      data-testid="onboarding-server-still"
+    >
+      <Text as="p" level="label-small" className="text-content-layout-2">
+        {caption}
+      </Text>
+      <pre className="mt-3 overflow-x-auto whitespace-pre font-mono text-body-small text-content-layout-1">
+        {lines.join('\n')}
+      </pre>
+    </div>
+  )
+}
 
 /** A scene's video, framed like a window on the stage. Its parent decides when it plays. */
 function SceneVideo({
@@ -265,7 +306,8 @@ function TourBody({
   const videoRef = useRef<HTMLVideoElement>(null)
   const step = TOUR_STEPS[index]
   const last = index === TOUR_STEPS.length - 1
-  const useVideo = !failed[step.key]
+  const still = isContainerRuntime() ? step.serverStill : undefined
+  const useVideo = !still && !failed[step.key]
 
   const complete = useCallback((at: number) => {
     const key = TOUR_STEPS[at].key
@@ -381,7 +423,9 @@ function TourBody({
               level="body-medium"
               className="mt-3 text-content-layout-2"
             >
-              {step.body}
+              {isContainerRuntime() && step.serverBody
+                ? step.serverBody
+                : step.body}
             </Text>
             {step.authority && <AuthorityNote className="mt-6" />}
           </m.div>
@@ -456,7 +500,9 @@ function TourBody({
             exit={{ opacity: 0, scale: 0.985 }}
             transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
           >
-            {useVideo ? (
+            {still ? (
+              <ServerStill caption={still.caption} lines={still.lines} />
+            ) : useVideo ? (
               <SceneVideo
                 stem={step.video}
                 playing={videoPlaying}

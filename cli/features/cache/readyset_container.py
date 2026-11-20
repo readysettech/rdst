@@ -126,6 +126,16 @@ def check_docker_available() -> Dict[str, Any]:
     Returns:
         Dict with success status and error info if not available
     """
+    from shared import server_mode
+
+    reason = server_mode.containers_unavailable_reason()
+    if reason:
+        return {
+            "success": False,
+            "error": reason,
+            "error_type": DockerError.CLI_NOT_FOUND,
+            "remediation": "Use the RDST desktop app: https://readyset.io/downloads",
+        }
     try:
         result = subprocess.run(
             ['docker', 'info'],

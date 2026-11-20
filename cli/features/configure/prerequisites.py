@@ -152,7 +152,7 @@ def _postgres_provider(conn: Any) -> Optional[str]:
             conn,
             "SELECT rolname FROM pg_catalog.pg_roles WHERE rolname IN "
             "('rds_superuser', 'cloudsqlsuperuser', 'azure_pg_admin', 'supabase_admin', "
-            "'neon_superuser', 'doadmin')",
+            "'neon_superuser', 'doadmin', 'robot_zmon', 'zalandos')",
         )
     }
     if "rds_superuser" in roles:
@@ -169,7 +169,30 @@ def _postgres_provider(conn: Any) -> Optional[str]:
     ):
         if role in roles:
             return provider
+    # Kubernetes operators: CloudNativePG writes cnpg.config_sha256 into every
+    # instance's configuration; the Zalando operator creates its robot_zmon role.
+    if _one(conn, "SELECT current_setting('cnpg.config_sha256', true) IS NOT NULL"):
+        return "cnpg"
+    if roles & {"robot_zmon", "zalandos"}:
+        return "zalando"
     return None
+
+
+def _operator_extras(conn: Any, target_config: dict[str, Any]) -> dict[str, Any]:
+    """The cluster and namespace an operator fix names in its kubectl commands."""
+    extras: dict[str, Any] = {}
+    try:
+        name = _one(conn, "SELECT current_setting('cluster_name', true)")
+    except Exception as exc:
+        logger.debug("cluster_name lookup failed: %s", exc)
+        name = None
+    if name:
+        extras["cluster"] = str(name)
+    parts = str(target_config.get("host") or "").lower().split(".")
+    # <service>.<namespace>.svc[.cluster.local]
+    if len(parts) >= 3 and parts[2] == "svc" and parts[1]:
+        extras["namespace"] = parts[1]
+    return extras
 
 
 def _mysql_provider(conn: Any) -> Optional[str]:
@@ -672,6 +695,8 @@ def check_target(
             user=str(target_config.get("user") or "the RDST user"),
             database=str(target_config.get("database") or "this database"),
         )
+        if provider in ("cnpg", "zalando"):
+            ctx.extras.update(_operator_extras(conn, target_config))
         runner = check_postgres if engine == "postgresql" else check_mysql
         checks = runner(conn, ctx, open_connection, sleep=sleep)
     except Exception as exc:

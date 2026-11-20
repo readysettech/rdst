@@ -15,11 +15,13 @@ import {
   retryQuery,
 } from './lib/backendReachability'
 import { preloadRouteCode } from './lib/preloadRouteCode'
+import { installServerSignInRedirect } from './lib/serverSession'
 import { routeTree } from './routeTree.gen'
 
 import './style.css'
 
 installBackendReachability()
+installServerSignInRedirect()
 
 void fetchEnvRequirements()
   .then(({ telemetry_enabled }) => initAnalytics(telemetry_enabled))

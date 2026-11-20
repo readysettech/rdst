@@ -773,7 +773,8 @@ def main():
     download_dir = (
         Path(args.download_dir)
         if args.download_dir
-        else Path.home() / ".rdst" / "cache" / "stackexchange"
+        else Path(os.environ.get("RDST_DATA_DIR") or Path.home() / ".rdst").expanduser()
+        / "cache" / "stackexchange"
     )
     download_dir.mkdir(parents=True, exist_ok=True)
     log.info("Download cache: %s", download_dir)

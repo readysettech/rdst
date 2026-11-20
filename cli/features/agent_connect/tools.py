@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 
 ABOUT = ("RDST is Readyset's database monitoring app, running locally on this computer; "
          "database passwords stay in this computer's OS keyring and are never returned.")
+SERVER_ABOUT = ("RDST is Readyset's database monitoring app, running as a server in the user's "
+                "cluster; it connects to databases from its own pod, and database passwords "
+                "stay on the server and are never returned.")
+
+
+def _about() -> str:
+    from shared import server_mode
+
+    return SERVER_ABOUT if server_mode.enabled() else ABOUT
 
 
 class ToolError(Exception):
@@ -93,7 +102,15 @@ def _require_target(args: dict, key: str = "name") -> str:
 def _read_env_file(path: str, variable: str) -> str:
     """One variable's value from a dotenv-style file, read here so it never passes the agent."""
     from features.agent_connect import discover
+    from shared import server_mode
 
+    # A remote agent shares no filesystem with a server, and RDST must not read
+    # the server's own files on an agent's behalf.
+    if server_mode.enabled():
+        raise ToolError(
+            "RDST runs as a server, so it can't read files from your computer. "
+            "Pass the url or password directly; RDST never shows it back."
+        )
     file = Path(discover.rdst_path(path)).expanduser()
     if not file.is_absolute():
         raise ToolError("env_file must be an absolute path")
@@ -994,7 +1011,7 @@ AGENTS_NEED_AI = (
 
 
 def tool_list() -> list[dict]:
-    return [{"name": name, "description": f"{description} {ABOUT}", "inputSchema": schema}
+    return [{"name": name, "description": f"{description} {_about()}", "inputSchema": schema}
             for name, (description, schema, _handler) in TOOLS.items()]
 
 

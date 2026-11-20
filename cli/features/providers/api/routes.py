@@ -407,6 +407,17 @@ def _local_origin(request: Request) -> str:
     return "http://localhost"
 
 
+def _browser_origin(request: Request) -> str:
+    """Where the browser reaches this server: its public origin as a server, else loopback."""
+    from shared import server_mode
+
+    if server_mode.enabled():
+        origin = server_mode.public_origin(request)
+        if origin:
+            return origin
+    return _local_origin(request)
+
+
 def _provider_return_url(request: Request, provider: str) -> str:
     """Return to this web app, or to the desktop deep-link when sidecar-hosted."""
     if os.environ.get("RDST_DESKTOP") == "1":
@@ -414,7 +425,7 @@ def _provider_return_url(request: Request, provider: str) -> str:
         if not _DESKTOP_PROTOCOL_RE.fullmatch(scheme):
             scheme = "rdst"
         return f"{scheme}://oauth-complete?provider={quote(provider)}"
-    return f"{_local_origin(request)}/configure?connected={quote(provider)}"
+    return f"{_browser_origin(request)}/configure?connected={quote(provider)}"
 
 
 def _remote_browser_refusal(request: Request, provider: str) -> Optional[JSONResponse]:
@@ -423,6 +434,14 @@ def _remote_browser_refusal(request: Request, provider: str) -> Optional[JSONRes
     The broker returns the browser to this server's loopback address, which a browser
     elsewhere cannot reach, so the login would wait until it expired.
     """
+    from shared import server_mode
+
+    if server_mode.enabled():
+        refusal = server_mode.broker_sign_in_refusal(request)
+        if refusal is None:
+            return None
+        return JSONResponse(status_code=409, content={
+            "code": f"{provider}_oauth_server_host", "detail": refusal})
     origin = request.headers.get("origin", "")
     # The browser's own Origin says where it runs. A Docker port mapping or local proxy
     # makes the TCP peer non-loopback even when the browser is on this machine.
@@ -449,7 +468,7 @@ def _remote_browser_refusal(request: Request, provider: str) -> Optional[JSONRes
 def _provider_completion_url(request: Request, provider: str) -> str:
     """Where the broker sends the browser once the provider approves: this server's
     oauth-return route, which takes the completion the broker withholds tokens for."""
-    return f"{_local_origin(request)}/api/providers/oauth-return?provider={quote(provider)}"
+    return f"{_browser_origin(request)}/api/providers/oauth-return?provider={quote(provider)}"
 
 
 @router.get("/oauth-return", response_class=HTMLResponse)

@@ -17,6 +17,7 @@ import { Text } from '@rs/ui-new/text'
 import { type ReactNode, useEffect } from 'react'
 import { TargetConnectivityNotice, TargetLockNotice } from '../../../components'
 import { BenchmarkConfirmDialog } from '../../../components/BenchmarkConfirmDialog'
+import { isContainerRuntime } from '../../../lib/desktop'
 import { formatMeta, shortHash } from '../../../lib/formatters'
 import { queryDisplayName } from '../../../lib/queryIdentity'
 import { detectParameters } from '../../../lib/sqlParameters'
@@ -209,39 +210,43 @@ export function LoadTestSetup({
 
   // The run's shape: Readyset lane, goal, clients, summary and advanced
   // settings. Shared by the page layout and the Database drawer.
+  // Readyset runs in a temporary container, which a containerized server can't start.
+  const containerRuntime = isContainerRuntime()
   const loadControls = (
     <>
-      <HStack className="items-center justify-between gap-3 rounded-xl border border-border-layout-soft px-4 py-3">
-        <VStack className="min-w-0 items-start gap-0.5">
-          <Text level="label-small" className="text-content-layout-1">
-            Compare against Readyset
-          </Text>
-          <Text level="caption" className="text-content-layout-3">
-            {dockerUnavailable
-              ? 'Readyset runs in a local Docker sandbox, and Docker is not running.'
-              : comparative
-                ? 'Run against your database and Readyset side by side.'
-                : 'Origin only. Readyset is skipped for this run.'}
-          </Text>
-        </VStack>
-        <BaseInputSwitch
-          name="load-test-comparative"
-          aria-label="Compare against Readyset"
-          checked={comparative && !dockerUnavailable}
-          disabled={dockerUnavailable}
-          onCheckedChange={setComparative}
-        />
-      </HStack>
-      {/* Said before the run, not after real traffic has already been
+      <Show when={!containerRuntime}>
+        <HStack className="items-center justify-between gap-3 rounded-xl border border-border-layout-soft px-4 py-3">
+          <VStack className="min-w-0 items-start gap-0.5">
+            <Text level="label-small" className="text-content-layout-1">
+              Compare against Readyset
+            </Text>
+            <Text level="caption" className="text-content-layout-3">
+              {dockerUnavailable
+                ? 'Readyset runs in a local Docker sandbox, and Docker is not running.'
+                : comparative
+                  ? 'Run against your database and Readyset side by side.'
+                  : 'Origin only. Readyset is skipped for this run.'}
+            </Text>
+          </VStack>
+          <BaseInputSwitch
+            name="load-test-comparative"
+            aria-label="Compare against Readyset"
+            checked={comparative && !dockerUnavailable}
+            disabled={dockerUnavailable}
+            onCheckedChange={setComparative}
+          />
+        </HStack>
+        {/* Said before the run, not after real traffic has already been
           driven at the database for the configured duration. [D-11] */}
-      <Show when={dockerUnavailable}>
-        <InlineNotice
-          errorClass="local-dependency"
-          accent="warning"
-          title="Docker is required to compare against Readyset"
-          message="Start Docker so RDST can prepare its temporary Readyset sandbox, then try again. This run will measure the origin database only."
-          onRetry={() => void recheckSandbox()}
-        />
+        <Show when={dockerUnavailable}>
+          <InlineNotice
+            errorClass="local-dependency"
+            accent="warning"
+            title="Docker is required to compare against Readyset"
+            message="Start Docker so RDST can prepare its temporary Readyset sandbox, then try again. This run will measure the origin database only."
+            onRetry={() => void recheckSandbox()}
+          />
+        </Show>
       </Show>
 
       <VStack className="items-start gap-0.5">

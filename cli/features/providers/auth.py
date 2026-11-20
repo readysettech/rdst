@@ -106,6 +106,9 @@ def _credential_method(method: Optional[str]) -> Optional[str]:
         return "env"
     if "sso" in method:
         return "sso"
+    if "web-identity" in method:
+        # EKS IRSA or any OIDC web identity role.
+        return "web_identity"
     if "iam-role" in method or "instance" in method or "container" in method:
         return "instance"
     return "profile"

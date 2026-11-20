@@ -360,3 +360,35 @@ describe('SshFields', () => {
     })
   })
 })
+
+describe('SshFields in server mode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    Element.prototype.scrollIntoView = vi.fn()
+    vi.mocked(fetchSshKeys).mockResolvedValue([])
+    vi.mocked(fetchSshProfiles).mockResolvedValue([])
+    const meta = document.createElement('meta')
+    meta.name = 'rdst-runtime'
+    meta.content = 'container'
+    document.head.appendChild(meta)
+  })
+  afterEach(() => {
+    document.head.querySelector('meta[name="rdst-runtime"]')?.remove()
+    cleanup()
+  })
+
+  it("names the server's files and says how keys get there", () => {
+    render(<Harness onSubmit={vi.fn()} />)
+
+    expect(screen.getByTestId('ssh-key-server-hint').textContent).toMatch(
+      /Mount it into the container/
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: 'Key path' }))
+    expect(
+      screen.getByRole('option', { name: "Browse this server's files" })
+    ).toBeTruthy()
+    expect(
+      screen.queryByRole('option', { name: 'Browse local files' })
+    ).toBeNull()
+  })
+})

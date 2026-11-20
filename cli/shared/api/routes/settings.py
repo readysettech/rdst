@@ -637,3 +637,89 @@ async def verify_poll(request: Request) -> VerifyPollResponse:
         return VerifyPollResponse(verified=True)
     # A report went out through another install's email: delivered, nothing to store.
     return VerifyPollResponse(verified=bool(status.get("verified")))
+
+
+class SlackSettingsResponse(BaseModel):
+    # The URL itself is a secret and never comes back.
+    configured: bool
+    # "env" when RDST_SLACK_WEBHOOK_URL sets it (and Settings can't change it).
+    source: Literal["env", "settings"] | None = None
+    links_to_ui: bool = False
+    last_sent_at: int | None = None
+    last_error: str | None = None
+    last_error_at: int | None = None
+
+
+class SlackSettingsRequest(BaseModel):
+    webhook_url: str = Field(max_length=2048)
+
+
+class SlackTestRequest(BaseModel):
+    # Tests this URL before saving it; the saved one when empty.
+    webhook_url: str | None = Field(default=None, max_length=2048)
+
+
+class SlackTestResponse(BaseModel):
+    ok: bool
+    error: str | None = None
+
+
+def _slack_settings_response() -> SlackSettingsResponse:
+    from shared import slack_notifications as slack
+
+    _url, source = slack.configured()
+    return SlackSettingsResponse(configured=source is not None, source=source,
+                                 links_to_ui=slack._public_url() is not None, **slack.status())
+
+
+def _slack_event(action: str, ok: bool) -> None:
+    from shared import product_telemetry
+
+    product_telemetry.capture("slack_notifications_changed", {"action": action, "ok": ok})
+
+
+@router.get("/slack")
+async def get_slack_settings(request: Request) -> SlackSettingsResponse:
+    require_local_request(request)
+    return await asyncio.to_thread(_slack_settings_response)
+
+
+@router.put("/slack")
+async def set_slack_settings(request: Request, body: SlackSettingsRequest) -> SlackSettingsResponse:
+    require_local_request(request)
+    from shared import slack_notifications as slack
+
+    try:
+        saved = await asyncio.to_thread(slack.save_webhook_url, body.webhook_url)
+    except slack.InvalidWebhookUrl as exc:
+        raise HTTPException(400, str(exc)) from None
+    _slack_event("saved", saved)
+    if not saved:
+        raise HTTPException(503, "RDST couldn't save the webhook URL in its secret store.")
+    return await asyncio.to_thread(_slack_settings_response)
+
+
+@router.delete("/slack")
+async def clear_slack_settings(request: Request) -> SlackSettingsResponse:
+    require_local_request(request)
+    from shared import slack_notifications as slack
+
+    await asyncio.to_thread(slack.clear_webhook_url)
+    _slack_event("cleared", True)
+    return await asyncio.to_thread(_slack_settings_response)
+
+
+@router.post("/slack/test")
+async def test_slack_settings(request: Request, body: SlackTestRequest) -> SlackTestResponse:
+    require_local_request(request)
+    from shared import slack_notifications as slack
+
+    url = (body.webhook_url or "").strip() or None
+    if url:
+        try:
+            url = slack.validate_webhook_url(url)
+        except slack.InvalidWebhookUrl as exc:
+            raise HTTPException(400, str(exc)) from None
+    error = await asyncio.to_thread(slack.send_test, url)
+    _slack_event("test", error is None)
+    return SlackTestResponse(ok=error is None, error=error)

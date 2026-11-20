@@ -1,0 +1,193 @@
+# RDST runs as a single replica: one server owns its data volume (SQLite stores,
+# monitoring leases and the Readyset account session).
+
+image:
+  registry: docker.io
+  repository: readysettech/rdst
+  # Defaults to the chart's appVersion.
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+auth:
+  # token: every browser signs in with the access token (default).
+  # none: no sign-in; only for when an authenticating proxy (oauth2-proxy,
+  #       ingress auth) already sits in front of the Service.
+  mode: token
+  # The access token lives in the Secret <fullname>-auth (rdst-auth for a release
+  # named rdst), which the chart creates with a random token on install and keeps
+  # across upgrades and uninstalls. helm install prints the command to read it.
+  # Set token to choose it yourself; changing it restarts the pod and signs
+  # every browser out. With Argo CD (which renders with `helm template`), set
+  # token or existingSecret, since a generated token can't be read back there.
+  token: ""
+  # Or use a Secret you manage (SOPS, sealed-secrets, external-secrets).
+  existingSecret: ""
+  existingSecretKey: access-token
+
+# Slack: pushes (the alerts the desktop app shows as system notifications) go to a
+# Slack incoming webhook. The URL is a secret, so it comes from a Secret here; it can
+# also be pasted in the UI (Inbox > Notifications), which keeps it on the data volume.
+notifications:
+  slack:
+    existingSecret: ""
+    existingSecretKey: webhook-url
+
+# The address people open RDST at, for links in Slack messages and the log. Defaults to the first
+# ingress host when the ingress is on.
+publicUrl: ""
+
+# Readyset account service. Leave empty for production.
+keyserviceUrl: ""
+
+telemetry:
+  # Anonymous usage telemetry (PostHog). false sets RDST_TELEMETRY=false.
+  enabled: true
+
+# Databases RDST connects to on startup, for installs done by an agent or GitOps. Each
+# password comes from a Kubernetes Secret as RDST_<NAME>_PASSWORD and never touches RDST's
+# disk. RDST adds or updates these on every start; databases added in the UI are left alone,
+# and one removed from this list stays in RDST until you delete it there.
+targets: []
+#  - name: shop
+#    engine: postgresql          # or mysql
+#    host: pg-rw.database.svc.cluster.local
+#    port: 5432
+#    database: shop
+#    user: shop
+#    passwordSecret: {name: pg-app, key: password}
+#    monitoring: true            # turn monitoring on once it's added
+
+# Extra environment for the server: database passwords referenced by a target's
+# password_env, ANTHROPIC_API_KEY, and so on. Prefer envFrom with a Secret.
+env: []
+#  - name: RDST_APP_DB_PASSWORD
+#    valueFrom:
+#      secretKeyRef: {name: rdst-db, key: password}
+envFrom: []
+#  - secretRef:
+#      name: rdst-secrets
+
+persistence:
+  enabled: true
+  # Use a block-storage class (RWO). SQLite stores need a local filesystem, not NFS.
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+  size: 5Gi
+  annotations: {}
+  # Use an existing PVC instead of the StatefulSet's volume claim template.
+  existingClaim: ""
+
+service:
+  type: ClusterIP
+  port: 8787
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: rdst.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: rdst-tls
+  #    hosts: [rdst.example.com]
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountToken: false
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 384Mi
+  limits:
+    memory: 1Gi
+
+startupProbe:
+  # Database migrations on upgrade can take a while; allow up to 10 minutes.
+  httpGet: {path: /health, port: http}
+  periodSeconds: 5
+  failureThreshold: 120
+livenessProbe:
+  httpGet: {path: /health, port: http}
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+readinessProbe:
+  httpGet: {path: /health, port: http}
+  periodSeconds: 10
+  timeoutSeconds: 5
+
+terminationGracePeriodSeconds: 30
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+
+# Extra volumes, for example SSH keys for SSH-tunneled targets:
+#   extraVolumes: [{name: ssh, secret: {secretName: rdst-ssh, defaultMode: 0400}}]
+#   extraVolumeMounts: [{name: ssh, mountPath: /data/.ssh, readOnly: true}]
+extraVolumes: []
+extraVolumeMounts: []
+
+networkPolicy:
+  enabled: false
+  # Pods allowed to reach the UI, usually the ingress controller.
+  ingressFrom: []
+  #  - namespaceSelector:
+  #      matchLabels: {kubernetes.io/metadata.name: kube-system}
+  # Egress to the databases RDST monitors.
+  databases: []
+  #  - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: database}}}]
+  #    ports: [{port: 5432, protocol: TCP}]
+  # HTTPS egress for the Readyset account service (keyservice.readyset.io), and
+  # telemetry when enabled. Narrow it with an egress gateway or CIDRs if needed.
+  allowHttpsEgress: true
+
+discovery:
+  kubernetes:
+    # "Search this cluster" in the connect dialog lists the PostgreSQL and MySQL
+    # Services RDST can reach, plus CloudNativePG and Zalando clusters. The chart
+    # grants read-only access to Services, Namespaces and those clusters, never
+    # Secrets, and mounts the service account token. false turns the search off.
+    enabled: true
+    # Namespaces to search. Empty searches the whole cluster (a ClusterRole);
+    # otherwise RDST gets a Role in each namespace listed.
+    namespaces: []
+    # Kubernetes API server ports allowed through the NetworkPolicy, when it's on.
+    # 443 on EKS, GKE and AKS; 6443 on kubeadm, k3s and k3d.
+    apiServerPorts: [443, 6443]
+    # The API server's addresses, for the NetworkPolicy. Empty opens those ports to
+    # any address, which lets HTTPS out even with allowHttpsEgress: false. Find them
+    # with: kubectl get endpoints kubernetes -n default
+    apiServerCidrs: []
+    #  - 10.0.0.10/32

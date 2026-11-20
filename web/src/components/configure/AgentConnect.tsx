@@ -34,9 +34,13 @@ import {
   subscribeAgentConnect,
 } from '../../lib/agentConnect'
 import {
+  AGENT_KEY_PLACEHOLDER,
+  createAgentKey,
   type FoundDatabase,
   openInApp,
   PROMPT_SUMMARY,
+  SERVER_PROMPT_KEY_NOTE,
+  SERVER_PROMPT_SUMMARY,
   type SignInProvider,
 } from '../../lib/agentDiscovery'
 import {
@@ -45,6 +49,7 @@ import {
   trackEvent,
 } from '../../lib/analytics'
 import { startBootstrapRun } from '../../lib/backgroundRuns'
+import { isContainerRuntime } from '../../lib/desktop'
 import { userErrorClass } from '../../lib/userErrorClass'
 import { notifyDatabasesChanged } from './addDatabase'
 import { FindDatabases } from './FindDatabases'
@@ -269,6 +274,9 @@ export function AgentConnect({
   const [showPrompt, setShowPrompt] = useState(false)
   const [progress, setProgress] = useState<AgentProgress>(NO_PROGRESS)
   const [opening, setOpening] = useState(false)
+  // A server's prompt carries an agent key, made when the prompt is first copied.
+  const server = isContainerRuntime()
+  const [agentKey, setAgentKey] = useState<string | null>(null)
   const loadRef = useRef<AbortController | null>(null)
 
   const load = useCallback(async () => {
@@ -410,7 +418,13 @@ export function AgentConnect({
   const copy = async () => {
     if (!prompt) return
     try {
-      await navigator.clipboard.writeText(prompt.prompt)
+      let text = prompt.prompt
+      if (server && text.includes(AGENT_KEY_PLACEHOLDER)) {
+        const key = agentKey ?? (await createAgentKey()).key
+        setAgentKey(key)
+        text = text.replaceAll(AGENT_KEY_PLACEHOLDER, key)
+      }
+      await navigator.clipboard.writeText(text)
       setCopied(true)
       void agentAttemptId(prompt.attempt).then((id) =>
         trackEvent('agent_prompt_copied', { attempt_id: id })
@@ -467,6 +481,16 @@ export function AgentConnect({
     )
 
   const caption = connected ? 'Your agent connected.' : undefined
+  const shownPrompt =
+    prompt && server
+      ? {
+          ...prompt,
+          prompt: prompt.prompt.replaceAll(
+            AGENT_KEY_PLACEHOLDER,
+            agentKey ?? '[agent key, added when you copy]'
+          ),
+        }
+      : prompt
 
   const status: { state: AgentState; title: string; caption: ReactNode } =
     added && target
@@ -545,12 +569,22 @@ export function AgentConnect({
               className="text-content-layout-2"
               data-testid="agent-prompt-summary"
             >
-              {PROMPT_SUMMARY}
+              {server ? SERVER_PROMPT_SUMMARY : PROMPT_SUMMARY}
             </Text>
+            {server && (
+              <Text
+                as="p"
+                level="caption"
+                className="mt-1 text-content-layout-3"
+                data-testid="agent-prompt-key-note"
+              >
+                {SERVER_PROMPT_KEY_NOTE}
+              </Text>
+            )}
 
             <div className="mt-4">
               <PromptCard
-                prompt={prompt}
+                prompt={shownPrompt}
                 caption={caption}
                 copied={copied}
                 primary={!connected}

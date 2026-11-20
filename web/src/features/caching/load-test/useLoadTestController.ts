@@ -13,6 +13,7 @@ import {
   fetchTargets,
   updateQueryParameters,
 } from '../../../lib/api'
+import { isContainerRuntime } from '../../../lib/desktop'
 import {
   buildParameterSuggestions,
   fetchParameterSchema,
@@ -171,8 +172,10 @@ export function useLoadTestController({
     staleTime: 5_000,
   })
   const dockerUnavailable =
-    sandboxQuery.data !== undefined &&
-    (!sandboxQuery.data.docker_installed || !sandboxQuery.data.docker_running)
+    isContainerRuntime() ||
+    (sandboxQuery.data !== undefined &&
+      (!sandboxQuery.data.docker_installed ||
+        !sandboxQuery.data.docker_running))
   useEffect(() => {
     if (dockerUnavailable) setComparative(false)
   }, [dockerUnavailable])

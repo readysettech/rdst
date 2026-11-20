@@ -45,6 +45,7 @@ import {
   readsItsOwnSecret,
   recommended,
   replyToAgent,
+  SERVER_PROMPT_SUMMARY,
   SIGN_IN_PROVIDERS,
   type SignInProvider,
   signInProvider,
@@ -58,6 +59,7 @@ import {
   type RdstEventProperties,
   trackEvent,
 } from '../../lib/analytics'
+import { isContainerRuntime } from '../../lib/desktop'
 import { useConfigure } from '../../lib/useConfigure'
 import { userErrorClass } from '../../lib/userErrorClass'
 import {
@@ -112,6 +114,15 @@ const SCAN_PLACES = [
   'Databases running on this computer',
   'Saved connections',
 ].map((label) => ({ method: '', label, state: 'running', found: 0 }))
+// A server-mode RDST in a Kubernetes pod looks around its cluster instead.
+const CLUSTER_PLACES = [
+  {
+    method: '',
+    label: 'Databases in this Kubernetes cluster',
+    state: 'running',
+    found: 0,
+  },
+]
 
 type FindStage = RdstEventProperties['find_view_closed']['stage']
 
@@ -282,6 +293,8 @@ function secretWhere(found: FoundDatabase): string {
       ? 'Its URL is in one of your agent sessions or your shell history.'
       : `Its URL is in ${file(found.url_file)}.`
   if (found.secrets) return `Its secrets are in ${found.secrets}.`
+  if (found.password_hint)
+    return `Read its password with: ${found.password_hint}`
   return "RDST didn't find its password."
 }
 
@@ -380,7 +393,13 @@ function FoundOption({
               />
             )}
             {found.reach === 'unreachable' && (
-              <span title="It exists but doesn't answer from this computer: it may be in a private network or behind an allowlist. Claude can help reach it.">
+              <span
+                title={
+                  isContainerRuntime()
+                    ? "It exists but doesn't answer from RDST's pod: a NetworkPolicy, firewall or security group may be blocking it."
+                    : "It exists but doesn't answer from this computer: it may be in a private network or behind an allowlist. Claude can help reach it."
+                }
+              >
                 <Tag
                   size="small"
                   variant="neutral"
@@ -982,6 +1001,10 @@ export function FindDatabases({
   onEdit?: (target: string) => void
 }) {
   const [agents, setAgents] = useState<DiscoveryAgent[] | null>(null)
+  // A server has no computer of the user's to search: in a Kubernetes pod it searches the
+  // cluster, and elsewhere (plain Docker) it offers no search.
+  const server = isContainerRuntime()
+  const [cluster, setCluster] = useState(false)
   const [agentKey, setAgentKey] = useState<string | null>(null)
   // The agent picked for the search is signed out: its sign-in shows before anything runs.
   const [signInFirst, setSignInFirst] = useState(false)
@@ -1033,10 +1056,11 @@ export function FindDatabases({
   useEffect(() => {
     let live = true
     fetchDiscoveryOptions()
-      .then(({ agents: found, apps: installed }) => {
+      .then(({ agents: found, apps: installed, kubernetes }) => {
         if (!live) return
         setAgents(found)
         setApps(installed)
+        setCluster(kubernetes)
         onAgentsRef.current?.(found)
         trackEvent('find_view_shown', {
           agents: found.length,
@@ -1758,93 +1782,102 @@ export function FindDatabases({
 
   // The coding agent's ways in, under whatever RDST shows.
   const stageIn = onOpenApp ? apps : []
-  const agentWays = (stageIn.length > 0 || onPastePrompt) && (
-    <div
-      className="flex flex-wrap items-center gap-x-1 gap-y-1 border-t border-border-layout-2 pt-3"
-      data-testid="agent-ways"
-    >
-      <Text as="span" level="caption" className="text-content-layout-3">
-        {found.length > 0
-          ? 'Or work in your own app:'
-          : 'Rather have your coding agent do it?'}
-      </Text>
-      <TooltipProvider delayDuration={150}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="How your coding agent helps"
-              className="mr-1 inline-grid size-4 cursor-help place-items-center rounded-full border border-border-layout-2 text-[10px] leading-none text-content-layout-3 hover:text-content-layout-1"
-            >
-              ?
-            </button>
-          </TooltipTrigger>
-          <TooltipContent
-            side="top"
-            className="max-w-72"
-            label="Your coding agent looks through your project for its database, adds it to RDST and helps turn monitoring on. Start it in your Claude or Codex app, or copy the prompt into any agent you have open."
-          />
-        </Tooltip>
-      </TooltipProvider>
-      {onOpenApp &&
-        stageIn.map((app) => (
-          <Button
-            key={app}
-            variant="primary"
-            modifier="ghost"
-            size="small"
-            label={`Start in the ${APP_NAMES[app]} app`}
-            icon="arrow-up-right"
-            iconPosition="right"
-            loading={busy === `app-${app}`}
-            disabled={busy !== null && busy !== 'scan'}
-            onClick={() => {
-              trackEvent('find_option_chosen', { option: 'open_app', app })
-              setBusy(`app-${app}`)
-              void onOpenApp(app)
-                .catch((caught) =>
-                  setError(
-                    caught instanceof Error ? caught.message : String(caught)
-                  )
-                )
-                .finally(() => setBusy(null))
-            }}
-            data-testid={app === 'claude' ? 'open-in-app' : `open-in-${app}`}
-          >
-            <AgentLogo agent={app} size={14} className="mr-1.5" />
-          </Button>
-        ))}
-      {onPastePrompt && !promptShown && (
+  // A server's prompt has the agent find the database in its Kubernetes cluster, so plain
+  // Docker offers none.
+  const agentWays = (!server || cluster) &&
+    (stageIn.length > 0 || onPastePrompt) && (
+      <div
+        className="flex flex-wrap items-center gap-x-1 gap-y-1 border-t border-border-layout-2 pt-3"
+        data-testid="agent-ways"
+      >
+        <Text as="span" level="caption" className="text-content-layout-3">
+          {found.length > 0
+            ? 'Or work in your own app:'
+            : 'Rather have your coding agent do it?'}
+        </Text>
         <TooltipProvider delayDuration={150}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="primary"
-                modifier="ghost"
-                size="small"
-                label="Show the prompt"
-                disabled={busy !== null && busy !== 'scan'}
-                onClick={() => {
-                  trackEvent('find_option_chosen', { option: 'paste_prompt' })
-                  onPastePrompt()
-                }}
-                data-testid="agent-prompt-reveal"
-              />
+              <button
+                type="button"
+                aria-label="How your coding agent helps"
+                className="mr-1 inline-grid size-4 cursor-help place-items-center rounded-full border border-border-layout-2 text-[10px] leading-none text-content-layout-3 hover:text-content-layout-1"
+              >
+                ?
+              </button>
             </TooltipTrigger>
             <TooltipContent
               side="top"
               className="max-w-72"
-              label={PROMPT_SUMMARY}
+              label={
+                server
+                  ? 'Your coding agent finds the database your app uses in this cluster, adds it to RDST and helps turn monitoring on. Copy the prompt into any agent you have open, with kubectl access to the cluster.'
+                  : 'Your coding agent looks through your project for its database, adds it to RDST and helps turn monitoring on. Start it in your Claude or Codex app, or copy the prompt into any agent you have open.'
+              }
             />
           </Tooltip>
         </TooltipProvider>
-      )}
-    </div>
-  )
+        {onOpenApp &&
+          stageIn.map((app) => (
+            <Button
+              key={app}
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              label={`Start in the ${APP_NAMES[app]} app`}
+              icon="arrow-up-right"
+              iconPosition="right"
+              loading={busy === `app-${app}`}
+              disabled={busy !== null && busy !== 'scan'}
+              onClick={() => {
+                trackEvent('find_option_chosen', { option: 'open_app', app })
+                setBusy(`app-${app}`)
+                void onOpenApp(app)
+                  .catch((caught) =>
+                    setError(
+                      caught instanceof Error ? caught.message : String(caught)
+                    )
+                  )
+                  .finally(() => setBusy(null))
+              }}
+              data-testid={app === 'claude' ? 'open-in-app' : `open-in-${app}`}
+            >
+              <AgentLogo agent={app} size={14} className="mr-1.5" />
+            </Button>
+          ))}
+        {onPastePrompt && !promptShown && (
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="primary"
+                  modifier="ghost"
+                  size="small"
+                  label="Show the prompt"
+                  disabled={busy !== null && busy !== 'scan'}
+                  onClick={() => {
+                    trackEvent('find_option_chosen', { option: 'paste_prompt' })
+                    onPastePrompt()
+                  }}
+                  data-testid="agent-prompt-reveal"
+                />
+              </TooltipTrigger>
+              <TooltipContent
+                side="top"
+                className="max-w-72"
+                label={server ? SERVER_PROMPT_SUMMARY : PROMPT_SUMMARY}
+              />
+            </Tooltip>
+          </TooltipProvider>
+        )}
+      </div>
+    )
   const providers = (
     <div>
       <Text as="p" level="caption" className="mb-2 text-content-layout-3">
-        Or sign in to where it's hosted
+        {server && !cluster
+          ? "Sign in to where it's hosted"
+          : "Or sign in to where it's hosted"}
       </Text>
       <ProviderTiles disabled={busy === 'setup'} onSignIn={onSignIn} />
     </div>
@@ -1859,18 +1892,20 @@ export function FindDatabases({
   // Nothing searched yet: the search button. Searching: the scan's steps, then the
   // agent's, with what it's doing right now.
   if (!scan || searching) {
-    const methods = (scan?.methods ?? SCAN_PLACES).filter(
-      (method) => method.method !== 'reach'
-    )
+    const methods = (
+      scan?.methods ?? (server ? CLUSTER_PLACES : SCAN_PLACES)
+    ).filter((method) => method.method !== 'reach')
     const looked = methods.every((method) => method.state !== 'running')
     const reach = scan?.methods?.find((method) => method.method === 'reach')
     const total = methods.reduce((sum, method) => sum + method.found, 0)
     const steps: { label: string; state: StepState; detail?: ReactNode }[] = [
       {
-        label: 'Looking on this computer',
+        label: server ? 'Looking in this cluster' : 'Looking on this computer',
         state: looked ? 'done' : 'active',
         detail: looked
-          ? `${total} traces in your projects, history, Docker and saved connections`
+          ? server
+            ? `${total} database Services and clusters`
+            : `${total} traces in your projects, history, Docker and saved connections`
           : methods
               .filter((method) => method.state === 'running')
               .map((method) => method.label)
@@ -1912,7 +1947,9 @@ export function FindDatabases({
               >
                 {withAgent
                   ? `Searching for databases with ${agentName}`
-                  : 'Searching this computer'}
+                  : server
+                    ? 'Searching this cluster'
+                    : 'Searching this computer'}
               </Text>
               {search?.state === 'running' && (
                 <Button
@@ -1994,6 +2031,17 @@ export function FindDatabases({
               />
             </div>
           </>
+        ) : server ? (
+          cluster && (
+            <OptionCard
+              kind="scan"
+              primary
+              title="Search this cluster"
+              caption="PostgreSQL and MySQL Services RDST can reach in this Kubernetes cluster, in a few seconds."
+              onClick={() => void look(false)}
+              testId="scan-computer"
+            />
+          )
         ) : (
           <OptionCard
             kind="scan"
@@ -2086,7 +2134,9 @@ export function FindDatabases({
                 : `Found ${countLabel(found.length)}. Pick one to set up.`
               : scan.state === 'failed'
                 ? "RDST couldn't finish searching"
-                : 'No databases found on this computer'}
+                : server
+                  ? `No ${inRdst.length ? 'new ' : ''}databases found in this cluster`
+                  : `No ${inRdst.length ? 'new ' : ''}databases found on this computer`}
         </Text>
         <Text as="p" level="caption" className="text-content-layout-3">
           {shortList
@@ -2096,7 +2146,8 @@ export function FindDatabases({
                 ? `${search.agent?.label ?? agentName} is signed out, so here's what RDST found.`
                 : `${search.agent?.name ?? agentName} didn't finish, so here's what RDST found.`
               : found.length === 0
-                ? "Sign in to where it's hosted, or connect it manually."
+                ? (scan.message ??
+                  "Sign in to where it's hosted, or connect it manually.")
                 : null}
         </Text>
         {search?.state === 'done' && scan.candidates.length > 0 && (
@@ -2140,12 +2191,11 @@ export function FindDatabases({
             size="small"
             className="-ml-2"
             label="Search again"
+            loading={busy === 'scan'}
             onClick={() => {
               lastImport = null
-              setScan(null)
-              setSearch(null)
               setPicked(null)
-              setShowAll(false)
+              void look(withAgent)
             }}
             data-testid="search-again"
           />

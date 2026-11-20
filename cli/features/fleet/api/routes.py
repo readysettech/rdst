@@ -380,7 +380,11 @@ async def diff_fleet_snapshots(
 @router.post("/import")
 async def import_fleet(http_request: Request, request: FleetImportRequest):
     """Import fleet targets from a CSV file or uploaded content (SSE stream)."""
+    from shared import server_mode
+
     require_local_request(http_request)
+    if request.csv_content is None:
+        server_mode.require_local_files()
 
     import tempfile
 

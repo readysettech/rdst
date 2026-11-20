@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 AGENTS = {"claude": "Claude Code", "codex": "Codex"}
 # What the dialog calls the agent in a sentence: "Claude found 2 databases".
 AGENT_NAMES = {"claude": "Claude", "codex": "Codex"}
-PROVIDERS = ("local", "docker", "supabase", "neon", "digitalocean", "aws", "gcp", "azure",
+PROVIDERS = ("local", "docker", "kubernetes", "supabase", "neon", "digitalocean", "aws", "gcp", "azure",
              "planetscale", "railway", "render", "heroku", "aiven", "timescale", "crunchy",
              "cockroach", "xata", "tembo", "nile", "prisma", "tidb", "singlestore", "fly",
              "vultr", "linode", "scaleway", "ovh", "other")
@@ -791,6 +791,8 @@ def sanitize_candidates(items: Any) -> list[dict[str, Any]]:
             "url_host": _clean(item.get("url_host"), 255),
             "instance": _clean(item.get("instance"), 200),
             "secrets": _clean(item.get("secrets"), 120),
+            # How to read an operator-managed password, as a command; RDST never reads it.
+            "password_hint": _clean(item.get("password_hint"), 240),
             "incomplete": bool(item.get("incomplete")) or None,
             # Which line of RDST's own list the agent means, when it's going over one.
             "found": item["found"] if isinstance(item.get("found"), int) and

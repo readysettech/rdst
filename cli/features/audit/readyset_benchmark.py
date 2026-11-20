@@ -34,7 +34,9 @@ class _NullConsole:
 
 
 def docker_available() -> bool:
-    return shutil.which("docker") is not None
+    from shared import server_mode
+
+    return not server_mode.enabled() and shutil.which("docker") is not None
 
 
 def substitute_params(sql: str) -> str | None:

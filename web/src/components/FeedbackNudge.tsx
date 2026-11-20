@@ -13,6 +13,8 @@ import {
 } from '../lib/feedbackNudge'
 import { FeedbackChat } from './FeedbackChat'
 
+const MODAL_RETRY_MS = 30_000
+
 /**
  * The occasional corner invitation to the Feedback & help chat. Never modal;
  * see lib/feedbackNudge for when it shows and how long it stays away.
@@ -22,12 +24,19 @@ export function FeedbackNudge() {
   const [chatOpen, setChatOpen] = useState(false)
 
   useEffect(() => {
-    const timer = setTimeout(() => {
+    let timer: ReturnType<typeof setTimeout>
+    const show = () => {
       if (!nudgeDue()) return
+      // Wait out an open modal (sign-in, setup) so the nudge never competes with it.
+      if (document.querySelector('[aria-modal="true"]')) {
+        timer = setTimeout(show, MODAL_RETRY_MS)
+        return
+      }
       snoozeNudge('shown')
       trackEvent('feedback_nudge_shown')
       setVisible(true)
-    }, SESSION_DELAY_MS)
+    }
+    timer = setTimeout(show, SESSION_DELAY_MS)
     return () => clearTimeout(timer)
   }, [])
 

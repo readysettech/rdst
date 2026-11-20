@@ -68,7 +68,10 @@ async def browse_directory(
         Current path, parent path, sorted subdirectories, matching files, and
         whether the listing is the user's home directory.
     """
+    from shared import server_mode
+
     require_local_request(request)
+    server_mode.require_local_files()
 
     if path:
         resolved = os.path.abspath(os.path.expanduser(path))

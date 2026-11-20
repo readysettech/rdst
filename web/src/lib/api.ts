@@ -865,6 +865,11 @@ export async function startAccountLogin(
       body: { return_url: returnUrl },
     }
   )
+  // A 5xx detail is the sign-in service's own wording (often a proxy page), not advice.
+  if (response.status >= 500)
+    throw new Error(
+      "Readyset's sign-in service didn't respond. Try again in a minute."
+    )
   throwIfApiError(response, error, 'Failed to start Readyset sign-in')
   if (!data) throw new Error('Missing response body')
   return data

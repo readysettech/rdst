@@ -75,10 +75,15 @@ def logout() -> dict[str, Any]:
     """Sign out of AWS SSO by clearing the CLI's cached SSO tokens.
 
     `aws sso logout` invalidates every cached SSO session on this machine;
-    the CLI has no per-profile logout.
+    the CLI has no per-profile logout. Without the CLI the same cache is
+    cleared directly.
     """
     import subprocess
 
+    from .aws_device_login import cli_available, logout_without_cli
+
+    if not cli_available():
+        return logout_without_cli()
     try:
         completed = subprocess.run(
             ["aws", "sso", "logout"], capture_output=True, text=True, timeout=30
@@ -177,6 +182,10 @@ def _register_login(entry: dict[str, Any]) -> str:
     login_id = uuid.uuid4().hex
     with _REGISTRY_LOCK:
         LOGIN_REGISTRY[login_id] = entry
+    device = entry.get("device")
+    if device is not None:
+        device.run_in_background(f"rdst-aws-login-{login_id[:8]}")
+        return login_id
     reader = threading.Thread(
         target=_drain_output,
         args=(entry["process"], entry["buffer"]),
@@ -195,6 +204,11 @@ def start_login(profile: str) -> dict[str, Any]:
     signed_in, detail = verify_profile(profile)
     if signed_in:
         return {"login_id": None, "state": "already_signed_in", "detail": detail}
+
+    from .aws_device_login import cli_available
+
+    if not cli_available():
+        return _start_device_login(profile=profile)
 
     process = _spawn_login_process(["aws", "sso", "login", "--profile", profile])
     login_id = _register_login(
@@ -237,6 +251,13 @@ def start_sso_session_login(start_url: str, region: str) -> dict[str, Any]:
             "detail": "AWS SSO session is already active",
         }
 
+    from .aws_device_login import cli_available
+
+    if not cli_available():
+        return _start_device_login(
+            session_name=session_name, start_url=start_url, region=region
+        )
+
     process = _spawn_login_process(
         ["aws", "sso", "login", "--sso-session", session_name]
     )
@@ -254,6 +275,62 @@ def start_sso_session_login(start_url: str, region: str) -> dict[str, Any]:
         "state": "started",
         "detail": "AWS SSO login started; approve the request in your browser",
     }
+
+
+def _start_device_login(
+    *,
+    profile: Optional[str] = None,
+    session_name: Optional[str] = None,
+    start_url: Optional[str] = None,
+    region: Optional[str] = None,
+) -> dict[str, Any]:
+    """Start the botocore device flow used when the AWS CLI isn't installed."""
+    from .aws_device_login import DeviceLogin, SsoConfigMissing, profile_sso_config
+
+    if profile:
+        try:
+            start_url, region, session_name = profile_sso_config(profile)
+        except SsoConfigMissing as exc:
+            raise UnknownAwsProfile(str(exc)) from exc
+    device = DeviceLogin(start_url=start_url, region=region, session_name=session_name)
+    try:
+        device.start()
+    except Exception as exc:
+        raise AwsCliSpawnError(f"Unable to start AWS SSO sign-in: {exc}") from exc
+    entry: dict[str, Any] = {"device": device, "started_at": time.monotonic()}
+    if profile:
+        entry["profile"] = profile
+    else:
+        entry.update(start_url=start_url, session_name=session_name)
+    login_id = _register_login(entry)
+    return {
+        "login_id": login_id,
+        "state": "started",
+        "detail": "AWS SSO login started; approve the request in your browser",
+        "verification_url": device.verification_url,
+        "user_code": device.user_code,
+    }
+
+
+def _device_login_status(login_id: str, entry: dict[str, Any]) -> dict[str, Any]:
+    device = entry["device"]
+    fallback = _entry_fallback(entry)
+    url = device.verification_url
+    if time.monotonic() - entry["started_at"] > LOGIN_TIMEOUT_SECONDS:
+        device.cancel()
+        return _retain_terminal_login(login_id, _status_payload(
+            state="timeout", detail="AWS SSO login timed out after 300 seconds",
+            fallback=fallback, verification_url=url))
+    state, detail = device.snapshot()
+    if state == "running":
+        return _status_payload(state="running", detail=detail, fallback=fallback,
+                               verification_url=url)
+    if state == "success":
+        signed_in, detail = _verify_login(entry)
+        if not signed_in:
+            state, detail = "failed", f"AWS SSO sign-in finished, but verification failed: {detail}"
+    return _retain_terminal_login(login_id, _status_payload(
+        state=state, detail=detail, fallback=fallback, verification_url=url))
 
 
 def parse_verification_url(output: str) -> Optional[str]:
@@ -351,6 +428,9 @@ def get_login_status(login_id: str) -> dict[str, Any]:
             _remove_login(login_id)
             raise KeyError(login_id)
         return terminal_payload
+
+    if "device" in entry:
+        return _device_login_status(login_id, entry)
 
     process: subprocess.Popen[str] = entry["process"]
     buffer: OutputBuffer = entry["buffer"]

@@ -187,6 +187,39 @@ describe('SignInPage', () => {
     )
   })
 
+  it('leaves a provider redirect once, after it finishes, even if the account signs in first', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    localStorage.setItem('rdst_login_return_to', '/database?panel=enable')
+    vi.mocked(fetchAccountStatus).mockResolvedValue({
+      signed_in: false,
+    } as Awaited<ReturnType<typeof fetchAccountStatus>>)
+    let finishRedirect: (value: { state: string; detail: string }) => void =
+      () => {}
+    vi.mocked(completeAccountRedirect).mockReturnValue(
+      new Promise((resolve) => {
+        finishRedirect = resolve
+      })
+    )
+    renderWithClient(<SignInPage callbackLoginId="login-9" />)
+    await vi.advanceTimersByTimeAsync(0)
+
+    // The server stores the session before the redirect's own polling returns.
+    vi.mocked(fetchAccountStatus).mockResolvedValue({
+      signed_in: true,
+    } as Awaited<ReturnType<typeof fetchAccountStatus>>)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(router.navigate).not.toHaveBeenCalled()
+
+    finishRedirect({ state: 'success', detail: '' })
+    await waitFor(() =>
+      expect(router.navigate).toHaveBeenCalledWith({
+        href: '/database?panel=enable',
+      })
+    )
+    expect(router.navigate).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
   it('offers the providers again when the redirect cannot finish', async () => {
     vi.mocked(completeAccountRedirect).mockRejectedValue(new Error('expired'))
     renderWithClient(<SignInPage callbackLoginId="login-9" />)

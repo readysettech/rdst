@@ -1031,6 +1031,18 @@ METHODS: tuple[tuple[str, str, Callable[[Callable[[str], None]], list[dict[str, 
        ("clients", "Saved connections", scan_clients))
 
 
+def methods() -> tuple[tuple[str, str, Callable[[Callable[[str], None]], list[dict[str, Any]]]],
+                       ...]:
+    """Where to look: this computer's projects, history, containers, ports and saved
+    connections, or, for a server-mode RDST in a Kubernetes pod, the cluster around it."""
+    from features.agent_connect import kubernetes
+
+    if kubernetes.available():
+        return (("kubernetes", "Databases in this Kubernetes cluster",
+                 kubernetes.scan_kubernetes),)
+    return METHODS
+
+
 def _key(item: dict[str, Any]) -> tuple:
     host = str(item.get("host") or "").lower()
     if not host:
@@ -1107,8 +1119,11 @@ def merge(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def scan(on_step: Callable[[list[dict[str, Any]]], None] | None = None) -> dict[str, Any]:
     """Run every method at once; ``on_step`` hears each one start and finish."""
+    from features.agent_connect import kubernetes
+
+    active = methods()
     steps = [{"method": method, "label": label, "state": "running", "found": 0,
-              "looked": [], "seconds": None} for method, label, _ in METHODS]
+              "looked": [], "seconds": None} for method, label, _ in active]
     checking = {"method": "reach", "label": "Checking which ones answer", "state": "running",
                 "found": 0, "looked": [], "seconds": None}
     steps.append(checking)
@@ -1119,8 +1134,10 @@ def scan(on_step: Callable[[list[dict[str, Any]]], None] | None = None) -> dict[
         step = steps[index]
         started = time.time()
         try:
-            items = METHODS[index][2](lambda where: step["looked"].append(where))
+            items = active[index][2](lambda where: step["looked"].append(where))
             step["state"] = "done"
+        except kubernetes.DiscoveryNotAllowed as exc:
+            items, step["state"], step["message"] = [], "failed", str(exc)
         except Exception:
             logger.debug("Scan method %s failed", step["method"], exc_info=True)
             items, step["state"] = [], "failed"
@@ -1133,8 +1150,8 @@ def scan(on_step: Callable[[list[dict[str, Any]]], None] | None = None) -> dict[
         return items
 
     started = time.time()
-    with ThreadPoolExecutor(max_workers=len(METHODS)) as pool:
-        results = list(pool.map(run_one, range(len(METHODS))))
+    with ThreadPoolExecutor(max_workers=len(active)) as pool:
+        results = list(pool.map(run_one, range(len(active))))
     merged = merge([item for items in results for item in items])
     reached = time.time()
     found = rank(check_reach(merged))
@@ -1212,7 +1229,7 @@ def connection_args(item: dict[str, Any]) -> dict[str, Any] | None:
 
 
 CARRIED = ("env_file", "env_var", "password_file", "password_var", "url_file", "url_host",
-           "secrets", "instance", "history", "reach", "project", "source", "saved_as", "wsl")
+           "secrets", "password_hint", "instance", "history", "reach", "project", "source", "saved_as", "wsl")
 
 
 def settle(proposed: list[dict[str, Any]], found: list[dict[str, Any]],

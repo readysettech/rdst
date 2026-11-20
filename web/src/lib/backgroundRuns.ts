@@ -11,6 +11,7 @@ import {
 import type { BenchmarkRequest } from './api'
 import type { components } from './api.generated'
 import { api } from './client'
+import { isContainerRuntime } from './desktop'
 import { normalizeHttpError, normalizeSseError } from './errorContract'
 import { consumeSseResponse } from './sseReader'
 
@@ -463,7 +464,7 @@ export async function startAuditCaptureRun(
         target,
         duration: options.duration ?? 60,
         analysis: options.analysis ?? true,
-        readyset: true,
+        readyset: !isContainerRuntime(),
       },
     })
     if (error || !data) {

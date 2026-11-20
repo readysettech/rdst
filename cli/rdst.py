@@ -864,21 +864,30 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
 
         if restored_envs:
             print(f"Restored secure env vars: {', '.join(restored_envs)}")
-        if missing_envs:
+        # A server signs in and takes keys through the UI, so a fresh one has
+        # nothing to restore yet and the shell advice doesn't apply.
+        from shared import server_mode
+
+        if missing_envs and not server_mode.enabled():
             print(f"Missing required env vars: {', '.join(missing_envs)}")
         if restore_errors:
             print("Env restore warnings:")
             for err in restore_errors:
                 print(f"  - {err}")
-        if restored_envs or missing_envs:
+        if (restored_envs or missing_envs) and not server_mode.enabled():
             print(
                 "Note: values set in Web apply immediately for this process. "
                 "Values exported in a different shell require restarting `rdst web`."
             )
 
+        if server_mode.enabled():
+            for line in server_mode.startup_lines(host, port):
+                print(line)
+
         if reload:
             print("Auto-reload enabled (watching for file changes)")
-        open_browser = serve_static and not getattr(args, "no_browser", False)
+        open_browser = (serve_static and not getattr(args, "no_browser", False)
+                        and not server_mode.enabled())
         if open_browser:
             print("Opening the web UI in your browser (disable with --no-browser)")
             _open_browser_when_ready(host, port)
@@ -899,7 +908,15 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             app = _get_create_app()(static_dist_dir=static_dir_arg)
             # The app holds the token now; processes RDST starts don't need it.
             os.environ.pop(API_TOKEN_ENV, None)
-            uvicorn.run(app, host=host, port=port)
+            if server_mode.enabled():
+                # The server reads X-Forwarded-* itself for origin checks; client
+                # addresses stay the real peer. Open event streams get a bounded
+                # wait on SIGTERM so a pod stops within its grace period.
+                server_mode.quiet_health_checks()
+                uvicorn.run(app, host=host, port=port, proxy_headers=False,
+                            timeout_graceful_shutdown=15)
+            else:
+                uvicorn.run(app, host=host, port=port)
         return RdstResult(True, "")
     elif command == "help" or command is None:
         # Check if a question was provided
@@ -1180,6 +1197,10 @@ def main():
     from shared.query_registry.library_store import LibraryMigrationError
 
     configure_utf8_stdio()
+    # In a container, secrets live in a file on the data volume, not an OS keychain.
+    from shared import server_mode
+
+    server_mode.activate()
     if sys.argv[1:] == ["_mcp_server"]:
         from mcp_server import main as mcp_main
 

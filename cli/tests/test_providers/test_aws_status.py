@@ -83,6 +83,7 @@ class TestGetAwsStatus:
             ("sso", "sso"),
             ("iam-role", "instance"),
             ("container-role", "instance"),
+            ("assume-role-with-web-identity", "web_identity"),
             ("shared-credentials-file", "profile"),
             ("config-file", "profile"),
         ]:

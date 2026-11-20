@@ -17,6 +17,7 @@ import time
 
 from shared.child_process import rdst_child_argv
 from shared.cli.types import RdstResult
+from shared.constants import rdst_data_dir
 from shared.config.targets import TargetsConfig
 from shared.constants import rdst_instance_suffix
 from shared.deploy.docker_topology import DockerTopology
@@ -89,7 +90,10 @@ class DemoCommand:
         """Start a PostgreSQL Docker container for the demo."""
         # Check Docker
         if not self._docker_available():
-            return RdstResult(False, "Docker is not running. Please start Docker and try again.")
+            from shared import server_mode
+
+            return RdstResult(False, server_mode.containers_unavailable_reason()
+                              or "Docker is not running. Please start Docker and try again.")
 
         # Check for existing container
         status = self._container_status()
@@ -164,8 +168,7 @@ class DemoCommand:
             )
 
             engine, params = stackoverflow.parse_database_url(db_url)
-            from pathlib import Path
-            download_dir = Path.home() / ".rdst" / "cache" / "stackexchange"
+            download_dir = rdst_data_dir() / "cache" / "stackexchange"
             download_dir.mkdir(parents=True, exist_ok=True)
 
             split = stackoverflow.is_split_site(DEMO_SITE, download_dir)
@@ -525,6 +528,10 @@ class DemoCommand:
     # ------------------------------------------------------------------
 
     def _docker_available(self) -> bool:
+        from shared import server_mode
+
+        if server_mode.enabled():
+            return False
         try:
             result = subprocess.run(["docker", "info"], capture_output=True, timeout=5)
             return result.returncode == 0

@@ -157,9 +157,16 @@ export function useProviderOAuthLogin({
     }
     void runPoll()
     const timer = window.setInterval(() => void runPoll(), 2_000)
+    // Browsers slow timers in background tabs while the sign-in tab is in
+    // front, so check at once when this tab comes back.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void runPoll()
+    }
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       cancelled = true
       window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [loginId, reportOutcome])
 

@@ -10,6 +10,7 @@ import { Text } from '@rs/ui-new/text'
 import { useEffect, useState } from 'react'
 import { PRIVACY_POLICY_URL } from '../features/settings/links'
 import { useAiConsent } from '../lib/aiConsent'
+import { thisComputer } from '../lib/desktop'
 
 /** What AI sees, and where it goes. Shown wherever the user is asked to allow AI. */
 export function AiDisclosure({ className }: { className?: string }) {
@@ -209,7 +210,7 @@ export function AiOffGate({ path, title }: { path: string; title: string }) {
             {copy.title}
           </Text>
           <Text as="p" level="body-medium" className="text-content-layout-2">
-            {copy.detail} AI is off on this computer.
+            {copy.detail} AI is off on {thisComputer()}.
           </Text>
           <Button
             className="mt-2"

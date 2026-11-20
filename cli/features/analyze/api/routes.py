@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from shared import agent_activity
+from shared import agent_activity, server_mode
 from shared.api.guards import require_local_request
 from shared.monitor.statements import display_name
 from shared.api.models import AnalyzeRequest
@@ -213,6 +213,8 @@ async def analyze(
     guard: TargetGuard = Depends(require_target_body),
 ):
     require_local_request(http_request)
+    if request.readyset_cache and not request.skip_readyset:
+        server_mode.require_containers()
 
     input_data = AnalyzeInput(sql=request.query, normalized_sql=request.query, source="web")
     options = AnalyzeOptions(
@@ -234,6 +236,8 @@ async def analyze_quick(
     guard: TargetGuard = Depends(require_target_body),
 ):
     require_local_request(http_request)
+    if request.readyset_cache and not request.skip_readyset:
+        server_mode.require_containers()
 
     input_data = AnalyzeInput(sql=request.query, normalized_sql=request.query, source="web")
     options = AnalyzeOptions(

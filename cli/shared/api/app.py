@@ -14,7 +14,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, TypeAdapter
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -173,6 +173,11 @@ async def lifespan(app: FastAPI):
     product_telemetry.install_asyncio_capture(asyncio.get_running_loop())
     daily_summaries = DailySummaries().start()
 
+    # Inbox pushes also go to the user's Slack webhook, when one is set.
+    from shared.slack_notifications import SlackForwarder
+
+    slack_forwarder = SlackForwarder().start()
+
     # desktop-server.json tells local agents and `rdst claude add` where /mcp is.
     from features.agent_connect.discovery import AgentConnectRuntime
 
@@ -198,9 +203,13 @@ async def lifespan(app: FastAPI):
         monitored_targets,
         observation_scheduler_enabled,
     )
+    from shared import server_mode
     from shared.deploy.sandbox_manager import sandbox_manager
 
-    await sandbox_manager.start()
+    # A server in a container can't start the local Readyset sandbox containers.
+    manage_sandbox = not server_mode.enabled()
+    if manage_sandbox:
+        await sandbox_manager.start()
     scheduler: ObservationScheduler | None = None
     monitor_loop = None
     analyze_queue = None
@@ -259,7 +268,17 @@ async def lifespan(app: FastAPI):
                 analyze_queue = await start_analyze_queue()
                 if app is not None:
                     app.state.analyze_queue = analyze_queue
+        # Databases the Helm chart's targets list names, added through the same routes as the
+        # UI once the app is up. It logs bad entries and never stops startup.
+        seed_task = None
+        if app is not None and server_mode.enabled():
+            from features.configure import seed_targets
+
+            if os.environ.get(seed_targets.ENV_VAR):
+                seed_task = asyncio.create_task(seed_targets.seed(app))
         yield
+        if seed_task is not None and not seed_task.done():
+            seed_task.cancel()
     finally:
         await agent_connect.stop()
         if app is not None:
@@ -280,6 +299,7 @@ async def lifespan(app: FastAPI):
             await monitor_loop.stop()
         await query_assessment_worker.stop()
         await daily_summaries.stop()
+        await slack_forwarder.stop()
         # Shutdown order (research Q5): the scheduler stops admitting,
         # cancels in-flight collections, and releases its leases before
         # anything else is torn down.
@@ -292,7 +312,8 @@ async def lifespan(app: FastAPI):
 
             await query_discovery.close()
             console.info("Observation scheduler stopped")
-        await sandbox_manager.stop()
+        if manage_sandbox:
+            await sandbox_manager.stop()
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -494,9 +515,17 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     )
 
     # Outermost, so a DNS-rebinding request reaches no route, static file, or /mcp.
-    app.add_middleware(HostAllowlistMiddleware, allowed_hosts=configured_allowed_hosts())
+    # A server answers on whatever name its ingress gives it; its access token keeps a
+    # rebinding page out instead.
+    from shared import server_mode
+
+    if not (server_mode.enabled() and server_mode.auth_required()):
+        app.add_middleware(HostAllowlistMiddleware, allowed_hosts=configured_allowed_hosts())
 
     register_error_handlers(app)
+
+    server_mode.install(app)
+    server_mode.install_agent_key(app)
 
     from features.account.api import routes as account
     from features.agent_connect.api import routes as agent_connect
@@ -583,7 +612,12 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
         # index that points at deleted JS, leaving the user on a prior build
         # after every update. Hashed assets are content-addressed, so they take
         # the opposite treatment -- cache them hard.
-        def _index_response() -> FileResponse:
+        def _index_response() -> Response:
+            marker = server_mode.index_marker()
+            if marker:
+                page = index_file.read_text(encoding="utf-8").replace(
+                    "<head>", f"<head>{marker}", 1)
+                return HTMLResponse(page, headers={"Cache-Control": "no-cache"})
             return FileResponse(
                 str(index_file), headers={"Cache-Control": "no-cache"}
             )

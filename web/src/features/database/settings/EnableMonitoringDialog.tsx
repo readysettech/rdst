@@ -31,7 +31,11 @@ import {
   PrerequisitesChecker,
   usePrerequisites,
 } from '@/features/prerequisites'
-import { useSignedOut } from '@/lib/accountStatus'
+import {
+  isSignedInAccount,
+  useAccountStatus,
+  useSignedOut,
+} from '@/lib/accountStatus'
 import {
   type AddFlow,
   abandonAttempt,
@@ -56,6 +60,11 @@ import {
   useUpdateMonitorSettings,
 } from '@/lib/monitor/hooks'
 import { monitorKeys } from '@/lib/monitor/keys'
+import {
+  forgetEnableAfterSignIn,
+  rememberEnableAfterSignIn,
+  takeEnableAfterSignIn,
+} from '@/lib/pendingMonitorEnable'
 import { invalidateTrialRelatedQueries } from '@/lib/trialQueries'
 import { userErrorClass } from '@/lib/userErrorClass'
 import { DialogShell } from '../../../components/DialogShell'
@@ -154,6 +163,7 @@ export function EnableMonitoringDialog({
   // account or used-up AI usage holds deep analysis too.
   const limit = useMonitoringLimit(target, open).data
   const signedOut = useSignedOut()
+  const signedIn = isSignedInAccount(useAccountStatus().data)
   const needsAccount = signedOut && limit?.own_key !== true
   const deepWaits =
     limit?.target_fits === false && limit.limit != null
@@ -344,8 +354,29 @@ export function EnableMonitoringDialog({
     )
   const signIn = () => {
     turnOnAfterSetup.current = true
+    // Google sign-in leaves the page; this brings the choice back when it returns.
+    rememberEnableAfterSignIn({ target, automatic, measure })
     setSignInOpen(true)
   }
+  // Back from a sign-in that left the page: turn on with the choices made before it.
+  const [resumeEnable, setResumeEnable] = useState(false)
+  useEffect(() => {
+    if (!open || !saved || !signedIn || saved.enabled) return
+    const pending = takeEnableAfterSignIn(target)
+    if (!pending) return
+    setAutomatic(pending.automatic)
+    setMeasure(pending.measure)
+    setResumeEnable(true)
+  }, [open, saved, signedIn, target])
+  useEffect(() => {
+    if (!resumeEnable || disabled || !checksPass || update.isPending) return
+    setResumeEnable(false)
+    turnOnAfterSetup.current = true
+    trackEvent('monitoring_signin_gate_choice', {
+      choice: 'signed_in_after',
+    })
+    allowAiAndTurnOn()
+  })
   const addKey = () => {
     trackEvent('monitoring_signin_gate_choice', { choice: 'own_key' })
     turnOnAfterSetup.current = true
@@ -734,10 +765,13 @@ export function EnableMonitoringDialog({
         source="monitoring_gate"
         onClose={() => {
           turnOnAfterSetup.current = false
+          forgetEnableAfterSignIn()
           setSignInOpen(false)
         }}
         onSuccess={() => {
           setSignInOpen(false)
+          // Signed in without leaving the page; this dialog turns on below.
+          forgetEnableAfterSignIn()
           void invalidateTrialRelatedQueries(client)
           void client.invalidateQueries({ queryKey: monitorKeys.limitAll })
           // The user asked to turn on once signed in, with the choices made here.

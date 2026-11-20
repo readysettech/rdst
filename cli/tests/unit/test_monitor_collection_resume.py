@@ -61,6 +61,7 @@ def test_reenable_requests_collection_and_wakes_queue(tmp_path, monkeypatch):
                  {"q": "SELECT * FROM orders"}, [], {"calls": 600, "total_ms": 1200})
     store.set_settings("db", {"enabled": False})
     monkeypatch.setattr(routes, "_now", lambda: 10000)
+    monkeypatch.setattr(routes, "_target_configured", lambda target: True)
     monkeypatch.setattr(database_limit, "claim_target", lambda *a, **kw: "on")
     monkeypatch.setattr(routes, "_start_first_run", Mock())
     from features.query_registry.scheduler import ObservationScheduler, ACTIVE_INTERVAL_SECONDS

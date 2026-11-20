@@ -29,6 +29,23 @@ afterEach(() => {
 })
 
 describe('CodingAgentsGroup', () => {
+  it('points a server at the database page, where agents get a key', () => {
+    const meta = document.createElement('meta')
+    meta.name = 'rdst-runtime'
+    meta.content = 'container'
+    document.head.appendChild(meta)
+    try {
+      renderWithClient(<CodingAgentsGroup />)
+      expect(screen.getByText(/Connect Claude or Codex to RDST/)).toBeTruthy()
+      expect(
+        screen.queryByRole('button', { name: 'Copy Claude Code command' })
+      ).toBeNull()
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled()
+    } finally {
+      meta.remove()
+    }
+  })
+
   it('shows the MCP URL and the Claude Code command, with no token', async () => {
     const { container } = renderWithClient(<CodingAgentsGroup />)
     expect(await screen.findByText('http://127.0.0.1:8787/mcp')).toBeTruthy()

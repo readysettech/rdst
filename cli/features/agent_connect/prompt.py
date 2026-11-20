@@ -56,6 +56,55 @@ rdst_get_index_plan, rdst_top_queries, rdst_query_timeseries and rdst_latest_rep
 After applying a fix, call rdst_action with did_it so RDST updates right away.
 """
 
+SERVER_DOCS_URL = "https://readyset.io/docs/readyset-ai/rdst/server"
+
+SERVER_PROMPT_TEMPLATE = """\
+RDST is a database monitoring app from Readyset. It runs as a server in my Kubernetes \
+cluster at {url}, watches the PostgreSQL or MySQL database an app uses and suggests fixes \
+for slow queries. Please connect it to the database my app uses.
+
+What RDST stores and sends: {docs_url}
+
+Steps:
+1. Talk to RDST by sending JSON-RPC requests to its endpoint with curl, sending this \
+server's agent key as a Bearer header exactly as shown. Nothing needs installing or \
+registering. For example:
+   curl -s "{mcp_url}" -H "Authorization: Bearer {key}" -H "Content-Type: application/json" \
+-H "Accept: application/json, text/event-stream" -d '{{"jsonrpc": "2.0", "id": 1, "method": \
+"tools/call", "params": {{"name": "rdst_status", "arguments": {{}}}}}}'
+   A "tools/list" request shows every tool and its arguments.
+2. Work out which database my app uses in the cluster: from this project's Kubernetes \
+manifests, Helm values or kustomize files, or with kubectl get svc -A (and kubectl get \
+clusters.postgresql.cnpg.io -A for CloudNativePG). RDST connects from its own pod, so use \
+the in-cluster hostname (<service>.<namespace>.svc.cluster.local) and the Service's port, \
+never localhost or a port-forward address. Show me what you found (engine, host, port, \
+database name and where it's defined) and ask: "Is this the database you want RDST to \
+watch?" If there's more than one, list them and ask which; prefer dev or staging over \
+production.
+3. Once I confirm, get its password from the app's Kubernetes Secret with kubectl (for \
+CloudNativePG, the password key of the <cluster>-app Secret). If the database has a \
+read-only or monitoring user, prefer it. Pass the password straight to rdst_add_database \
+with a short name, like the app's name. Never show me the password or write it to a file.
+4. Run rdst_check_prerequisites with that name. If ready_to_monitor is false, show me \
+RDST's instructions as it gives them (like pg_stat_statements or the pg_monitor role). \
+Offer to run its in-database statements only after I say yes, and don't change server \
+settings or restart a database unless I ask. Then check again. Don't turn on monitoring \
+until it reports ready_to_monitor: true.
+5. Then call rdst_enable_monitoring. The first time, RDST answers waiting_for_user: true: \
+ask me to open RDST at {url}, read its Turn on monitoring screen (and sign in to Readyset \
+if it asks) and click Turn on monitoring. Then call rdst_wait_for_monitoring, again each \
+time it says not yet, for up to 10 minutes, until it reports monitoring: true.
+6. {quiet}
+7. Tell me the name RDST saved the database under and whether monitoring is on.
+
+Ask me before you change anything in my cluster or my database. Keep connection details \
+and passwords out of your replies.
+
+Afterwards you can read what RDST finds with rdst_list_inbox, rdst_list_actions, \
+rdst_get_index_plan, rdst_top_queries, rdst_query_timeseries and rdst_latest_report. \
+After applying a fix, call rdst_action with did_it so RDST updates right away.
+"""
+
 FIX_PROMPT_TEMPLATE = """\
 RDST is a database monitoring app from Readyset that I installed on this computer. It runs \
 locally at {url}. The database {target} is already saved in RDST, but RDST can't monitor \
@@ -137,19 +186,44 @@ def render_fix_prompt(url: str, target: str, attempt: str | None = None,
                                       wsl_note=wsl_note)
 
 
+# Stands in for the agent key in a server's prompt until the page that copies it fills it in.
+AGENT_KEY_PLACEHOLDER = "RDST_AGENT_KEY_HERE"
+
+
 def render_ask_prompt(url: str, target: str, attempt: str | None = None,
-                      wsl_url: str | None = None) -> str:
+                      wsl_url: str | None = None, server: bool = False) -> str:
     """The prompt that has the user's own agent answer questions about ``target`` from what
-    RDST found."""
+    RDST found. For a server-mode RDST the agent is on another machine and sends the agent
+    key; the database page puts the key in place of ``AGENT_KEY_PLACEHOLDER`` when it copies
+    the prompt."""
     endpoint = mcp_url(url, attempt)
     wsl_note = WSL_NOTE.format(url=url, wsl_url=wsl_url) if wsl_url else ""
-    return ASK_PROMPT_TEMPLATE.format(url=url, mcp_url=endpoint, target=target,
+    text = ASK_PROMPT_TEMPLATE.format(url=url, mcp_url=endpoint, target=target,
                                       wsl_note=wsl_note)
+    if not server:
+        return text
+    return (text
+            .replace("that I installed on this computer. It runs locally at",
+                     "that runs as a server at")
+            .replace("to its local endpoint with curl.",
+                     "to its endpoint with curl, sending this server's agent key as a Bearer "
+                     "header exactly as shown.")
+            .replace('-H "Content-Type: application/json"',
+                     f'-H "Authorization: Bearer {AGENT_KEY_PLACEHOLDER}" '
+                     '-H "Content-Type: application/json"'))
 
 
-def render_prompt(url: str, attempt: str | None = None, wsl_url: str | None = None) -> str:
-    """The prompt for ``url``, carrying the ``attempt`` in its MCP URL."""
+def render_prompt(url: str, attempt: str | None = None, wsl_url: str | None = None,
+                  server: bool = False) -> str:
+    """The prompt for ``url``, carrying the ``attempt`` in its MCP URL. A server-mode RDST
+    runs in the user's cluster: its prompt has the agent find the database there and send the
+    agent key, which the page puts in place of ``AGENT_KEY_PLACEHOLDER`` when it copies."""
     endpoint = mcp_url(url, attempt)
+    if server:
+        return SERVER_PROMPT_TEMPLATE.format(
+            url=url, mcp_url=endpoint, key=AGENT_KEY_PLACEHOLDER, docs_url=SERVER_DOCS_URL,
+            quiet=QUIET_DATABASE.replace("through docker exec when it's in a container",
+                                         "through kubectl exec into the database's pod"))
     wsl_note = WSL_NOTE.format(url=url, wsl_url=wsl_url) if wsl_url else ""
     return PROMPT_TEMPLATE.format(docs_url=DOCS_URL, url=url, mcp_url=endpoint,
                                   quiet=QUIET_DATABASE,

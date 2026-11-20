@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from shared import server_mode
 from shared.api.guards import require_local_request
 from shared.config.targets import TargetsConfig
 from shared.env_requirements_service import EnvRequirementsService
@@ -26,6 +27,9 @@ class ClearKeyringResponse(BaseModel):
 @router.post("/dev/clear-keyring")
 async def clear_keyring(request: Request) -> ClearKeyringResponse:
     require_local_request(request)
+    if server_mode.enabled():
+        # A developer reset; on a shared server it would wipe everyone's secrets.
+        raise HTTPException(status_code=404, detail="Not Found")
 
     env_service = EnvRequirementsService()
     names = env_service.get_clearable_secret_names()

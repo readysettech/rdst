@@ -795,10 +795,21 @@ def monitoring_approved(target: str) -> bool:
     return _store().lever_is_set(target, MONITORING_APPROVED)
 
 
+def _target_configured(target: str) -> bool:
+    from shared.config.targets import TargetsConfig
+
+    config = TargetsConfig()
+    config.load()
+    return config.get(target) is not None
+
+
 @router.put("/targets/{target}/settings", **documented(models.MonitorSettings))
 async def put_settings(target: str, body: MonitorSettingsUpdate, request: Request):
     from features.monitor import database_limit
 
+    # Monitoring a database that isn't configured would hold a monitoring slot.
+    if body.enabled and not await asyncio.to_thread(_target_configured, target):
+        raise HTTPException(404, "Target not found")
     try:
         update = body.model_dump(exclude_none=True)
         mode = update.pop("analysis_mode", None)

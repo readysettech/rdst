@@ -990,6 +990,15 @@ class CacheService:
         try:
             target = input_data.target
 
+            # A server in a container can't run Readyset beside itself; a
+            # remote host or a Kubernetes cluster still can.
+            from shared import server_mode
+
+            local_reason = server_mode.containers_unavailable_reason()
+            if local_reason and not options.host and options.mode in ("docker", "systemd"):
+                yield ErrorEvent(type="error", message=local_reason, stage="deploy")
+                return
+
             # Load target config
             config = TargetsConfig()
             config.load()

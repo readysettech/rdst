@@ -21,6 +21,12 @@ def client(fleet_router_client):
 
 
 @pytest.fixture(autouse=True)
+def aws_cli_installed(monkeypatch):
+    # These tests cover the AWS CLI path; test_aws_device_login covers the CLI-less one.
+    monkeypatch.setattr("features.providers.aws_device_login.cli_available", lambda: True)
+
+
+@pytest.fixture(autouse=True)
 def clear_login_registry():
     aws_login.LOGIN_REGISTRY.clear()
     yield

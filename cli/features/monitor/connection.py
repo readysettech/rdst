@@ -87,6 +87,10 @@ def connection_problem(error: str | None) -> dict[str, str]:
         return {"reason": error[:300], "fix": "Check the SSH tunnel settings for this database."}
     for needles, reason, fix in _REASONS:
         if any(needle in lowered for needle in needles):
+            if "connection refused" in needles or "timed out" in needles:
+                from shared import server_mode
+
+                fix += server_mode.network_hint()
             return {"reason": reason, "fix": fix}
     return {"reason": "RDST couldn't connect.", "fix": UNKNOWN_FIX}
 

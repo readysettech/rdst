@@ -139,7 +139,11 @@ class AccountLogoutResponse(BaseModel):
 async def start_account_login(
     request: Request, body: AccountLoginRequest
 ) -> AccountLoginResponse:
+    from shared import server_mode
+
     require_local_request(request)
+    if refusal := server_mode.broker_sign_in_refusal(request):
+        raise HTTPException(status_code=409, detail=refusal)
     try:
         result = await asyncio.to_thread(account_service.start_login, body.return_url)
     except AccountServiceError as exc:

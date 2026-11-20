@@ -1,0 +1,26 @@
+RDST is starting as {{ include "rdst.fullname" . }} in {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+Open it at:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}/
+{{- end }}
+{{- else }}
+Reach it without exposing it:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rdst.fullname" . }} 8787:{{ .Values.service.port }}
+  then open http://localhost:8787/
+{{- end }}
+{{- if eq .Values.auth.mode "token" }}
+
+Sign in with the access token:
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "rdst.authSecretName" . }} -o jsonpath='{.data.{{ include "rdst.authSecretKey" . }}}' | base64 -d
+{{- else }}
+
+Sign-in is off (auth.mode=none). Keep an authenticating proxy in front of this Service.
+{{- if not .Values.networkPolicy.enabled }}
+WARNING: networkPolicy.enabled is false, so any pod in the cluster can reach RDST without
+signing in. Turn it on and list the proxy under networkPolicy.ingressFrom.
+{{- end }}
+{{- end }}
+
+Then sign in to Readyset and connect a database from the UI.

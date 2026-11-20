@@ -73,7 +73,9 @@ def _container_network_args(
 
 def docker_runtime_status() -> Dict[str, bool]:
     """Return whether the local Docker CLI and daemon are available."""
-    if shutil.which("docker") is None:
+    from shared import server_mode
+
+    if server_mode.enabled() or shutil.which("docker") is None:
         return {"installed": False, "running": False}
     try:
         result = subprocess.run(

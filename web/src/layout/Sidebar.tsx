@@ -25,6 +25,7 @@ import {
   reattachBackgroundRuns,
   useBackgroundRuns,
 } from '../lib/backgroundRuns'
+import { isContainerRuntime } from '../lib/desktop'
 import {
   type ConfiguredDatabase,
   configuredTargetsKey,
@@ -376,7 +377,11 @@ export function Sidebar() {
         <DatabaseList databases={databases} activeName={activeDatabase} />
       </Scrollable>
 
-      <PlatformCard className="mt-auto mb-3" />
+      {isContainerRuntime() ? (
+        <div className="mt-auto" />
+      ) : (
+        <PlatformCard className="mt-auto mb-3" />
+      )}
 
       <nav
         aria-label="Secondary"

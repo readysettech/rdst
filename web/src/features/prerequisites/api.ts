@@ -14,6 +14,8 @@ export type ProviderId =
   | 'supabase'
   | 'neon'
   | 'digitalocean'
+  | 'cnpg'
+  | 'zalando'
 
 export interface PrereqFix {
   summary: string

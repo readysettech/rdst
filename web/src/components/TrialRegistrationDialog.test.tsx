@@ -90,6 +90,25 @@ describe('AccountLoginDialog', () => {
     expect(screen.getByRole('button', { name: 'Email me a link' })).toBeTruthy()
   })
 
+  it('says so when Google sign-up cannot start', async () => {
+    vi.mocked(startAccountLogin).mockRejectedValueOnce(
+      new Error(
+        "Readyset's sign-in service didn't respond. Try again in a minute."
+      )
+    )
+    renderWithClient(
+      <AccountLoginDialog isOpen onClose={vi.fn()} signUp />,
+      createTestQueryClient()
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Sign up with Google' }))
+    expect(
+      await screen.findByText(
+        "Readyset's sign-in service didn't respond. Try again in a minute."
+      )
+    ).toBeTruthy()
+    expect(startAccountGoogleOAuth).not.toHaveBeenCalled()
+  })
+
   it('starts magic-link authentication from the RDST dialog', async () => {
     renderWithClient(
       <AccountLoginDialog isOpen onClose={vi.fn()} />,

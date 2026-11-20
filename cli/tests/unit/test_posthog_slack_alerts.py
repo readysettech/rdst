@@ -178,6 +178,19 @@ class TestInstallationTracking:
 
         session.head.assert_not_called()
 
+    @pytest.mark.parametrize("value", ["1", "TRUE", " yes "])
+    def test_rdst_internal_marks_install_internal_without_probe(
+        self, temp_rdst_dir, monkeypatch, value
+    ):
+        tm = self._make_tm(temp_rdst_dir)
+        monkeypatch.setenv("RDST_INTERNAL", value)
+        requests, session = self._mock_requests()
+
+        with patch("shared.telemetry_manager._get_requests", return_value=requests):
+            assert tm._detect_internal_user() is True
+
+        session.head.assert_not_called()
+
     def test_unset_ingest_key_sends_nothing(self, temp_rdst_dir):
         tm = self._make_tm(temp_rdst_dir)
         tm.POSTHOG_API_KEY = ""

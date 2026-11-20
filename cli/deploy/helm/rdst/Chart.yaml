@@ -1,0 +1,16 @@
+apiVersion: v2
+# Published as oci://registry-1.docker.io/readysettech/rdst-helm, next to the
+# readysettech/rdst image; resources are still named rdst.
+name: rdst-helm
+description: RDST, Readyset's always-on query monitoring agent and web UI, as one service
+type: application
+# The chart version follows the RDST release it ships with; CI sets both at publish time.
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://readyset.io
+sources:
+  - https://github.com/readysettech/rdst
+keywords: [postgres, mysql, monitoring, query-performance]
+maintainers:
+  - name: Readyset
+    url: https://readyset.io

@@ -183,7 +183,6 @@ export function SignInPage({
     },
   })
   const linkSent = magicLink.isSuccess
-  useSignedInElsewhere(() => void finish())
   const validateEmail = () => {
     const valid = isValidEmail(normalizeEmail(email))
     setEmailError(valid ? null : 'Enter a valid email address.')
@@ -193,6 +192,11 @@ export function SignInPage({
     mutationFn: ({ loginId, url }: { loginId: string; url?: string }) =>
       completeAccountRedirect(loginId, url),
     onSuccess: finish,
+  })
+  // A provider redirect finishes through `callback`; the account turning signed in while it
+  // runs isn't a sign-in from elsewhere.
+  useSignedInElsewhere(() => {
+    if (!callback.isPending) void finish()
   })
   const completeRef = useRef((loginId: string, url?: string) =>
     callback.mutate({ loginId, url })

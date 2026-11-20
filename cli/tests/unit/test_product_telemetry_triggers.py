@@ -115,6 +115,7 @@ async def fire(event, store, monkeypatch):
     elif event in ('monitoring_enabled', 'monitoring_disabled'):
         monkeypatch.setattr(routes, '_store', lambda: store)
         monkeypatch.setattr(database_limit, 'claim_target', lambda *args: 'on')
+        monkeypatch.setattr(routes, '_target_configured', lambda target: True)
         monkeypatch.setattr(routes, '_release_monitoring_slot', lambda target: None)
         monkeypatch.setattr(routes, '_start_first_run', lambda *args: None)
         app = FastAPI()
@@ -379,6 +380,7 @@ def test_error_dedupe_rate_limit_expiry_and_process_restart(receiver, monkeypatc
 async def test_turning_on_without_ai_reports_why(signed_in, expected, receiver, monkeypatch):
     _manager, events, store = receiver
     monkeypatch.setattr(routes, '_store', lambda: store)
+    monkeypatch.setattr(routes, '_target_configured', lambda target: True)
     monkeypatch.setattr(database_limit, 'claim_target', lambda *args: 'pending')
     monkeypatch.setattr(database_limit, '_signed_in', lambda: signed_in)
     monkeypatch.setattr(routes, '_start_first_run', lambda *args: None)

@@ -34,6 +34,7 @@ from shared.query_registry.observation_store import (
     _refuse_network_path,
     _storage_guard,
 )
+from shared.sqlite_check import quick_check
 
 # Each collector process establishes a fresh rate baseline against persisted history.
 COLLECTOR_PROCESS = uuid.uuid4().hex
@@ -949,7 +950,7 @@ class MonitorStore:
                 if version == 0:
                     conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
                 if version:
-                    check = conn.execute("PRAGMA quick_check").fetchone()[0]
+                    check = quick_check(conn)
                     if check != "ok":
                         raise StorageError(f"Local storage damaged at {self.path}: {check}. "
                                            "Restore this file from a backup.")

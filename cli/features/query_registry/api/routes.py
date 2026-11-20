@@ -1198,7 +1198,10 @@ async def import_queries(
 ) -> ImportQueriesResponse:
     """Import queries from a local SQL file (semicolon-separated, with
     optional `-- name:` / `-- target:` metadata comments)."""
+    from shared import server_mode
+
     require_local_request(http_request)
+    server_mode.require_local_files()
     from ..models import QueryCommandInput
     from ..service import QueryService
 
@@ -1274,6 +1277,14 @@ class BenchmarkRequest(BaseModel):
 
 class LoadTestRunStartResponse(BaseModel):
     run_id: str
+
+
+def _require_lane_runtime(lanes: list[str]) -> None:
+    """The Readyset lane runs in a local sandbox container."""
+    if "readyset" in lanes:
+        from shared import server_mode
+
+        server_mode.require_containers()
 
 
 def _benchmark_request_fingerprint(request: BenchmarkRequest) -> str:
@@ -1489,6 +1500,7 @@ async def run_benchmark(
     itself served.
     """
     require_local_request(http_request)
+    _require_lane_runtime(request.lanes)
     return EventSourceResponse(_benchmark_generator(
         queries=request.queries,
         target=guard.target_name,
@@ -1516,6 +1528,7 @@ async def start_load_test_run(
 ) -> LoadTestRunStartResponse:
     """Start or attach to the target's detached benchmark."""
     require_local_request(http_request)
+    _require_lane_runtime(request.lanes)
     from shared.run_registry import run_registry
     from ..readyset_lane import benchmark_sandbox
     from ..service import QueryService

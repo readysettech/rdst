@@ -141,6 +141,10 @@ export async function completeAccountRedirect(
     throw new Error(result.detail || 'Readyset sign-in failed')
   }
   clearTemporarySession(loginId)
-  if (!callbackUrl) window.history.replaceState({}, '', '/account-login')
+  // Drop the spent code from the address bar, only while still on the callback page: by
+  // now the page may have moved on to where the sign-in started, and rewriting that
+  // address would send the user back to the sign-in form. The router's own state stays.
+  if (!callbackUrl && window.location.pathname === '/account-login')
+    window.history.replaceState(window.history.state, '', '/account-login')
   return result
 }

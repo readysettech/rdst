@@ -132,6 +132,38 @@ describe('OnboardingTour', () => {
     expect(screen.queryByText(/You decide what runs/)).toBeNull()
   })
 
+  it("doesn't pitch a coding agent beside a server-mode RDST", () => {
+    const meta = document.createElement('meta')
+    meta.name = 'rdst-runtime'
+    meta.content = 'container'
+    document.head.appendChild(meta)
+    try {
+      renderWithClient(<OnboardingTour open onFinish={vi.fn()} />)
+      expect(screen.getByText(/search its cluster/)).toBeTruthy()
+      expect(screen.queryByText(/hand the job to Claude/)).toBeNull()
+    } finally {
+      meta.remove()
+    }
+  })
+
+  it('shows a still instead of the desktop agent video in server mode', () => {
+    const meta = document.createElement('meta')
+    meta.name = 'rdst-runtime'
+    meta.content = 'container'
+    document.head.appendChild(meta)
+    try {
+      renderWithClient(<OnboardingTour open onFinish={vi.fn()} />)
+      expect(screen.getByTestId('onboarding-server-still')).toBeTruthy()
+      expect(screen.queryByTestId('onboarding-video')).toBeNull()
+      expect(screen.getByText('Search this cluster')).toBeTruthy()
+      fireEvent.click(screen.getByTestId('onboarding-next'))
+      act(() => {})
+      expect(screen.getByTestId('onboarding-video')).toBeTruthy()
+    } finally {
+      meta.remove()
+    }
+  })
+
   it('ends on asking a coding agent what RDST found', () => {
     expect(TOUR_STEPS.map((step) => step.key)).toEqual([
       'tour-connect',

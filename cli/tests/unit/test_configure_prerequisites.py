@@ -16,6 +16,7 @@ from features.configure.prerequisites import (
     check_target,
     detect_provider,
 )
+from features.configure.prerequisite_fixes import fix_for, provider_name
 
 
 class ScriptedCursor:
@@ -98,11 +99,15 @@ def pg_rules(
     query_size: str = "4kB",
     track: str = "top",
     counter: ProbeCounter | None = None,
+    cnpg: bool = False,
+    cluster_name: str = "",
 ) -> list[tuple[str, Any]]:
     counter = counter or ProbeCounter()
     return [
         ("FROM pg_catalog.pg_roles WHERE rolname IN", [(role,) for role in roles or []]),
         ("proname = 'aurora_version'", [(1 if aurora else 0,)]),
+        ("cnpg.config_sha256", [(cnpg,)]),
+        ("current_setting('cluster_name'", [(cluster_name,)]),
         ("pg_available_extensions", [(1 if available else 0,)]),
         ("e.extname = 'pg_stat_statements'", [(schema,)] if schema else []),
         ("current_setting('shared_preload_libraries')",
@@ -779,3 +784,87 @@ def test_monitor_names_the_failed_setup_check_once_per_outage(monkeypatch, tmp_p
     collector._snapshot = {"capture_warning": {"source": "pg_stat_statements"}}
     active._monitoring_issues("db", 1180, False)
     assert checks == ["db", "db"]
+
+
+# Kubernetes operators -------------------------------------------------------
+
+
+def test_detect_provider_finds_cloudnativepg_and_zalando():
+    assert detect_provider(ScriptedConnection(pg_rules(cnpg=True)), "postgresql",
+                           {"host": "pg-rw.database.svc.cluster.local"}) == "cnpg"
+    assert detect_provider(ScriptedConnection(pg_rules(roles=["robot_zmon"])), "postgresql",
+                           {"host": "acid-app.apps.svc"}) == "zalando"
+    # Cloud providers still win when their roles are present.
+    assert detect_provider(ScriptedConnection(pg_rules(roles=["rds_superuser"], cnpg=True)),
+                           "postgresql", {"host": "db.internal"}) == "rds"
+    assert detect_provider(ScriptedConnection(pg_rules()), "postgresql",
+                           {"host": "pg-rw.database.svc"}) == "self_hosted"
+
+
+def test_operator_extras_read_cluster_and_namespace():
+    from features.configure.prerequisites import _operator_extras
+
+    conn = ScriptedConnection(pg_rules(cluster_name="billing-db"))
+    assert _operator_extras(conn, {"host": "billing-db-rw.billing.svc.cluster.local"}) == {
+        "cluster": "billing-db", "namespace": "billing"}
+    assert _operator_extras(ScriptedConnection(pg_rules()), {"host": "10.0.0.5"}) == {}
+
+
+def cnpg_ctx(**extras) -> Context:
+    ctx = pg_ctx(provider="cnpg", user="billing", database="billing")
+    ctx.extras.update({"cluster": "billing-db", "namespace": "billing", **extras})
+    return ctx
+
+
+def test_cloudnativepg_preload_fix_uses_the_cluster_spec_not_alter_system():
+    error = RuntimeError("pg_stat_statements must be loaded via shared_preload_libraries")
+    checks, _ = run_pg(pg_rules(preload="", view_error=error), ctx=cnpg_ctx())
+    fix = by_id(checks)["pg_stat_statements_preload"].fix
+    assert fix.sql == []
+    assert "ALTER SYSTEM" not in fix.plain()
+    assert 'pg_stat_statements.max: "10000"' in fix.steps[1]
+    assert fix.commands == [
+        "kubectl -n billing patch clusters.postgresql.cnpg.io billing-db --type merge -p "
+        "'{\"spec\": {\"postgresql\": {\"parameters\": {\"pg_stat_statements.max\": \"10000\"}}}}'"
+    ]
+    assert fix.restart is True
+    assert any("restarts the instances" in step for step in fix.after)
+    assert "cloudnative-pg.io" in fix.docs_url
+
+
+def test_cloudnativepg_query_size_track_and_grant_fixes():
+    ctx = cnpg_ctx()
+    size = fix_for("query_text_size", ctx)
+    assert '"track_activity_query_size": "4096"' in size.commands[0] and size.restart
+    track = fix_for("pg_stat_statements_track", ctx)
+    assert '"pg_stat_statements.track": "top"' in track.commands[0] and not track.restart
+    grant = fix_for("read_all_stats", ctx)
+    assert grant.sql == ["GRANT pg_monitor TO billing;"]
+    assert "kubectl -n billing exec -it billing-db-1 -c postgres" in grant.steps[0]
+    assert "inRoles" in grant.note
+    create = fix_for("pg_stat_statements", ctx)
+    assert create.sql == ["CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"]
+
+
+def test_operator_fixes_fall_back_to_placeholders_without_names():
+    ctx = pg_ctx(provider="cnpg")
+    assert "kubectl -n <namespace> patch clusters.postgresql.cnpg.io <cluster>" in (
+        fix_for("query_text_size", ctx).commands[0])
+
+
+def test_zalando_preload_fix_keeps_the_existing_libraries():
+    ctx = pg_ctx(provider="zalando", user="app", database="app")
+    ctx.extras.update({"cluster": "acid-app", "namespace": "apps",
+                       "preload": "bg_mon,pg_auth_mon"})
+    fix = fix_for("pg_stat_statements_preload", ctx)
+    assert fix.commands == [
+        "kubectl -n apps patch postgresqls.acid.zalan.do acid-app --type merge -p "
+        "'{\"spec\": {\"postgresql\": {\"parameters\": {\"shared_preload_libraries\": "
+        "\"bg_mon,pg_auth_mon,pg_stat_statements\"}}}}'"
+    ]
+    assert "acid-app-0" in fix_for("read_all_stats", ctx).steps[0]
+
+
+def test_provider_names_for_operators():
+    assert provider_name("cnpg", "postgresql") == "PostgreSQL on CloudNativePG"
+    assert provider_name("zalando", "postgresql") == "PostgreSQL on Zalando Postgres Operator"

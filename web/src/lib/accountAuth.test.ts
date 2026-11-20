@@ -140,6 +140,25 @@ describe('RDST account authentication', () => {
     expect(window.location.search).toBe('')
   })
 
+  it('leaves the address alone once the page has moved on from the callback', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/account-login?login_id=login-1&code=oauth-code'
+    )
+    // The page goes back to where sign-in started while the pickup is still finishing.
+    vi.mocked(completeAccountLogin).mockImplementationOnce(async () => {
+      window.history.pushState({}, '', '/database?panel=enable')
+      return { state: 'success', detail: '' }
+    })
+
+    const result = await completeAccountRedirect('login-1')
+
+    expect(result.state).toBe('success')
+    expect(window.location.pathname).toBe('/database')
+    expect(window.location.search).toBe('?panel=enable')
+  })
+
   it('exchanges a desktop deep-link code without navigating the renderer', async () => {
     const result = await completeAccountRedirect(
       'login-1',

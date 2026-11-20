@@ -22,6 +22,7 @@ import {
   startAgentFix,
 } from '@/lib/agentDiscovery'
 import { trackEvent } from '@/lib/analytics'
+import { isContainerRuntime } from '@/lib/desktop'
 
 const POLL_MS = 1200
 const APP_LABELS = { claude: 'Claude', codex: 'Codex' } as const
@@ -96,6 +97,22 @@ export function AgentFix({
     }, POLL_MS)
     return () => window.clearInterval(timer)
   }, [runId])
+
+  // A server's coding agents connect from the database page's card with an agent key, so
+  // the fix starts there instead of from a prompt copied here.
+  if (isContainerRuntime())
+    return (
+      <Text
+        as="p"
+        level="caption"
+        className="mb-4 text-content-layout-3"
+        data-testid="agent-fix-server"
+      >
+        To have Claude or Codex fix this, connect it with "Connect Claude or
+        Codex" on the {target} page, then ask it to get {target} ready to
+        monitor.
+      </Text>
+    )
 
   if (!loaded) return null
 

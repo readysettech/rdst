@@ -5,7 +5,11 @@ import { Scrollable } from '@rs/ui-new/scrollable'
 import { VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useEffect, useMemo, useState } from 'react'
-import { isDesktopRuntime, selectDesktopSshKey } from '../../lib/desktop'
+import {
+  isContainerRuntime,
+  isDesktopRuntime,
+  selectDesktopSshKey,
+} from '../../lib/desktop'
 import {
   fetchSshDirectory,
   fetchSshKeys,
@@ -81,6 +85,8 @@ export function SshFields({
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
   const desktop = isDesktopRuntime()
+  // A server-mode RDST reads keys from its own filesystem, where the chart mounts them.
+  const server = isContainerRuntime()
   const selectedProfile = value.profile
     ? rememberedHosts.find((item) => item.name === value.profile)
     : undefined
@@ -204,11 +210,18 @@ export function SshFields({
         label: option.label,
       })),
       ...(!desktop
-        ? [{ value: '__browse__', label: 'Browse local files' }]
+        ? [
+            {
+              value: '__browse__',
+              label: server
+                ? "Browse this server's files"
+                : 'Browse local files',
+            },
+          ]
         : []),
       { value: '__manual__', label: 'Enter path manually' },
     ],
-    [keyOptions, selectedKey, displayValue.key_path, desktop]
+    [keyOptions, selectedKey, displayValue.key_path, desktop, server]
   )
 
   const chooseHost = (selection: string) => {
@@ -379,6 +392,17 @@ export function SshFields({
                   disabled={disabled}
                 />
               </div>
+            )}
+            {server && (
+              <Text
+                level="caption"
+                className="text-content-layout-3"
+                data-testid="ssh-key-server-hint"
+              >
+                RDST reads the key from this server. Mount it into the container
+                first, for example with the Helm chart's extraVolumes at
+                /data/.ssh.
+              </Text>
             )}
           </VStack>
         )}

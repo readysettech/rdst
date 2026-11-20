@@ -1923,6 +1923,11 @@ class QueryCommand:
         from shared.cli.types import RdstResult
         from shared.config.targets import create_targets_config
 
+        from shared import server_mode
+
+        if server_mode.enabled():
+            return RdstResult(ok=False, message=server_mode.CONTAINERS_UNAVAILABLE)
+
         queries = queries or []
 
         if not queries:

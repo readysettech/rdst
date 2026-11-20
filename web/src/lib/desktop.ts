@@ -116,11 +116,30 @@ export function isDesktopMac(): boolean {
 
 /** The machine RDST runs on, as copy names it: "this Mac" in the macOS app. */
 export function thisComputer(): string {
+  if (isContainerRuntime()) return 'this server'
   return isDesktopMac() ? 'this Mac' : 'this computer'
+}
+
+/** Where pushes show up: the viewer's browser when RDST runs as a server. */
+export function thisDevice(): string {
+  return isContainerRuntime() ? 'this browser' : thisComputer()
 }
 
 export function isDesktopRuntime(): boolean {
   return window.rdstDesktop?.isDesktop === true
+}
+
+/**
+ * True when the UI is served by RDST running as a server in a container
+ * (Docker or Kubernetes). The server tags index.html with this marker; features
+ * that start their own Docker containers are unavailable there.
+ */
+export function isContainerRuntime(): boolean {
+  return (
+    document
+      .querySelector('meta[name="rdst-runtime"]')
+      ?.getAttribute('content') === 'container'
+  )
 }
 
 export function getDesktopUpdates(): DesktopUpdates | undefined {

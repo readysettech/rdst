@@ -8,14 +8,18 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from features.qpdemo.service import DemoService, demo_facts
+from shared import server_mode
 from shared.api.guards import require_local_request
 
-router = APIRouter(prefix="/demo", tags=["demo"])
+# The demo provisions its own database, Readyset and proxy containers.
+router = APIRouter(
+    prefix="/demo", tags=["demo"], dependencies=[Depends(server_mode.require_containers)]
+)
 
 
 def _svc() -> DemoService:

@@ -615,6 +615,7 @@ def test_api_queries_health_and_series(monkeypatch, tmp_path):
     )
     monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(routes, "_now", lambda: 100_000)
+    monkeypatch.setattr(routes, "_target_configured", lambda target: True)
     store = MonitorStore()
     store.record("db", 13_540, [
         {"query_key": "key", "calls": 30, "total_ms": 600},

@@ -1,11 +1,12 @@
 import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
+import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import { Dropdown } from '@rs/ui-new/dropdown'
 import { IconButton } from '@rs/ui-new/icon-button'
 import { Popover, PopoverContent, PopoverTrigger } from '@rs/ui-new/popover'
 import { Text } from '@rs/ui-new/text'
 import { type ReactNode, useState } from 'react'
-import { thisComputer } from '@/lib/desktop'
+import { isContainerRuntime, thisComputer, thisDevice } from '@/lib/desktop'
 import {
   useMonitorSettings,
   useUpdateMonitorSettings,
@@ -18,6 +19,11 @@ import {
   useDesktopNotificationsOn,
 } from './desktopNotifications'
 import { MuteRulesDialog } from './MuteRulesList'
+import {
+  sendSlackTest,
+  useSaveSlackWebhook,
+  useSlackSettings,
+} from './slackNotifications'
 
 /** What pushes, in the order the Inbox files it. */
 export const PUSH_ROWS: { key: keyof NotifyEvents; label: string }[] = [
@@ -91,11 +97,12 @@ function SwitchRow({
 }
 
 /** The database's push switches, the daily report switch and its quiet hours. */
-function Controls({ target }: { target: string }) {
+function Controls({ target, slack }: { target: string; slack: boolean }) {
   const settings = useMonitorSettings(target)
   const update = useUpdateMonitorSettings(target)
-  // Nothing pushes while Push to this computer is off, so no switch reads on.
-  const push = useDesktopNotificationsOn()
+  // Nothing pushes while both Push to this computer and Slack are off, so no switch reads on.
+  const desktop = useDesktopNotificationsOn()
+  const push = desktop || slack
   const events: NotifyEvents = {
     ...PUSH_DEFAULTS,
     ...settings.data?.notify_events,
@@ -130,9 +137,7 @@ function Controls({ target }: { target: string }) {
         level="caption"
         className="px-2.5 py-2.5 text-content-layout-3"
       >
-        {push
-          ? 'Pushed once as a desktop notification. Nothing is sent by email.'
-          : `Push to ${thisComputer()} is off, so nothing is pushed. Nothing is sent by email.`}
+        {pushCaption(desktop, slack)}
       </Text>
       <div className="my-1 border-t border-border-layout-2" />
       <Row label="Quiet hours">
@@ -167,6 +172,126 @@ function Controls({ target }: { target: string }) {
   )
 }
 
+function pushCaption(desktop: boolean, slack: boolean): string {
+  if (desktop && slack)
+    return 'Pushed once as a desktop notification and to Slack. Nothing is sent by email.'
+  if (slack) return 'Pushed once to Slack. Nothing is sent by email.'
+  if (desktop)
+    return 'Pushed once as a desktop notification. Nothing is sent by email.'
+  return isContainerRuntime()
+    ? 'Nothing is pushed until Slack is set up. Alerts still wait in the Inbox.'
+    : `Push to ${thisComputer()} is off, so nothing is pushed. Nothing is sent by email.`
+}
+
+/** Slack: the webhook the server posts pushes to, a test, and the last delivery problem. */
+function SlackSection() {
+  const settings = useSlackSettings()
+  const save = useSaveSlackWebhook()
+  const [url, setUrl] = useState('')
+  const [result, setResult] = useState<{ problem: string | null } | null>(null)
+  const data = settings.data
+  if (settings.isError) return null
+  const fromEnv = data?.source === 'env'
+  const problem = save.error instanceof Error ? save.error.message : null
+  return (
+    <div className="border-b border-border-layout-2 px-2.5 py-2">
+      <div className="flex min-h-9 items-center gap-3 text-body-small text-content-layout-1">
+        <span className="flex-1">Slack</span>
+        {data?.configured ? (
+          <>
+            <Button
+              label="Send test"
+              aria-label="Send a test message to Slack"
+              modifier="ghost"
+              size="small"
+              onClick={() =>
+                void sendSlackTest().then((p) => setResult({ problem: p }))
+              }
+            />
+            {!fromEnv && (
+              <Button
+                label="Remove"
+                aria-label="Remove the Slack webhook"
+                modifier="ghost"
+                size="small"
+                disabled={save.isPending}
+                onClick={() => {
+                  setResult(null)
+                  save.mutate(null)
+                }}
+              />
+            )}
+          </>
+        ) : null}
+      </div>
+      {data?.configured ? (
+        <Text as="p" level="caption" className="text-content-layout-3">
+          {fromEnv
+            ? 'Pushes go to the Slack webhook in RDST_SLACK_WEBHOOK_URL.'
+            : 'Pushes go to your Slack webhook.'}
+        </Text>
+      ) : (
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            setResult(null)
+            save.mutate(url.trim(), { onSuccess: () => setUrl('') })
+          }}
+        >
+          <Text as="p" level="caption" className="text-content-layout-3">
+            {isContainerRuntime()
+              ? 'Paste a Slack incoming webhook URL to get pushes in a channel or DM while nobody has RDST open.'
+              : 'Paste a Slack incoming webhook URL to also get pushes in a channel or DM.'}
+          </Text>
+          <BaseInputText
+            name="slack-webhook-url"
+            type="password"
+            aria-label="Slack webhook URL"
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="https://hooks.slack.com/services/..."
+            autoComplete="off"
+            disabled={save.isPending}
+          />
+          <div className="flex justify-end gap-1">
+            <Button
+              type="button"
+              label="Test"
+              aria-label="Send a test message to this webhook"
+              modifier="ghost"
+              size="small"
+              disabled={!url.trim()}
+              onClick={() =>
+                void sendSlackTest(url.trim()).then((p) =>
+                  setResult({ problem: p })
+                )
+              }
+            />
+            <Button
+              type="submit"
+              label="Save"
+              size="small"
+              disabled={!url.trim() || save.isPending}
+            />
+          </div>
+        </form>
+      )}
+      {(result || problem || data?.last_error) && (
+        <Text asChild level="caption">
+          <output
+            className={`block pt-1.5 ${result?.problem || problem || (!result && data?.last_error) ? 'text-content-warning-soft' : 'text-content-layout-3'}`}
+          >
+            {result
+              ? (result.problem ?? 'Sent. Check the Slack channel or DM.')
+              : (problem ?? `Last message failed: ${data?.last_error}`)}
+          </output>
+        </Text>
+      )}
+    </div>
+  )
+}
+
 /** The bell: what pushes to the desktop, the quiet hours, and the mute rules. */
 export function NotificationSettings({ target }: { target?: string }) {
   const [open, setOpen] = useState(false)
@@ -174,6 +299,7 @@ export function NotificationSettings({ target }: { target?: string }) {
   // The last test's outcome: null once shown, else why it couldn't be.
   const [tested, setTested] = useState<{ problem: string | null } | null>(null)
   const push = useDesktopNotificationsOn()
+  const slack = useSlackSettings().data?.configured ?? false
   const health = useDesktopNotificationHealth()
   const blocked = push && health?.blocked ? health.message : null
   return (
@@ -208,7 +334,7 @@ export function NotificationSettings({ target }: { target?: string }) {
           </Text>
           <SwitchRow
             id="notify-push"
-            label={`Push to ${thisComputer()}`}
+            label={`Push to ${thisDevice()}`}
             checked={push}
             onChange={(on) => void setDesktopNotifications(on)}
           />
@@ -246,8 +372,9 @@ export function NotificationSettings({ target }: { target?: string }) {
               </output>
             </Text>
           )}
+          <SlackSection />
           {target ? (
-            <Controls target={target} />
+            <Controls target={target} slack={slack} />
           ) : (
             <Text
               as="p"

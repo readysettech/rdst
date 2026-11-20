@@ -28,10 +28,41 @@ slow, and shows what an index, a rewrite, or a Readyset cache would do about it.
 - **`rdst demo`** — try everything against a local demo database in one command
 - **MCP built in** — `rdst claude add` registers RDST as an MCP server so Claude Code can use your targets
 
+## Ways to run RDST
+
+RDST runs in three ways. All of them include the always-on monitoring agent and
+the same UI.
+
+**Desktop app.** Download [RDST Desktop](https://readyset.io/downloads) for
+macOS, Windows or Linux. It's the quickest way to watch a database you can
+reach from your own computer.
+
+**Docker, as a standalone agent.** Run RDST next to your database on any host
+or VM, and open the UI in a browser:
+
+```bash
+docker run -d --name rdst --hostname rdst --restart unless-stopped \
+  -p 8787:8787 -v rdst-data:/data readysettech/rdst
+docker exec rdst cat /data/.rdst/access-token   # prints the access token
+```
+
+**Kubernetes, as a server.** Install the Helm chart in the cluster your
+databases run in:
+
+```bash
+helm install rdst oci://registry-1.docker.io/readysettech/rdst-helm -n rdst --create-namespace
+kubectl -n rdst get secret rdst-auth -o jsonpath='{.data.access-token}' | base64 -d
+kubectl -n rdst port-forward svc/rdst 8787:8787
+```
+
+Docker and Kubernetes run RDST in server mode. The
+[server mode guide](deploy/README.md) covers sign-in, secrets, Slack
+notifications, upgrades and connecting to your databases.
+
 ## Installation
 
-Prefer an app? **[RDST Desktop](https://readyset.io/downloads)** packages the
-same toolkit with a graphical client for macOS, Windows, and Linux.
+The CLI below is the fourth way in: the same toolkit from your terminal, with
+the UI available through `rdst web`.
 
 Install the RDST CLI on macOS or Linux without sudo, pip, or a preinstalled Python:
 

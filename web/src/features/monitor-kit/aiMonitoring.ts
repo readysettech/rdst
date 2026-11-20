@@ -7,6 +7,7 @@ import type {
   MonitoringLimit,
   MonitorSettings,
 } from '@/lib/monitor/types'
+import { thisComputer } from '../../lib/desktop'
 
 /** "AI monitoring on 2 of 3 databases", or without a known limit, "on 2 databases". */
 export function limitLine(limit: MonitoringLimit | undefined): string | null {
@@ -234,7 +235,9 @@ const REASON_COPY: Record<
   declined: {
     label: 'AI off',
     short: 'AI off',
-    reasonLabel: 'AI is off on this computer',
+    get reasonLabel() {
+      return `AI is off on ${thisComputer()}`
+    },
     headline: 'Turn on AI to get slow-query alerts and fixes',
     detail:
       'AI is off, so RDST shows charts and alerts for connections, stuck queries and locks only. Turn on AI to get slow-query alerts and fixes.',
@@ -314,7 +317,7 @@ export function monitoringStatus(
       headline: null,
       detail: connectionProblem
         ? `${connectionProblem.reason} ${connectionProblem.fix} Readings pick back up by themselves once it answers.`
-        : "RDST can't reach this database, so readings are paused. Check that it's running and reachable from this computer. Readings pick back up by themselves once it answers.",
+        : `RDST can't reach this database, so readings are paused. Check that it's running and reachable from ${thisComputer()}. Readings pick back up by themselves once it answers.`,
       action: { kind: 'check_connection', label: 'Check again' },
       tone: 'negative',
       busy: false,

@@ -21,6 +21,12 @@ START_URL = "https://example.awsapps.com/start"
 
 
 @pytest.fixture(autouse=True)
+def aws_cli_installed(monkeypatch):
+    # These tests cover the AWS CLI path; test_aws_device_login covers the CLI-less one.
+    monkeypatch.setattr("features.providers.aws_device_login.cli_available", lambda: True)
+
+
+@pytest.fixture(autouse=True)
 def isolated_home(monkeypatch, tmp_path):
     home = str(tmp_path)
     drive, path = os.path.splitdrive(home)

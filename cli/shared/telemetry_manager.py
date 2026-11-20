@@ -338,6 +338,7 @@ class TelemetryManager:
     # RDST_SENTRY_DSN: Sentry DSN for crash reporting
     # RDST_INTERNAL_PROBE_URL: host that answers only from inside the company
     # network; unresolvable elsewhere. Empty skips the internal-install probe.
+    # RDST_INTERNAL: 1 marks a test install (servers, containers, CI) internal without the probe.
     POSTHOG_API_KEY = resolve_posthog_key()
     POSTHOG_HOST = "https://us.i.posthog.com"
     SENTRY_DSN = os.environ.get("RDST_SENTRY_DSN", "")
@@ -567,6 +568,8 @@ class TelemetryManager:
                 import shutil
                 if os.environ.get("RDST_DESKTOP") == "1":
                     install_method = "desktop"
+                elif os.environ.get("RDST_SERVER", "").strip().lower() in {"1", "true", "yes"}:
+                    install_method = "container"
                 elif shutil.which("pipx") and "pipx" in sys.prefix:
                     install_method = "pipx"
                 elif shutil.which("uvx") and "uv" in sys.prefix:
@@ -1214,6 +1217,8 @@ class TelemetryManager:
 
     def _detect_internal_user(self) -> bool:
         """Probe the internal canary with a hard overall deadline."""
+        if os.environ.get("RDST_INTERNAL", "").strip().lower() in ("1", "true", "yes"):
+            return True
         if not self.INTERNAL_INSTALL_PROBE_URL:
             return False
 

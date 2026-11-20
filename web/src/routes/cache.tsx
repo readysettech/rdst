@@ -1,4 +1,5 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
+import { isContainerRuntime } from '../lib/desktop'
 // The workspace component lives in the route-ignored `-caching-page` sibling so
 // the code-splitter can relocate the CodeMirror SQL-editor stack (pulled in
 // transitively by the embedded Compare/Load test panes) out of the eager entry
@@ -43,7 +44,10 @@ export const Route = createFileRoute('/cache')({
 
 function CachePageRoute() {
   const search = Route.useSearch()
-  const view = search.view === 'load-test' ? 'load-test' : 'compare'
+  const view =
+    search.view === 'load-test' || isContainerRuntime()
+      ? 'load-test'
+      : 'compare'
   return (
     <CachingPage
       view={view}

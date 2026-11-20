@@ -649,8 +649,11 @@ class CaptureService:
                 )
 
                 if not docker_available():
+                    from shared import server_mode
+
                     run.readyset_notice = (
-                        "Docker is not available - skipped Readyset cache benchmark"
+                        server_mode.containers_unavailable_reason()
+                        or "Docker is not available - skipped Readyset cache benchmark"
                     )
                     yield WorkloadStatusEvent(
                         type="status",

@@ -21,6 +21,7 @@ import { useTargetResolution } from '../hooks/useTarget';
 import { useRecentScanDirs } from '../hooks/useRecentScanDirs';
 import { sanitizeWebError } from '../lib/errorContract';
 import { useScan } from '../lib/useScan';
+import { isContainerRuntime } from '../lib/desktop';
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock';
 import { useCacheAction } from '../lib/useCacheAction';
 import {
@@ -33,8 +34,29 @@ import {
 } from '../components/scan';
 
 export const Route = createFileRoute('/scan')({
-  component: ScanPage,
+  component: ScanRoute,
 });
+
+function ScanRoute() {
+  if (isContainerRuntime()) return <ServerScanNotice />;
+  return <ScanPage />;
+}
+
+// The scan reads a code directory on the machine RDST runs on, which for a
+// server is a container the person using it can't reach.
+function ServerScanNotice() {
+  return (
+    <div className="mx-auto max-w-xl p-8" data-testid="scan-server-notice">
+      <Text as="h1" level="label-large" className="mb-2">
+        Code scan needs a repository on this server
+      </Text>
+      <Text as="p" level="body-small" className="text-content-layout-3">
+        Code scan reads a repository on the machine RDST runs on. Mount a
+        repository into the container to use it, or run rdst scan from the CLI.
+      </Text>
+    </div>
+  );
+}
 
 function ScanPage() {
   const navigate = useNavigate();

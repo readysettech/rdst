@@ -20,6 +20,7 @@ export interface DiscoveryAgent {
 export type DiscoveryProvider =
   | 'local'
   | 'docker'
+  | 'kubernetes'
   | 'supabase'
   | 'neon'
   | 'digitalocean'
@@ -49,6 +50,7 @@ export type DiscoveryProvider =
 
 /** What a hosted provider is called. */
 export const PROVIDER_NAMES: Partial<Record<DiscoveryProvider, string>> = {
+  kubernetes: 'Kubernetes',
   supabase: 'Supabase',
   neon: 'Neon',
   digitalocean: 'DigitalOcean',
@@ -105,6 +107,9 @@ export interface FoundDatabase {
   instance?: string | null
   /** The secret manager the project keeps its secrets in, like "Infisical". */
   secrets?: string | null
+  /** The command that reads an operator-managed password, like a CloudNativePG cluster's
+   * Secret. RDST never reads it itself. */
+  password_hint?: string | null
   /** The project uses a database but doesn't say where: the agent works it out. */
   incomplete?: boolean | null
   /** A project listed by name, read only once the user picks it (a Mac's Documents). */
@@ -119,7 +124,14 @@ export interface FoundDatabase {
 
 /** One way a scan looked, and what it saw. */
 export interface ScanMethod {
-  method: 'projects' | 'history' | 'docker' | 'ports' | 'clients' | 'reach'
+  method:
+    | 'projects'
+    | 'history'
+    | 'docker'
+    | 'ports'
+    | 'clients'
+    | 'kubernetes'
+    | 'reach'
   label: string
   state: 'running' | 'done' | 'failed'
   found: number
@@ -221,11 +233,16 @@ export function startSetup(
 export async function fetchDiscoveryOptions(refresh = false): Promise<{
   agents: DiscoveryAgent[]
   apps: ('claude' | 'codex')[]
+  /** A server-mode RDST in a Kubernetes pod: its search covers the cluster. */
+  kubernetes: boolean
 }> {
-  const body = await call<{ agents?: DiscoveryAgent[]; apps?: string[] }>(
-    `/api/agent-connect/agents${refresh ? '?refresh=true' : ''}`
-  )
+  const body = await call<{
+    agents?: DiscoveryAgent[]
+    apps?: string[]
+    kubernetes?: boolean
+  }>(`/api/agent-connect/agents${refresh ? '?refresh=true' : ''}`)
   return {
+    kubernetes: body.kubernetes === true,
     agents: Array.isArray(body.agents) ? body.agents : [],
     apps: (Array.isArray(body.apps) ? body.apps : []).filter(
       (app): app is 'claude' | 'codex' => app === 'claude' || app === 'codex'
@@ -236,6 +253,14 @@ export async function fetchDiscoveryOptions(refresh = false): Promise<{
 /** What the paste prompt has the user's agent do, in a sentence. */
 export const PROMPT_SUMMARY =
   'Your agent finds the database this project uses, adds it to RDST and gets it ready to monitor. It only reads the project folder and asks you before changing anything.'
+
+/** The same promise for a server-mode RDST, where the agent finds the database in the cluster. */
+export const SERVER_PROMPT_SUMMARY =
+  'Your agent finds the database your app uses in this cluster, from its manifests or kubectl, adds it to RDST with the password from its Kubernetes Secret and gets it ready to monitor. It asks you before changing anything.'
+
+/** What copying a server's prompt does to its agent key. */
+export const SERVER_PROMPT_KEY_NOTE =
+  'Copying creates an agent key and puts it in the prompt. It replaces any earlier key, and agents using the old one lose access.'
 
 /** Opens a terminal window where the user signs `agent` in. */
 export function signInAgent(agent: string): Promise<unknown> {
@@ -494,3 +519,27 @@ export const signInProvider = (found: FoundDatabase): SignInProvider | null =>
   (SIGN_IN_PROVIDERS as readonly string[]).includes(found.provider)
     ? (found.provider as SignInProvider)
     : null
+
+/** A server's agent key, without the key itself: it's only ever shown when it's created. */
+export type AgentKeyStatus = {
+  exists: boolean
+  /** Unix seconds. */
+  created_at: number | null
+  last_used_at: number | null
+}
+
+/** Where a server's agent prompt carries the agent key until the page fills it in. */
+export const AGENT_KEY_PLACEHOLDER = 'RDST_AGENT_KEY_HERE'
+
+export function fetchAgentKey(): Promise<AgentKeyStatus> {
+  return call('/api/server/agent-key')
+}
+
+/** A new agent key, replacing any earlier one. The response is the only time it's shown. */
+export function createAgentKey(): Promise<AgentKeyStatus & { key: string }> {
+  return call('/api/server/agent-key', { method: 'POST' })
+}
+
+export function revokeAgentKey(): Promise<AgentKeyStatus> {
+  return call('/api/server/agent-key', { method: 'DELETE' })
+}

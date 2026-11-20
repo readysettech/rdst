@@ -141,8 +141,14 @@ def resolve_api_key(provider: str = "auto") -> KeyResolution:
                 model=HOSTED_MODEL,
             )
 
+    from shared import server_mode
+
+    own_key = (
+        "set ANTHROPIC_API_KEY in the server's environment (the Helm chart's env or envFrom)"
+        if server_mode.enabled()
+        else f"set your own Anthropic key:\n  {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}"
+    )
     raise LLMError(
-        "Sign in to Readyset to use hosted inference, or set your own Anthropic key:\n"
-        f"  {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}",
+        f"Sign in to Readyset to use hosted inference, or {own_key}",
         code="LOGIN_REQUIRED" if requested_provider != "claude" else "NO_API_KEY",
     )

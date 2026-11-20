@@ -96,3 +96,22 @@ describe('scan failure', () => {
     ).toBeTruthy()
   })
 })
+
+describe('scan in server mode', () => {
+  it('explains the scan needs a repository on the server instead of opening it', () => {
+    const meta = document.createElement('meta')
+    meta.name = 'rdst-runtime'
+    meta.content = 'container'
+    document.head.appendChild(meta)
+    try {
+      render(<ScanPage />)
+      expect(screen.getByTestId('scan-server-notice')).toBeTruthy()
+      expect(
+        screen.getByText(/Mount a repository into the container/)
+      ).toBeTruthy()
+      expect(screen.queryByRole('heading', { name: 'Code scan' })).toBeNull()
+    } finally {
+      meta.remove()
+    }
+  })
+})

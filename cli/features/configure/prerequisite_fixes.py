@@ -22,6 +22,8 @@ PROVIDER_NAMES = {
     "supabase": "Supabase",
     "neon": "Neon",
     "digitalocean": "DigitalOcean",
+    "cnpg": "CloudNativePG",
+    "zalando": "Zalando Postgres Operator",
 }
 
 DOCS = {
@@ -33,6 +35,8 @@ DOCS = {
     ("postgresql", "neon"): "https://neon.com/docs/extensions/pg_stat_statements",
     ("postgresql", "digitalocean"): "https://docs.digitalocean.com/products/databases/postgresql/details/supported-extensions/",
     ("postgresql", "self_hosted"): "https://www.postgresql.org/docs/current/pgstatstatements.html",
+    ("postgresql", "cnpg"): "https://cloudnative-pg.io/documentation/current/postgresql_conf/",
+    ("postgresql", "zalando"): "https://postgres-operator.readthedocs.io/en/latest/reference/cluster_manifest/",
     ("mysql", "rds"): "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PerfInsights.EnableMySQL.html",
     ("mysql", "aurora"): "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_PerfInsights.EnableMySQL.html",
     ("mysql", "cloudsql"): "https://cloud.google.com/sql/docs/mysql/flags",
@@ -69,6 +73,8 @@ def provider_name(provider: Optional[str], engine: str) -> Optional[str]:
         return "Self-hosted PostgreSQL" if engine == "postgresql" else "Self-hosted MySQL"
     if provider == "azure":
         return "Azure Database for " + ("PostgreSQL" if engine == "postgresql" else "MySQL")
+    if provider in ("cnpg", "zalando"):
+        return f"PostgreSQL on {PROVIDER_NAMES[provider]}"
     return PROVIDER_NAMES.get(provider, provider)
 
 
@@ -83,7 +89,10 @@ def _mysql_user(name: str) -> str:
 
 
 def fix_for(check_id: str, ctx: "Context") -> Optional[Fix]:
-    builder = (_POSTGRES if ctx.engine == "postgresql" else _MYSQL).get(check_id)
+    table = _POSTGRES if ctx.engine == "postgresql" else _MYSQL
+    if ctx.engine == "postgresql" and ctx.provider in _OPERATOR_KIND:
+        table = _OPERATOR_FIXES
+    builder = table.get(check_id)
     if builder is None:
         return None
     fix = builder(ctx)
@@ -311,6 +320,133 @@ _POSTGRES = {
     "read_all_stats": _pg_grant,
     "query_text_size": _pg_query_size,
     "pg_stat_statements_track": _pg_track,
+}
+
+
+# Kubernetes operators -------------------------------------------------------
+# CloudNativePG and the Zalando operator own postgresql.conf and reject or undo
+# ALTER SYSTEM, so settings go in the cluster's manifest instead.
+
+_OPERATOR_KIND = {"cnpg": "clusters.postgresql.cnpg.io", "zalando": "postgresqls.acid.zalan.do"}
+
+
+def _operator_names(ctx: "Context") -> tuple[str, str]:
+    return (str(ctx.extras.get("namespace") or "<namespace>"),
+            str(ctx.extras.get("cluster") or "<cluster>"))
+
+
+def _operator_patch(ctx: "Context", parameters: dict[str, str]) -> str:
+    namespace, cluster = _operator_names(ctx)
+    body = ", ".join(f'"{key}": "{value}"' for key, value in parameters.items())
+    return (f"kubectl -n {namespace} patch {_OPERATOR_KIND[ctx.provider]} {cluster} --type merge "
+            f"-p '{{\"spec\": {{\"postgresql\": {{\"parameters\": {{{body}}}}}}}}}'")
+
+
+def _operator_yaml(parameters: dict[str, str]) -> str:
+    lines = ["spec:", "  postgresql:", "    parameters:"]
+    lines += [f'      {key}: "{value}"' for key, value in parameters.items()]
+    return "\n".join(lines)
+
+
+def _operator_settings_fix(ctx: "Context", summary: str, parameters: dict[str, str],
+                           restart: bool) -> Fix:
+    namespace, cluster = _operator_names(ctx)
+    p = ctx.provider
+    where = (f"the {cluster} Cluster" if p == "cnpg" else f"the {cluster} postgresql manifest")
+    after = []
+    if restart:
+        after.append(f"{PROVIDER_NAMES[p]} restarts the instances to apply it"
+                     + (", replicas first, then a switchover." if p == "cnpg" else ".")
+                     + " A single instance is briefly unavailable.")
+    after.append("Keep the same change in the manifest you deploy from, or the next apply "
+                 "undoes it.")
+    return Fix(
+        summary=summary,
+        steps=[f"Add these parameters to {where} in namespace {namespace}, or run the "
+               "command below:", _operator_yaml(parameters)],
+        commands=[_operator_patch(ctx, parameters)],
+        after=after,
+        restart=restart,
+    )
+
+
+def _operator_superuser(ctx: "Context") -> str:
+    namespace, cluster = _operator_names(ctx)
+    if ctx.provider == "cnpg":
+        return (f"Run as the postgres superuser, for example with kubectl -n {namespace} exec "
+                f"-it {cluster}-1 -c postgres -- psql -d {ctx.database} (or kubectl cnpg psql "
+                f"{cluster} -n {namespace} with the cnpg plugin).")
+    return (f"Run as the postgres superuser, for example with kubectl -n {namespace} exec -it "
+            f"{cluster}-0 -- psql -U postgres -d {ctx.database}.")
+
+
+def _operator_preload(ctx: "Context") -> Fix:
+    if ctx.provider == "cnpg":
+        return _operator_settings_fix(
+            ctx,
+            "CloudNativePG manages shared_preload_libraries. Set a pg_stat_statements "
+            "parameter in the Cluster spec, and it preloads the library and creates the "
+            "extension in every database.",
+            {"pg_stat_statements.max": "10000"},
+            restart=True,
+        )
+    current = str(ctx.extras.get("preload") or "").strip()
+    libraries = ",".join(part.strip() for part in [current, "pg_stat_statements"]
+                         if part and part.strip())
+    fix = _operator_settings_fix(
+        ctx,
+        "The Zalando image preloads pg_stat_statements unless the manifest overrides "
+        "shared_preload_libraries. Add it back there, keeping the libraries already listed.",
+        {"shared_preload_libraries": libraries},
+        restart=True,
+    )
+    return fix
+
+
+def _operator_create(ctx: "Context") -> Fix:
+    create = "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
+    note = None
+    if ctx.provider == "cnpg":
+        note = ("With a pg_stat_statements parameter in the Cluster spec, CloudNativePG "
+                "creates the extension in every database on its own.")
+    return Fix(summary=f"Create pg_stat_statements in {ctx.database}.", sql=[create],
+               steps=[_operator_superuser(ctx)], note=note)
+
+
+def _operator_grant(ctx: "Context") -> Fix:
+    user = _pg_ident(ctx.user)
+    note = None
+    if ctx.provider == "cnpg":
+        note = (f"If {ctx.user} is a managed role in the Cluster spec, add pg_monitor to its "
+                "inRoles instead, so CloudNativePG keeps the grant.")
+    return Fix(
+        summary=f"Let {ctx.user} read every user's statements and activity.",
+        sql=[f"GRANT pg_monitor TO {user};"],
+        steps=[_operator_superuser(ctx) + " It takes effect on RDST's next check, no restart."],
+        note=note,
+    )
+
+
+def _operator_query_size(ctx: "Context") -> Fix:
+    fix = _operator_settings_fix(ctx, "Raise track_activity_query_size in the cluster's "
+                                      "manifest.", {"track_activity_query_size": "4096"},
+                                 restart=True)
+    fix.docs_url = "https://www.postgresql.org/docs/current/runtime-config-statistics.html"
+    return fix
+
+
+def _operator_track(ctx: "Context") -> Fix:
+    return _operator_settings_fix(ctx, "Turn statement tracking back on in the cluster's "
+                                       "manifest. It applies without a restart.",
+                                  {"pg_stat_statements.track": "top"}, restart=False)
+
+
+_OPERATOR_FIXES = {
+    "pg_stat_statements_preload": _operator_preload,
+    "pg_stat_statements": _operator_create,
+    "read_all_stats": _operator_grant,
+    "query_text_size": _operator_query_size,
+    "pg_stat_statements_track": _operator_track,
 }
 
 

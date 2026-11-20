@@ -1,0 +1,16 @@
+# The image is built from an allowlist: the Python package, its lockfile and the
+# built web UI. Everything else in the checkout stays out of the build context.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!rdst.py
+!mcp_server.py
+!_version.py
+!_version_build.py
+!features/
+!shared/
+!web_dist/
+**/__pycache__
+**/*.pyc
