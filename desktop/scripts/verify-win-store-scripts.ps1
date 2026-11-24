@@ -68,4 +68,26 @@ try {
     Remove-Item -LiteralPath $jsonArrayPath -ErrorAction SilentlyContinue
 }
 
+$updaterCache = Join-Path ([IO.Path]::GetTempPath()) "rdst-store-updater-$PID"
+try {
+    New-Item -ItemType Directory -Path $updaterCache | Out-Null
+    $installerCopy = Join-Path $updaterCache 'installer.exe'
+    [IO.File]::WriteAllText($installerCopy, 'installer')
+    $openInstaller = [IO.File]::Open($installerCopy, 'Open', 'Read', 'None')
+    try {
+        $problem = Remove-RdstUpdaterCache $updaterCache 1
+    } finally {
+        $openInstaller.Dispose()
+    }
+    if ($problem -notlike '*installer.exe (9 bytes)*') {
+        throw "A locked updater cache was reported as: $problem"
+    }
+    $problem = Remove-RdstUpdaterCache $updaterCache 5
+    if ($problem -or (Test-Path -LiteralPath $updaterCache)) {
+        throw "An unlocked updater cache remained: $problem"
+    }
+} finally {
+    Remove-Item -LiteralPath $updaterCache -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host 'RDST Desktop Store PowerShell checks passed'

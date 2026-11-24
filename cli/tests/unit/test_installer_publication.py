@@ -889,6 +889,8 @@ def test_windows_store_certification_is_fail_closed():
     assert "Get-RdstStateFindings" in script
     assert "Get-RdstProfilePaths" in script
     assert "rdst-desktop-updater" in script
+    # The updater cache holds no user data: certification removes it rather than failing on it.
+    assert "Remove-RdstUpdaterCache" in script
     # An interrupted run's own install is removed before the next run's preflight.
     assert "Clear-CertificationInstall $installRoot $uninstaller" in script
     assert "Remove-Item -LiteralPath $certificationMarker" in script

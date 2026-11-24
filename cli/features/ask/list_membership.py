@@ -47,12 +47,25 @@ class ListPlan:
     predicate_kind: str = "negative_like"
 
 
-def set_function(node):
-    return (
+# sqlglot 30.34 and later parse FIND_IN_SET as exp.FindInSet; earlier versions as an anonymous call.
+FIND_IN_SET = getattr(exp, "FindInSet", None)
+
+
+def set_arguments(node):
+    """The (needle, list) arguments of a two-argument FIND_IN_SET call, else None."""
+    if FIND_IN_SET is not None and isinstance(node, FIND_IN_SET):
+        return node.this, node.expression
+    if (
         isinstance(node, exp.Anonymous)
         and node.name.upper() == "FIND_IN_SET"
         and len(node.expressions) == 2
-    )
+    ):
+        return tuple(node.expressions)
+    return None
+
+
+def set_function(node):
+    return set_arguments(node) is not None
 
 
 def zero(node):
@@ -87,7 +100,7 @@ def absence_predicate(node):
         call = node.this
     if call is None:
         return None
-    literal, col = call.expressions
+    literal, col = set_arguments(call)
     if (
         not isinstance(literal, exp.Literal)
         or not literal.is_string
@@ -208,6 +221,7 @@ def plan_list_membership(sql, dialect):
     remaining = [c for i, c in enumerate(clauses) if i != index]
     if any(
         isinstance(n, (exp.Or, exp.Not, exp.Like, exp.Anonymous))
+        or set_function(n)
         or isinstance(n, exp.Column)
         and n.name == col.name
         for c in remaining

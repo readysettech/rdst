@@ -208,9 +208,8 @@ function Get-RdstDesktopShortcuts {
 }
 
 # RDST data in the agent's own profile: a per-user install, the app's Electron profile (named
-# after the product or the package), the updater's download cache and the backend's data
-# directory. Known folders ignore the smoke run's redirected APPDATA and USERPROFILE, so these
-# are the agent's real ones.
+# after the product or the package) and the backend's data directory. Known folders ignore the
+# smoke run's redirected APPDATA and USERPROFILE, so these are the agent's real ones.
 function Get-RdstProfilePaths {
     $roaming = [Environment]::GetFolderPath('ApplicationData')
     $local = [Environment]::GetFolderPath('LocalApplicationData')
@@ -218,10 +217,33 @@ function Get-RdstProfilePaths {
     return @(
         (Join-Path $roaming 'RDST Desktop'),
         (Join-Path $roaming 'rdst-desktop'),
-        (Join-Path $local 'rdst-desktop-updater'),
         (Join-Path $local 'Programs\RDST Desktop'),
         (Join-Path $userProfile '.rdst')
     ) | Where-Object { Test-Path $_ }
+}
+
+# The updater's cache holds the installer copy electron-builder keeps for differential updates,
+# never user data, so certification removes it itself. The uninstaller's delete skips files
+# another process still has open, such as a scan of that freshly written installer, so retry
+# for a while. Returns a description of whatever could not be removed.
+function Remove-RdstUpdaterCache {
+    param(
+        [string]$Path = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'rdst-desktop-updater'),
+        [int]$TimeoutSeconds = 60
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ((Test-Path -LiteralPath $Path) -and [DateTime]::UtcNow -lt $deadline) {
+        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $Path) {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    if (Test-Path -LiteralPath $Path) {
+        $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
+            ForEach-Object { "$($_.FullName) ($($_.Length) bytes)" })
+        return "RDST updater cache remained after $TimeoutSeconds seconds: $Path $($files -join ', ')"
+    }
 }
 
 # Credential Manager entries the backend writes (its sign-in, keys and Slack token), from
@@ -712,6 +734,10 @@ try {
             Remove-Item -LiteralPath $profileDataDir -Recurse -Force
         }
     }
+    $updaterCacheProblem = Remove-RdstUpdaterCache
+    if ($updaterCacheProblem) {
+        Write-Warning $updaterCacheProblem
+    }
     if (Test-Path -LiteralPath $certificationMarker -PathType Leaf) {
         Write-Host 'An earlier certification run was interrupted; removing its installation'
         Clear-CertificationInstall $installRoot $uninstaller
@@ -964,6 +990,14 @@ try {
         $cleanupFailures += "Could not remove certification work directory: $($_.Exception.Message)"
     }
     if ($preflightPassed) {
+        try {
+            $updaterCacheProblem = Remove-RdstUpdaterCache
+            if ($updaterCacheProblem) {
+                Write-Warning $updaterCacheProblem
+            }
+        } catch {
+            Write-Warning "Could not remove the RDST updater cache: $($_.Exception.Message)"
+        }
         try {
             $remaining = @(Get-RdstStateFindings $installRoot)
             $cleanupFailures += $remaining
