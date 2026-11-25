@@ -1,11 +1,19 @@
-// The question box, which is the page: a raised panel with the 17px textarea, the
-// read-only caption, the Enter key and the one Ask button.
+// The question box, which is the page: a raised panel with the 17px textarea that grows
+// with the question, the read-only caption, the send shortcut and the one Ask button.
+// Enter breaks the line; Ctrl+Enter (Cmd+Enter on a Mac) asks.
 import { cn } from '@rs/tailwind-base'
 import { BaseInputTextarea } from '@rs/ui-new/base-input-textarea'
 import { Button } from '@rs/ui-new/button'
 import { Text } from '@rs/ui-new/text'
-import { type KeyboardEvent, type RefObject, useId } from 'react'
+import { type KeyboardEvent, type RefObject, useId, useRef } from 'react'
 import { DEFAULT_ASK_LIMIT } from './askModel'
+import { useAutoGrow } from './useAutoGrow'
+
+const SEND_KEY =
+  typeof navigator !== 'undefined' &&
+  /Mac|iPhone|iPad/.test(navigator.userAgent)
+    ? 'Cmd Enter'
+    : 'Ctrl Enter'
 
 export type AskEmphasis = 'solid' | 'outline' | 'ghost'
 
@@ -34,8 +42,11 @@ export function AskBox({
   onSubmit: () => void
 }) {
   const id = useId()
+  const ownRef = useRef<HTMLTextAreaElement>(null)
+  const ref = inputRef ?? ownRef
+  useAutoGrow(ref, question)
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault()
       if (!busy) onSubmit()
     }
@@ -47,7 +58,7 @@ export function AskBox({
     >
       <BaseInputTextarea
         id={id}
-        ref={inputRef}
+        ref={ref}
         name="question"
         aria-label="Question"
         value={question}
@@ -71,7 +82,7 @@ export function AskBox({
             : 'Choose a database to ask.'}
         </Text>
         <kbd className="rounded-sm border border-border-layout-2 px-1.5 font-mono text-label-extra-small font-normal text-content-layout-3">
-          Enter
+          {SEND_KEY}
         </kbd>
         <Button
           variant="primary"

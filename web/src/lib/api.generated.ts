@@ -5954,13 +5954,35 @@ export interface components {
         };
         /**
          * AskClarification
-         * @description A clarification question the user answered for a question.
+         * @description A clarification question answered for a question, by the user or, when Ask answers
+         *     first, by Ask's best guess.
          */
         AskClarification: {
             /** Answer */
             answer: string;
+            /**
+             * Assumed
+             * @default false
+             */
+            assumed?: boolean;
+            /** Examples */
+            examples?: string[];
+            /** Hints */
+            hints?: string[];
             /** Id */
             id: string;
+            /**
+             * Minor
+             * @default false
+             */
+            minor?: boolean;
+            /**
+             * Multiple
+             * @default false
+             */
+            multiple?: boolean;
+            /** Options */
+            options?: string[];
             /** Question */
             question: string;
             /** Term */
@@ -5968,13 +5990,34 @@ export interface components {
         };
         /**
          * AskClarificationAnswer
-         * @description A clarification the user answered, as an answer reports it.
+         * @description A clarification answered by the user or assumed by Ask, as an answer reports it.
          */
         AskClarificationAnswer: {
             /** Answer */
             answer: string;
+            /**
+             * Assumed
+             * @default false
+             */
+            assumed?: boolean;
+            /** Examples */
+            examples?: string[];
+            /** Hints */
+            hints?: string[];
             /** Id */
             id: string;
+            /**
+             * Minor
+             * @default false
+             */
+            minor?: boolean;
+            /**
+             * Multiple
+             * @default false
+             */
+            multiple?: boolean;
+            /** Options */
+            options?: string[];
             /** Question */
             question: string;
             /** Term */
@@ -6002,8 +6045,17 @@ export interface components {
          * @description A clarification question for the user.
          */
         AskClarificationQuestion: {
+            /** Examples */
+            examples?: string[];
+            /** Hints */
+            hints?: string[];
             /** Id */
             id: string;
+            /**
+             * Multiple
+             * @default false
+             */
+            multiple?: boolean;
             /** Options */
             options: string[];
             /** Question */
@@ -6094,6 +6146,11 @@ export interface components {
          * @description Request for text-to-SQL conversion.
          */
         AskRequest: {
+            /**
+             * Answer First
+             * @default false
+             */
+            answer_first?: boolean;
             /** Clarification Answers */
             clarification_answers?: {
                 [key: string]: string;

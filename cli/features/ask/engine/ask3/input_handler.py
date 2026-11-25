@@ -68,18 +68,35 @@ class AskInputHandler:
         # Display the question (without inline options - we show them separately)
         self._console.print(MessagePanel(question_text, variant="info"))
 
-        # An open question asks for a value or definition; there is nothing to pick. With
-        # no input left (stdin closed), it is skipped like an empty answer.
+        # An open question asks for a value or definition: the user picks one of Ask's
+        # suggested answers by number or types their own. With no input left (stdin
+        # closed), it is skipped like an empty answer.
         if not question.options:
+            if question.examples:
+                self._console.print(SelectionTable(list(question.examples)))
+                prompt = "Pick a number or type your own answer (Enter skips): "
+            else:
+                prompt = "Your answer: "
             try:
-                return input("Your answer: ").strip()
+                answer = input(prompt).strip()
             except EOFError:
                 return ""
+            if answer.isdigit() and 1 <= int(answer) <= len(question.examples):
+                return question.examples[int(answer) - 1]
+            return answer
 
-        # Display options with "Other" escape hatch for free-text input
-        all_options = list(question.options) + ["Other (type your own answer)"]
+        # Each option shows the schema identifier it reads when there is one, and
+        # "None of these" lets the user describe the answer in their own words.
+        hints = question.hints or [""] * len(question.options)
+        all_options = [
+            f"{option} ({hint})" if hint else option
+            for option, hint in zip(question.options, hints)
+        ] + ["None of these (describe what you mean)"]
         self._console.print(SelectionTable(all_options))
         self._console.print()
+
+        if question.multiple:
+            return self._prompt_several(question.options)
 
         # Get user's choice
         while True:
@@ -113,6 +130,28 @@ class AskInputHandler:
             except EOFError:
                 # No input left (stdin closed): skipped like an open question.
                 return ""
+
+    def _prompt_several(self, options: List[str]) -> str:
+        """Every option the user picks, by number; the number after the options lets them
+        describe the answer instead."""
+        while True:
+            try:
+                reply = input("Pick one or more numbers, separated by commas: ").strip()
+            except EOFError:
+                return ""
+            numbers = [part.strip() for part in reply.split(",") if part.strip()]
+            if numbers and all(
+                part.isdigit() and 1 <= int(part) <= len(options) + 1 for part in numbers
+            ):
+                if any(int(part) == len(options) + 1 for part in numbers):
+                    return input("Describe what you mean: ")
+                return "; ".join(
+                    options[index - 1] for index in dict.fromkeys(map(int, numbers))
+                )
+            self._console.print(
+                f"[{StyleTokens.WARNING}]Please enter numbers between 1 and "
+                f"{len(options) + 1}[/{StyleTokens.WARNING}]"
+            )
 
     def prompt_choice(self, prompt_text: str, choices: List[str]) -> str:
         """Prompt user to make a choice from list."""

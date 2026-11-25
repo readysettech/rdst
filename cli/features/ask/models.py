@@ -18,12 +18,22 @@ class AskPhase(str, Enum):
 
 @dataclass
 class AskClarification:
-    """A clarification question the user answered for a question."""
+    """A clarification question answered for a question, by the user or, when Ask answers
+    first, by Ask's best guess."""
 
     id: str
     term: str
     question: str
     answer: str
+    # What the question offered, so an answer can be changed without asking again.
+    options: list[str] = field(default_factory=list)
+    hints: list[str] = field(default_factory=list)
+    examples: list[str] = field(default_factory=list)
+    multiple: bool = False
+    # Ask chose this answer itself; an empty answer leaves the point to the SQL writer.
+    assumed: bool = False
+    # Changes only which columns show or how rows are ordered.
+    minor: bool = False
 
 
 @dataclass
@@ -52,6 +62,9 @@ class AskOptions:
     enforce_result_limit: bool = True
     persist_query: bool = True
     raise_unexpected_errors: bool = False
+    # Answer with Ask's best guess for each clarifying question instead of asking first;
+    # the result lists those guesses so the user can change them.
+    answer_first: bool = False
 
 
 @dataclass
@@ -71,6 +84,14 @@ class AskClarificationQuestion:
     id: str
     question: str
     options: list[str]
+    # One per option when present: the schema identifier the option reads, with an example
+    # value when Ask could read one, for users who know the schema.
+    hints: list[str] = field(default_factory=list)
+    # Suggested answers to a question without options; the user may pick one or type
+    # their own.
+    examples: list[str] = field(default_factory=list)
+    # The user may pick several options; the answer lists them separated by "; ".
+    multiple: bool = False
 
 
 @dataclass

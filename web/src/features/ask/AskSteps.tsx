@@ -1,8 +1,9 @@
-// The answer area while a question runs: three quiet step lines, the usual wait and a
-// ghost Cancel.
+// The answer area while a question runs: three quiet step lines with a spinner on the
+// current one, the usual wait and a ghost Cancel.
 import { cn } from '@rs/tailwind-base'
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
+import { Spinner } from '@rs/ui-new/spinner'
 import { Text } from '@rs/ui-new/text'
 import { STEPS, stepForPhase } from './askModel'
 
@@ -33,13 +34,12 @@ export function AskSteps({
             >
               {state === 'done' ? (
                 <Icon name="tick" label="" size="small" />
+              ) : state === 'now' ? (
+                <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                  <Spinner />
+                </span>
               ) : (
-                <span
-                  className={cn(
-                    'h-3.5 w-3.5 shrink-0 rounded-full border border-border-layout-2',
-                    state === 'now' && 'border-4 border-content-layout-1'
-                  )}
-                />
+                <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-border-layout-2" />
               )}
               {label}
             </li>

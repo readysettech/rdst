@@ -11,8 +11,10 @@ import { Text } from '@rs/ui-new/text'
 import { type ReactNode, useId, useMemo, useState } from 'react'
 import { ReportAIOutputButton } from '@/components/ReportAIOutputButton'
 import { SqlCode } from '@/features/database/queries/SqlCode'
-import type { AskResultEvent } from '@/lib/ask'
+import type { AskClarification, AskResultEvent } from '@/lib/ask'
 import { createCsvFilename, downloadCsv, toCsv } from '@/lib/csv'
+import { useFormatSql } from '@/lib/useFormatSql'
+import { AskAssumptions } from './AskAssumptions'
 import {
   addedLimit,
   cellText,
@@ -63,7 +65,8 @@ export function StatusLine({
   )
 }
 
-/** "SQL that ran", foldable, with an added or lowered LIMIT named in the caption. */
+/** "SQL that ran", foldable and formatted, with an added or lowered LIMIT named in the
+ * caption. */
 export function SqlDisclosure({
   title,
   sql,
@@ -80,6 +83,10 @@ export function SqlDisclosure({
   onToggle: () => void
 }) {
   const id = useId()
+  const formatted = useFormatSql(open ? sql : null, undefined, {
+    lineWidth: 80,
+    multilineProjection: true,
+  })
   return (
     <div className="mt-6">
       <Pressable
@@ -112,7 +119,7 @@ export function SqlDisclosure({
       </Pressable>
       {open && (
         <div id={id} className="mt-3">
-          <SqlCode sql={sql} testId="ask-sql" />
+          <SqlCode sql={formatted ?? sql} testId="ask-sql" />
         </div>
       )}
     </div>
@@ -208,6 +215,7 @@ export function AskAnswer({
   onOpenInDatabase,
   onAnalyze,
   onAskAgain,
+  onChangeAssumptions,
   onEdit,
 }: {
   result: AskResultEvent
@@ -218,6 +226,8 @@ export function AskAnswer({
   onOpenInDatabase: (() => void) | null
   onAnalyze: () => void
   onAskAgain: () => void
+  /** Answers the question again with a changed assumption. */
+  onChangeAssumptions?: (clarifications: AskClarification[]) => void
   onEdit: () => void
 }) {
   const [sqlOpen, setSqlOpen] = useState(true)
@@ -280,6 +290,13 @@ export function AskAnswer({
             !result.limit_reduced &&
             ` Ask added LIMIT ${addedLimit(executedSql)}.`}
         </Text>
+      )}
+      {onChangeAssumptions && (result.clarifications?.length ?? 0) > 0 && (
+        <AskAssumptions
+          clarifications={result.clarifications ?? []}
+          disabled={false}
+          onChange={onChangeAssumptions}
+        />
       )}
       {!noRows && <Table result={result} />}
       <div className="mt-5 flex gap-1.5">

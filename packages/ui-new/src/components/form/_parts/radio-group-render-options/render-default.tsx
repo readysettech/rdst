@@ -72,7 +72,9 @@ export const renderDefault = (
         </div>
         <VStack className="w-full items-start gap-1">
           <HStack className="w-full items-center justify-between">
-            <Text level="label-medium">{option.label}</Text>
+            <Text level="label-medium" className="text-left">
+              {option.label}
+            </Text>
             {option.badge}
           </HStack>
           {option.description && (

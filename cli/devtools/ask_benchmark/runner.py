@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hashlib
 import json
+from dataclasses import replace
 from collections.abc import Callable
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -32,7 +33,12 @@ from features.ask.events import (
     AskResultEvent,
     AskSqlGeneratedEvent,
 )
-from features.ask.models import AskInput, AskOptions
+from features.ask.models import (
+    AskClarification,
+    AskClarificationQuestion,
+    AskInput,
+    AskOptions,
+)
 from features.ask.profiles import CANDIDATE_V4_FLAGS, CANDIDATE_V5_FLAGS
 from features.ask.service import AskService
 from features.ask.sql_validation import validate_sql_for_ask
@@ -60,7 +66,13 @@ from .models import (
     RunLimits,
 )
 from .oracle import UNSTABLE_GOLD_CASE_IDS, result_fingerprint, score_results
-from .oracle_user import ORACLE_MAX_ROUNDS, OracleUserSimulator, OracleUserUnavailable
+from .oracle_user import (
+    ANY_OPTION_ANSWER,
+    UNANSWERABLE_ANSWER,
+    ORACLE_MAX_ROUNDS,
+    OracleUserSimulator,
+    OracleUserUnavailable,
+)
 from .pipeline import (
     build_model_only_prompt,
     extract_sql,
@@ -338,6 +350,7 @@ class BenchmarkRunner:
         clarification_confidence_ceiling: float | None = None,
         clarification_draft_edit: bool = False,
         clarification_after_draft: bool = False,
+        answer_first: bool = False,
     ):
         self.run_id = run_id
         self.track = track
@@ -425,6 +438,11 @@ class BenchmarkRunner:
         if clarification_after_draft and track != EvaluationTrack.RDST:
             raise ValueError("Clarification after a draft applies only to the rdst-ask track")
         self.clarification_after_draft = clarification_after_draft
+        if answer_first and oracle_user is None:
+            raise ValueError("Answering first needs a simulated user to review the answer")
+        # Ask answers with its best guesses; the simulated user changes the wrong ones and
+        # Ask answers once more with those changes.
+        self.answer_first = answer_first
         self.budget_stop_reason: str | None = None
         self._gold_fingerprints: dict[int, str] = {}
         self._gold_results: dict[int, QueryResult] = {}
@@ -761,6 +779,7 @@ class BenchmarkRunner:
             no_interactive=self.interaction_mode == InteractionMode.AUTO,
             persist_query=False,
             raise_unexpected_errors=True,
+            answer_first=self.answer_first,
         )
 
         async def collect_events():
@@ -861,6 +880,37 @@ class BenchmarkRunner:
                     ),
                     None,
                 )
+        review = None
+        first_result = next(
+            (event for event in reversed(events) if isinstance(event, AskResultEvent)),
+            None,
+        )
+        if self.answer_first and first_result is not None and first_result.clarifications:
+            review = self._review_assumptions(case, first_result.clarifications)
+            if review["changed"]:
+                changed = review.pop("clarifications")
+
+                async def collect_changed_events():
+                    return [
+                        event
+                        async for event in service.ask(
+                            AskInput(
+                                question=question_for_rdst(case, self.context_mode),
+                                target=case.db_id,
+                                source="benchmark",
+                                provided_context=provided_context_for_case(
+                                    case, self.context_mode
+                                ),
+                                matched_database_values=value_matches.context,
+                                clarifications=changed,
+                            ),
+                            options,
+                        )
+                    ]
+
+                events.extend(self._run_async(collect_changed_events()))
+            else:
+                review.pop("clarifications")
         ctx = observed["context"]
         diagnostics = {
             "ask_service_phases": observed["phases"],
@@ -868,6 +918,8 @@ class BenchmarkRunner:
             "ask_service_events": [event.type for event in events],
             "matched_database_values": value_matches.to_dict(),
         }
+        if review is not None:
+            diagnostics["answer_first_review"] = review
         if self.interaction_mode != InteractionMode.AUTO:
             diagnostics["clarification_stopped"] = clarification is not None
         if ctx is not None:
@@ -890,6 +942,7 @@ class BenchmarkRunner:
                         "id": question.id,
                         "question": question.question,
                         "options": question.options,
+                        "hints": question.hints,
                     }
                     for question in clarification.questions
                 ],
@@ -998,6 +1051,50 @@ class BenchmarkRunner:
         # Ask's own execution, not the benchmark's re-run of its SQL.
         result["candidate_execution_ms"] = result_event.execution_time_ms
         return result
+
+    def _review_assumptions(
+        self, case: BenchmarkCase, assumed: list[AskClarification]
+    ) -> dict[str, Any]:
+        """The simulated user reads what Ask assumed as the questions it stands for and
+        changes every answer that differs from its own."""
+        questions = [
+            AskClarificationQuestion(
+                id=item.id,
+                question=item.question,
+                options=list(item.options),
+                hints=list(item.hints),
+                examples=list(item.examples),
+                multiple=item.multiple,
+            )
+            for item in assumed
+        ]
+        answer_started = perf_counter()
+        try:
+            answers, exchanges = self.oracle_user.answer(case, questions)
+        except OracleUserUnavailable as exc:
+            raise BenchmarkTransportError(str(exc)) from exc
+        self._harness_ms += (perf_counter() - answer_started) * 1000
+        changes = {
+            item.id: answers[item.id]
+            for item in assumed
+            if answers.get(item.id)
+            and answers[item.id] not in (ANY_OPTION_ANSWER, UNANSWERABLE_ANSWER)
+            and " ".join(answers[item.id].split()).casefold()
+            != " ".join(item.answer.split()).casefold()
+        }
+        return {
+            "assumed": {item.id: item.answer for item in assumed},
+            "changes": changes,
+            "changed": bool(changes),
+            "exchanges": [exchange.to_dict() for exchange in exchanges],
+            "clarifications": [
+                replace(item, answer=changes[item.id], assumed=False)
+                if item.id in changes
+                else item
+                for item in assumed
+            ],
+            "answer_policy": self.oracle_user.policy,
+        }
 
     def _run_async(self, awaitable):
         if self._rdst_event_loop is None:

@@ -161,7 +161,16 @@ class Ask3Context:
     # Concepts the SQL writer named when it could not answer; Ask asks the user about
     # them once before giving up.
     missing_schema: list[str] = field(default_factory=list)
+    # The writer's suggestions for working the missing concepts out from the data that
+    # exists, offered as answers to that question.
+    missing_schema_suggestions: list[str] = field(default_factory=list)
     writer_clarification_rounds: int = 0
+    # The user has answered what Ask asked; the writer approximates instead of refusing.
+    best_effort: bool = False
+    # Ask answers with its best guesses and lists them instead of asking first.
+    answer_first: bool = False
+    # Measures the SQL works out from other columns: term, how (used), alternatives.
+    derived_measures: list[dict[str, Any]] = field(default_factory=list)
     # The question before the user's latest answers. When set, generation first drafts SQL
     # from it and then asks for only the changes the answers require.
     clarification_draft_question: str = ""

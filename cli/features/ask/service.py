@@ -8,6 +8,7 @@ import functools
 import hashlib
 import json
 import logging
+import re
 import threading
 import uuid
 from collections.abc import AsyncGenerator, Callable, Collection, MutableMapping
@@ -286,6 +287,7 @@ from .value_location_normalization import (
     normalize_context as normalize_value_location_context,
 )
 from .value_probe import (
+    create_option_example_probe_executor,
     create_month_component_probe_executor,
     create_endpoint_component_probe_executor,
     create_period_literal_probe_executor,
@@ -324,10 +326,12 @@ class _PendingAskSession:
     workflow_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     surface: str = "unknown"
     raise_unexpected_errors: bool = False
-    clarification_context: dict[str, dict[str, str]] = field(default_factory=dict)
+    clarification_context: dict[str, dict[str, Any]] = field(default_factory=dict)
     # The SQL writer's refusal that the pending questions came from; it stands when they go
     # unanswered.
     writer_error: AskErrorEvent | None = None
+    # Ask answers with its best guesses instead of asking; see AskOptions.answer_first.
+    answer_first: bool = False
 
 
 _sessions: dict[str, _PendingAskSession] = {}
@@ -416,11 +420,107 @@ def _writer_missing_terms(ctx: Any) -> list[str]:
     return terms[:WRITER_CLARIFICATION_TERMS]
 
 
+def _with_option_hints(answer: str, option_hints: dict[str, str]) -> str:
+    """The answer with the identifier each chosen option reads; an answer to a question
+    that allows several options lists them separated by semicolons."""
+    if option_hints.get(answer):
+        return f"{answer} ({option_hints[answer]})"
+    parts = [part.strip() for part in answer.split(";")]
+    if len(parts) < 2 or not any(option_hints.get(part) for part in parts):
+        return answer
+    return "; ".join(
+        f"{part} ({option_hints[part]})" if option_hints.get(part) else part
+        for part in parts
+    )
+
+
+def _option_hints(question: Any) -> dict[str, str]:
+    """The schema identifier each offered option reads, without its example value."""
+    return {
+        option: hint.split(", e.g. ")[0]
+        for option, hint in zip(question.options, question.hints)
+        if hint
+    }
+
+
+def _offered(question: Any) -> dict[str, Any]:
+    """What a clarification question offered the user to answer with."""
+    return {
+        "options": list(question.options),
+        "hints": list(question.hints),
+        "examples": list(question.examples),
+        "multiple": bool(question.multiple),
+    }
+
+
+def _term_key(term: str) -> str:
+    """A term as an ID part, and for telling whether two points name the same term."""
+    return re.sub(r"[^a-z0-9]+", "-", term.lower()).strip("-") or "measure"
+
+
+def _same_term(one: str, other: str) -> bool:
+    """Two term keys name the same thing: equal, or the shorter, of several words, is
+    part of the longer ("debt-service-ratio" in "total-debt-service-ratio")."""
+    shorter, longer = sorted((one, other), key=len)
+    return shorter == longer or ("-" in shorter and f"-{shorter}-" in f"-{longer}-")
+
+
+def _reads_any(sql: str, hints: list[str]) -> bool:
+    """Whether the SQL reads a column some reading's hint names. True when there is no
+    SQL or no hinted column to tell by."""
+    columns = {
+        column.lower()
+        for hint in hints
+        for column in re.findall(r"\b(?!e\.g\b)[A-Za-z_]\w*\.([A-Za-z_]\w*)", hint)
+    }
+    if not sql or not columns:
+        return True
+    return any(
+        re.search(rf"\b{re.escape(column)}\b", sql, re.IGNORECASE) for column in columns
+    )
+
+
+def _best_guess(ambiguity: Any) -> str:
+    """Ask's own answer to a clarification question: the best-supported reading, every
+    likely one for a question that allows several, or the first suggested answer. Empty
+    when there is nothing to choose, which leaves the point to the SQL writer."""
+    options = ambiguity.possible_interpretations
+    if options:
+        best = max(options, key=lambda option: option.score)
+        if ambiguity.multiple:
+            likely = [option.text for option in options if option.score >= 0.5]
+            return "; ".join(likely or [best.text])
+        return best.text
+    return ambiguity.answer_examples[0] if ambiguity.answer_examples else ""
+
+
 def _english_list(items: list[str]) -> str:
     """'a', 'a or b', 'a, b or c'."""
     if len(items) < 3:
         return " or ".join(items)
     return ", ".join(items[:-1]) + " or " + items[-1]
+
+
+_MAX_EXAMPLE_CHARS = 40
+
+
+def _example_value_sql(hint: str, schema_info: Any, db_type: str | None) -> str | None:
+    """A query for one stored value of the column a hint names as table.column, or None
+    when the hint names no column of the schema."""
+    table_name, _, column_name = hint.rpartition(".")
+    table = schema_info.tables.get(table_name)
+    if table is None or column_name not in table.columns:
+        return None
+    mysql = "mysql" in str(db_type or "").casefold()
+    mark = "`" if mysql else '"'
+
+    def quoted(name: str) -> str:
+        return mark + name.replace(mark, mark * 2) + mark
+
+    column = quoted(column_name)
+    source = ".".join(quoted(part) for part in table_name.split("."))
+    text = "CHAR" if mysql else "TEXT"
+    return f"SELECT CAST({column} AS {text}) FROM {source} WHERE {column} IS NOT NULL LIMIT 1"
 
 
 def _stop_statements_in_background(statement_cancel: StatementCancel) -> None:
@@ -916,19 +1016,30 @@ class AskService:
                 ),
             )
             if input.clarifications:
-                # The user already answered this question's clarifications.
+                # The user already answered this question's clarifications, or changed the
+                # answers Ask chose when it answered first.
                 self._apply_user_clarifications(
                     ctx,
-                    {item.id: item.answer for item in input.clarifications},
+                    {
+                        item.id: item.answer
+                        for item in input.clarifications
+                        if item.answer.strip()
+                    },
                     {
                         item.id: {
                             "ambiguity_id": item.id,
                             "term": item.term,
                             "question": item.question,
+                            "assumed": item.assumed,
+                            "minor": item.minor,
+                            "option_hints": _option_hints(item),
+                            "offered": _offered(item),
                         }
                         for item in input.clarifications
                     },
                 )
+                # The user has seen what Ask assumed; it answers instead of refusing.
+                ctx.best_effort = options.answer_first
                 self._observe(AskPhase.CLARIFY, ctx)
             elif options.no_interactive:
                 deterministic_ambiguities = self._check_non_interactive_intent(ctx)
@@ -951,6 +1062,7 @@ class AskService:
                 with inference_workflow("ask", input.source, workflow_id):
                     if self._clarification_after_draft_enabled:
                         await asyncio.to_thread(self._write_clarification_draft, ctx)
+                    ctx.answer_first = options.answer_first
                     ctx, interpretations, ambiguities = await asyncio.to_thread(
                         self._detect_ambiguities, ctx
                     )
@@ -966,7 +1078,7 @@ class AskService:
                     )
                     return
                 if ambiguities:
-                    questions = self._clarification_questions(ambiguities)
+                    questions = self._clarification_questions(ctx, ambiguities)
                     clarification_context = {
                         question.id: {
                             "ambiguity_id": ambiguity.id,
@@ -974,9 +1086,30 @@ class AskService:
                             "question": ambiguity.clarifying_question,
                             "answer_type": ambiguity.answer_type,
                             "origin": "detector",
+                            "option_hints": {
+                                option.text: option.hint
+                                for option in ambiguity.possible_interpretations
+                                if option.hint
+                            },
+                            "offered": _offered(question),
+                            "assumed": options.answer_first,
+                            "minor": ambiguity.priority == "low",
                         }
                         for question, ambiguity in zip(questions, ambiguities)
                     }
+                if ambiguities and options.answer_first:
+                    # Answer with the best guess for each question; the result lists them
+                    # for the user to change.
+                    self._apply_user_clarifications(
+                        ctx,
+                        {
+                            question.id: guess
+                            for question, ambiguity in zip(questions, ambiguities)
+                            if (guess := _best_guess(ambiguity))
+                        },
+                        clarification_context,
+                    )
+                elif ambiguities:
                     yield self._open_clarification(
                         _PendingAskSession(
                             context=ctx,
@@ -997,6 +1130,7 @@ class AskService:
                 workflow_id=workflow_id,
                 surface=input.source,
                 raise_unexpected_errors=options.raise_unexpected_errors,
+                answer_first=options.answer_first,
             )
             with inference_workflow("ask", input.source, workflow_id):
                 async for event in self._run_with_writer_clarification(session):
@@ -1076,6 +1210,9 @@ class AskService:
         if pending.writer_error is not None and not answers:
             yield pending.writer_error
             return
+        if pending.writer_error is not None:
+            # The user told Ask how to find what the writer missed; it answers now.
+            ctx.best_effort = True
         if ctx.status == get_status_enum().ERROR:
             # The writer's refusal is answered now; generation starts over.
             ctx.status = get_status_enum().PENDING
@@ -1093,7 +1230,7 @@ class AskService:
         self,
         ctx: Any,
         answers: dict[str, str],
-        clarification_context: dict[str, dict[str, str]],
+        clarification_context: dict[str, dict[str, Any]],
     ) -> None:
         for answer_key, context in clarification_context.items():
             answer = answers.get(answer_key)
@@ -1107,36 +1244,81 @@ class AskService:
                     "answer": answer,
                     "answer_type": context.get("answer_type", CHOICE_ANSWER),
                     "origin": context.get("origin", "detector"),
-                    "source": "user",
+                    "source": "assumed" if context.get("assumed") else "user",
                     "applied": bool(answer),
+                    "offered": context.get("offered", {}),
+                    "minor": bool(context.get("minor")),
                 }
             )
         if answers:
             ctx.clarifications.update(answers)
+            # A chosen option's text is in business terms; the writer also gets the
+            # identifier it reads.
+            hinted = {
+                key: _with_option_hints(
+                    answer, clarification_context.get(key, {}).get("option_hints", {})
+                )
+                for key, answer in answers.items()
+            }
             ctx.refined_question = self._build_refined_question(
                 ctx.refined_question or ctx.question,
-                answers,
+                hinted,
                 clarification_context,
             )
 
     @staticmethod
     def _answered_clarifications(ctx: Any) -> list[AskClarification]:
-        """The user's clarification answers, in the order they refined the question."""
-        answered = {
-            item["answer_key"]: item
-            for item in ctx.clarification_resolutions
-            if item.get("source") == "user" and item.get("action") == "answer"
-        }
-        return [
-            AskClarification(
-                id=key,
-                term=answered[key]["term"],
-                question=answered[key]["question"],
-                answer=answer,
+        """The user's clarification answers and Ask's own best guesses, in the order they
+        refined the question, then the measures the SQL works out from other columns.
+
+        A guess Ask left to the SQL writer has an empty answer. A guess whose readings all
+        name columns the final SQL does not read did not shape the answer and is left out.
+        Points that change only which columns show or how rows are ordered come last.
+        """
+        reported: dict[str, dict[str, Any]] = {}
+        for item in ctx.clarification_resolutions:
+            if item.get("source") == "assumed" or (
+                item.get("source") == "user" and item.get("action") == "answer"
+            ):
+                reported[item["answer_key"]] = item
+        clarifications = []
+        for key, item in reported.items():
+            offered = item.get("offered") or {}
+            if item.get("source") == "assumed" and not _reads_any(
+                ctx.sql or "", offered.get("hints", [])
+            ):
+                continue
+            clarifications.append(
+                AskClarification(
+                    id=key,
+                    term=item["term"],
+                    question=item["question"],
+                    answer=ctx.clarifications.get(key, "") if item["applied"] else "",
+                    options=list(offered.get("options", [])),
+                    hints=list(offered.get("hints", [])),
+                    examples=list(offered.get("examples", [])),
+                    multiple=bool(offered.get("multiple", False)),
+                    assumed=item.get("source") == "assumed",
+                    minor=bool(item.get("minor")),
+                )
             )
-            for key, answer in ctx.clarifications.items()
-            if key in answered
-        ]
+        known = {_term_key(item.term) for item in clarifications}
+        for measure in ctx.derived_measures:
+            term = measure["term"]
+            if any(_same_term(_term_key(term), key) for key in known):
+                continue
+            known.add(_term_key(term))
+            clarifications.append(
+                AskClarification(
+                    id=f"derived-{_term_key(term)}",
+                    term=term,
+                    question=f"How should Ask work out {term}?",
+                    answer=measure["used"],
+                    options=[measure["used"], *measure["alternatives"]],
+                    assumed=True,
+                )
+            )
+        return sorted(clarifications, key=lambda item: item.minor)
 
     def abandon(self, session_id: str) -> bool:
         """Discard a pending clarification session."""
@@ -1176,6 +1358,36 @@ class AskService:
         ):
             if isinstance(event, AskErrorEvent):
                 questions = self._writer_clarification_questions(ctx)
+                if questions and session.answer_first and ctx.missing_schema_suggestions:
+                    # Work the missing concept out the way the writer suggested first,
+                    # and list it with what Ask assumed. With no suggestion there is no
+                    # answer to show, so Ask asks as it would otherwise.
+                    [question] = questions
+                    missing = _english_list(_writer_missing_terms(ctx))
+                    ctx.writer_clarification_rounds += 1
+                    self._apply_user_clarifications(
+                        ctx,
+                        {question.id: ctx.missing_schema_suggestions[0]},
+                        {
+                            question.id: {
+                                "ambiguity_id": question.id,
+                                "term": missing,
+                                "question": f"How should Ask work out {missing}?",
+                                "answer_type": "definition",
+                                "origin": "writer",
+                                "offered": _offered(question),
+                                "assumed": True,
+                            }
+                        },
+                    )
+                    ctx.best_effort = True
+                    ctx.status = get_status_enum().PENDING
+                    ctx.error_message = ctx.error_code = ctx.error_category = None
+                    async for retried in self._run_from_generate(
+                        ctx, persist_query=session.persist_query
+                    ):
+                        yield retried
+                    return
                 if questions:
                     ctx.writer_clarification_rounds += 1
                     yield self._open_clarification(
@@ -1213,16 +1425,16 @@ class AskService:
         if not terms:
             return []
         pronoun = "it" if len(terms) == 1 else "them"
-        verb = "holds" if len(terms) == 1 else "hold"
+        subject = "is it" if len(terms) == 1 else "are they"
         return [
             AskClarificationQuestion(
                 id="missing-1",
                 question=(
-                    f"I couldn't find {_english_list(terms)} in this database. Which "
-                    f"table, column or JSON key {verb} {pronoun}, or how should I work "
-                    f"{pronoun} out?"
+                    f"I couldn't find {_english_list(terms)} in this database. Where "
+                    f"{subject} recorded, or how should I work {pronoun} out?"
                 ),
                 options=[],
+                examples=list(ctx.missing_schema_suggestions),
             )
         ]
 
@@ -1310,7 +1522,7 @@ class AskService:
             answers = "\n".join(
                 f"- {item.get('term', '')}: {item['answer']}"
                 for item in ctx.clarification_resolutions
-                if item.get("source") == "user" and item.get("answer")
+                if item.get("source") in ("user", "assumed") and item.get("answer")
             )
             validation_message += defined_term_feedback(
                 ctx.validation_errors,
@@ -4390,6 +4602,7 @@ class AskService:
             callback=lambda **kw: ctx.add_llm_call(phase="clarify", **kw),
             compact=self._compact_clarification_enabled,
             draft_sql=ctx.clarification_draft_sql if ctx.clarification_draft_ready else "",
+            answer_first=ctx.answer_first,
         )
         raw_response = str(result.get("raw_response", ""))
         ctx.ambiguity_response_sha256 = hashlib.sha256(
@@ -4444,12 +4657,18 @@ class AskService:
             ctx.ambiguity_report = report.to_dict()
             if result.get("normalizations"):
                 ctx.ambiguity_report["normalizations"] = result["normalizations"]
-        if not report or not report.requires_clarification:
+        if not report or not report.ambiguities:
             return ctx, [], []
-        if not report.ambiguities:
+        # Answering first, every reported point is listed for the user to change.
+        answer_first = ctx.answer_first
+        if not answer_first and not report.requires_clarification:
             return ctx, [], []
         ceiling = self._clarification_confidence_ceiling
-        if ceiling is not None and report.overall_confidence > ceiling:
+        if (
+            not answer_first
+            and ceiling is not None
+            and report.overall_confidence > ceiling
+        ):
             # The detector is confident enough to proceed; the SQL writer can still ask.
             ctx.ambiguity_report["confidence_ceiling_proceeded"] = ceiling
             return ctx, [], []
@@ -4551,26 +4770,66 @@ class AskService:
                 }
             )
 
-    @staticmethod
-    def _clarification_questions(ambiguities: list[Any]):
+    def _clarification_questions(self, ctx: Any, ambiguities: list[Any]):
+        examples = self._option_examples(ctx, ambiguities)
         questions = []
         for ambiguity in ambiguities:
+            options = ambiguity.possible_interpretations
+            hints = [
+                f"{option.hint}, e.g. {examples[option.hint]}"
+                if option.hint in examples
+                else option.hint
+                for option in options
+            ]
             questions.append(
                 AskClarificationQuestion(
                     id=ambiguity.id,
                     question=ambiguity.clarifying_question,
-                    options=[
-                        option.text for option in ambiguity.possible_interpretations
-                    ],
+                    options=[option.text for option in options],
+                    hints=hints if any(hints) else [],
+                    examples=list(ambiguity.answer_examples),
+                    multiple=ambiguity.multiple,
                 )
             )
         return questions
+
+    def _option_examples(self, ctx: Any, ambiguities: list[Any]) -> dict[str, str]:
+        """One stored value for each option hint that names a schema column, so a user can
+        recognize the column by its data. Unreadable columns go without one."""
+        if ctx.dry_run or not ctx.target_config or ctx.schema_info is None:
+            return {}
+        hints = dict.fromkeys(
+            option.hint
+            for ambiguity in ambiguities
+            for option in ambiguity.possible_interpretations
+            if option.hint
+        )
+        probe = None
+        examples = {}
+        for hint in hints:
+            sql = _example_value_sql(hint, ctx.schema_info, ctx.db_type)
+            if sql is None:
+                continue
+            probe = probe or create_option_example_probe_executor(ctx, self._db_executor)
+            result = probe(sql, ctx.target_config)
+            rows = result.get("rows") or []
+            if result.get("success") and rows and rows[0] and rows[0][0] is not None:
+                example = " ".join(str(rows[0][0]).split())
+                if example.startswith(("{", "[")):
+                    # A whole JSON document says nothing about the key the option reads.
+                    continue
+                examples[hint] = (
+                    example
+                    if len(example) <= _MAX_EXAMPLE_CHARS
+                    else example[: _MAX_EXAMPLE_CHARS - 3] + "..."
+                )
+        return examples
 
     def _build_refined_question(
         self,
         original: str,
         clarifications: dict[str, str],
-        clarification_context: dict[str, dict[str, str]] | None = None,
+        clarification_context: dict[str, dict[str, Any]] | None = None,
     ) -> str:
         if not clarifications:
             return original

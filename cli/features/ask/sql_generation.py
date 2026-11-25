@@ -198,6 +198,38 @@ def _parse_json_object_response(
     return parsed
 
 
+# A reply may leave out the measures it derived; it then reports none.
+_REQUIRED_FIELDS = frozenset(SQL_GENERATION_RESPONSE_SCHEMA["required"]) - {"derived"}
+
+
+def _derived_measures(value: Any) -> List[Dict[str, Any]]:
+    """The measures the SQL works out from other columns, minus malformed entries."""
+    if not isinstance(value, list):
+        return []
+    measures = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        term, used = item.get("term"), item.get("used")
+        if not isinstance(term, str) or not isinstance(used, str):
+            continue
+        if not term.strip() or not used.strip():
+            continue
+        alternatives = item.get("alternatives")
+        measures.append(
+            {
+                "term": term.strip(),
+                "used": used.strip(),
+                "alternatives": [
+                    text.strip()
+                    for text in (alternatives if isinstance(alternatives, list) else [])
+                    if isinstance(text, str) and text.strip()
+                ][:2],
+            }
+        )
+    return measures
+
+
 def _usable_answer(result_data: Dict[str, Any]) -> Dict[str, Any] | None:
     """An answer with SQL that the model did not refuse, minus its format-only slips.
 
@@ -230,6 +262,7 @@ def _usable_answer(result_data: Dict[str, Any]) -> Dict[str, Any] | None:
         if isinstance(assumptions, list)
         else []
     )
+    answer["derived"] = _derived_measures(answer.get("derived"))
     return answer
 
 
@@ -245,6 +278,7 @@ class SQLGenerationResult:
     cannot_answer: bool = False
     cannot_answer_reason: str = ""
     missing_schema: List[str] = field(default_factory=list)
+    derived: List[Dict[str, Any]] = field(default_factory=list)
     error: str = ""
     raw_response: Dict[str, Any] = field(default_factory=dict)
 
@@ -443,7 +477,7 @@ def generate_sql_from_nl(
             try:
                 result_data = _parse_json_object_response(
                     response_text,
-                    required_fields=set(SQL_GENERATION_RESPONSE_SCHEMA["required"]),
+                    required_fields=set(_REQUIRED_FIELDS),
                     allowed_fields=set(SQL_GENERATION_RESPONSE_SCHEMA["properties"]),
                 )
             except json.JSONDecodeError:
@@ -455,7 +489,7 @@ def generate_sql_from_nl(
             raise _SQLGenerationResponseError(str(exc)) from exc
 
         answer = _usable_answer(result_data)
-        required_fields = set(SQL_GENERATION_RESPONSE_SCHEMA["required"])
+        required_fields = set(_REQUIRED_FIELDS)
         missing_fields = sorted(required_fields - result_data.keys())
         if missing_fields and answer is None:
             return {
@@ -488,6 +522,7 @@ def generate_sql_from_nl(
             cannot_answer=fields.get("cannot_answer", False),
             cannot_answer_reason=fields.get("cannot_answer_reason", ""),
             missing_schema=fields.get("missing_schema", []),
+            derived=_derived_measures(fields.get("derived")),
             raw_response=result_data,
         )
 
@@ -556,6 +591,7 @@ def generate_sql_from_nl(
             "cannot_answer": result.cannot_answer,
             "cannot_answer_reason": result.cannot_answer_reason,
             "missing_schema": result.missing_schema,
+            "derived": result.derived,
             "error": result.error,
             **(
                 {"error_code": "ask_unsafe_sql", "error_category": "read_only"}

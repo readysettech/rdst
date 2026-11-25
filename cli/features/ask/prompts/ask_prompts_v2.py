@@ -27,9 +27,10 @@ IMPORTANT:
 - A term, metric, threshold or rule that the provided context defines is settled; do not
   ask about it
 - DO NOT over-interpret simple questions - if there's an obvious answer in the schema, use it
-- The user knows this database. When the schema leaves unclear which table, column,
-  JSON key or join holds a concept the question needs, ask the user and name the
-  candidate identifiers as options.
+- The user may not know the schema's table, column or JSON key names. When the schema
+  leaves unclear which table, column, JSON key or join holds a concept the question
+  needs, ask about the concept in business terms ("Which ID should identify each
+  customer?") and offer the candidates as options.
 - Treat an explicitly requested operation with a missing result-changing parameter as
   a genuine ambiguity. For example, "top products", "some", "a few", "the biggest" or
   "the best ones" need a result count when no visible product default defines one.
@@ -48,13 +49,24 @@ IMPORTANT:
   "relevant indicators" or "related values" when several columns or JSON keys could
   fill it, JSON output whose key names the question does not give, and a proportion or
   share that could be a fraction or a percentage. Ask which columns, keys or unit to
-  return as a `value` question that names the candidates.
+  return as a `value` question that describes the candidates in business terms.
 - A computed term the question relies on (a score, index, rate, measure, label or
   classification) that neither the schema nor the provided context defines is high
   priority; ask for its definition.
 - Every option must be a complete reading. When the answer is a count, threshold or
   formula you do not know, ask a `value` or `definition` question instead of offering an
   option such as "a count you state" or "a formula you provide".
+- Ask one thing per question. Put a boundary in the answers instead of asking about it
+  separately: offer "20,000 or more", not "and does 20,000 itself count?".
+- Each question must make sense whatever the user answers to the others. Never ask a
+  question that depends on another one's answer ("If X is measured by Y, ..."), and do
+  not ask for a term's threshold or values when another question asks how the term is
+  defined.
+- Ask which identifier to show only when the candidates hold different values for the
+  same record. A key and the key it references, or two columns holding the same code,
+  are one candidate: use either without asking.
+- When the readings combine conditions, offer the combinations that differ ("either one
+  is High", "both are High").
 
 """
 
@@ -74,16 +86,22 @@ _DETECTION_CATEGORIES = """Classify each ambiguity into one of these categories:
 
 _DETECTION_ANSWER_TYPES = """Choose how the user answers each ambiguity (`answer_type`):
 - `choice`: the question has two or three genuinely different readings that you can list.
-  Give them as options.
+  Give them as options; the user picks one.
+- `choices`: the user picks every option that applies, as for which measures, columns or
+  categories to include. Give two to four options.
 - `value`: the answer is a code, category, threshold, cutoff, count, date or unit that
   neither the question nor the schema states, and you cannot list its plausible values
   (for example "Which code marks a running contract?" or "What glucose level counts as
-  high, and does that level itself count?"). Give no options.
+  high?"). Give no options.
 - `definition`: the answer is a formula or business definition the question relies on
   but nothing in the question or schema defines (for example "How is the consumption
   rate calculated?"). Give no options.
 Prefer `value` or `definition` over inventing options for a fact you do not know; the
-user can state it directly. Do not ask for values the schema or the matched database
+user can state it directly. For a `value` or `definition` question, give up to three
+`answer_examples`: short, complete answers in the user's words that a person might give,
+most common first, such as "10", "Above 20,000 a month" or "Liquid assets divided by
+total assets". The user may pick one or type their own. Give none for a `choice` or
+`choices` question. Do not ask for values the schema or the matched database
 values already show.
 
 """
@@ -98,6 +116,11 @@ AMBIGUITY_DETECTION_PROMPT = (
   calibrated probabilities.
 - Give one short supporting phrase from the question or schema.
 - State the SQL effect that distinguishes it from the other options.
+- Write its text in business terms, without table, column or JSON key names, so a user
+  who does not know the schema can choose it ("Customer number on the main customer
+  record").
+- Put every identifier it reads in `hint`, comma-separated: table.column, or
+  table.column followed by the JSON key path. Leave `hint` empty when it reads none.
 - Rank the most strongly supported interpretation first, but do not rely on order as
   the decision signal.
 
@@ -126,12 +149,15 @@ Rules:
   score below 0.70 or leads the runner-up by less than 0.20
 - Proceed with the simplest interpretation only when the remaining uncertainty is
   low and does not compound across multiple material choices
-- Provide two or three interpretations for each `choice` ambiguity and none for `value`
-  or `definition` ambiguities
+- Provide two or three interpretations for each `choice` ambiguity, two to four for each
+  `choices` ambiguity, and none for `value` or `definition` ambiguities
 - Every interpretation must produce a materially different SQL operation or result.
   Do not ask when the options have the same SQL effect.
-- Return at most four material ambiguities and at most three concise options per ambiguity
+- Return at most four material ambiguities and at most three concise options per `choice`
+  ambiguity
 - Keep each option text, reason, SQL effect, and clarifying question to one short sentence
+- Write each clarifying question in business terms, without table, column or JSON key
+  names
 - Return at most one evidence phrase per option, using fewer than 12 words
 - Use distinct option IDs and non-identical scores when the evidence supports a ranking
 - DO NOT include "Something else", "Other", or open-ended options; the user can always
@@ -158,8 +184,10 @@ COMPACT_AMBIGUITY_DETECTION_PROMPT = (
 - Return at most two ambiguities. For each, give the term from the question, one short
   clarifying question, and its answer_type
 - Give two or three options for each `choice` ambiguity, most likely first, each a few
-  words that state a distinct reading with a different result; give no options for
-  `value` or `definition` ambiguities
+  words that state a distinct reading with a different result; give two to four for
+  each `choices` ambiguity and no options for `value` or `definition` ambiguities
+- Write each clarifying question and option in business terms, without table, column
+  or JSON key names
 - DO NOT include "Something else", "Other", or open-ended options; the user can always
   answer in their own words
 - Return only the response object required by the supplied JSON schema
@@ -195,12 +223,17 @@ AMBIGUITY_DETECTION_RESPONSE_SCHEMA = {
                     "reason": {"type": "string"},
                     "answer_type": {
                         "type": "string",
-                        "enum": ["choice", "value", "definition"],
+                        "enum": ["choice", "choices", "value", "definition"],
+                    },
+                    "answer_examples": {
+                        "type": "array",
+                        "maxItems": 3,
+                        "items": {"type": "string"},
                     },
                     "possible_interpretations": {
                         "type": "array",
                         "minItems": 0,
-                        "maxItems": 3,
+                        "maxItems": 4,
                         "items": {
                             "type": "object",
                             "additionalProperties": False,
@@ -218,6 +251,7 @@ AMBIGUITY_DETECTION_RESPONSE_SCHEMA = {
                                     "items": {"type": "string"},
                                 },
                                 "sql_effect": {"type": "string"},
+                                "hint": {"type": "string"},
                             },
                             "required": [
                                 "id",
@@ -225,6 +259,7 @@ AMBIGUITY_DETECTION_RESPONSE_SCHEMA = {
                                 "score",
                                 "evidence",
                                 "sql_effect",
+                                "hint",
                             ],
                         },
                     },
@@ -240,6 +275,7 @@ AMBIGUITY_DETECTION_RESPONSE_SCHEMA = {
                     "term",
                     "reason",
                     "answer_type",
+                    "answer_examples",
                     "possible_interpretations",
                     "clarifying_question",
                     "priority",
@@ -281,11 +317,11 @@ COMPACT_AMBIGUITY_DETECTION_RESPONSE_SCHEMA = {
                     "clarifying_question": {"type": "string"},
                     "answer_type": {
                         "type": "string",
-                        "enum": ["choice", "value", "definition"],
+                        "enum": ["choice", "choices", "value", "definition"],
                     },
                     "options": {
                         "type": "array",
-                        "maxItems": 3,
+                        "maxItems": 4,
                         "items": {"type": "string"},
                     },
                 },

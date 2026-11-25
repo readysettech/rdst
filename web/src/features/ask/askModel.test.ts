@@ -240,6 +240,14 @@ describe('cellText', () => {
     expect(cellText(4790, 'zipcode')).toBe('4790')
     expect(cellText(null, 'id')).toBe('NULL')
   })
+
+  it('rounds long decimals for reading', () => {
+    expect(cellText(1253.4557956777996, 'ratio')).toBe('1,253.456')
+    expect(cellText(432.45766129032256, 'avg_score')).toBe('432.458')
+    expect(cellText(0.19912345, 'dti')).toBe('0.1991')
+    expect(cellText(-0.000012345, 'drift')).toBe('-0.00001235')
+    expect(cellText(2.5, 'rate')).toBe('2.5')
+  })
 })
 
 describe('Earlier', () => {

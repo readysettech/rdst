@@ -103,6 +103,9 @@ def _event_to_sse(event: AskEvent) -> dict:
                             "id": question.id,
                             "question": question.question,
                             "options": question.options,
+                            "hints": question.hints,
+                            "examples": question.examples,
+                            "multiple": question.multiple,
                         }
                         for question in event.questions
                     ],
@@ -142,6 +145,12 @@ def _event_to_sse(event: AskEvent) -> dict:
                             "term": item.term,
                             "question": item.question,
                             "answer": item.answer,
+                            "options": item.options,
+                            "hints": item.hints,
+                            "examples": item.examples,
+                            "multiple": item.multiple,
+                            "assumed": item.assumed,
+                            "minor": item.minor,
                         }
                         for item in event.clarifications
                     ],
@@ -372,7 +381,16 @@ async def ask(
         source=surface,
         clarifications=[
             AskClarification(
-                id=item.id, term=item.term, question=item.question, answer=item.answer
+                id=item.id,
+                term=item.term,
+                question=item.question,
+                answer=item.answer,
+                options=item.options,
+                hints=item.hints,
+                examples=item.examples,
+                multiple=item.multiple,
+                assumed=item.assumed,
+                minor=item.minor,
             )
             for item in body.clarifications or []
         ],
@@ -382,6 +400,7 @@ async def ask(
         timeout_seconds=body.timeout,
         verbose=False,
         no_interactive=False,
+        answer_first=body.answer_first,
     )
     return EventSourceResponse(
         _ask_generator(input_data, options, target_engine=guard.target_engine)

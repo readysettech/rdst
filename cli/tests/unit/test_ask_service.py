@@ -7,6 +7,7 @@ clarification handling, and error scenarios.
 
 import asyncio
 import json
+from dataclasses import replace
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -34,7 +35,7 @@ from features.ask.models import (
     AskOptions,
     AskPhase,
 )
-from features.ask.service import AskService
+from features.ask.service import AskService, _with_option_hints
 
 pytestmark = pytest.mark.usefixtures("run_blocking_inline")
 
@@ -486,6 +487,7 @@ class TestAskServiceSessionManagement:
                 term="best",
                 question="Rank the best titles by what?",
                 answer="most user votes",
+                options=["most user votes", "highest average rating"],
             )
         ]
         assert isinstance(asked_again, AskResultEvent)
@@ -1119,6 +1121,8 @@ class TestAskServiceSessionManagement:
                 "origin": "detector",
                 "source": "user",
                 "applied": True,
+                "offered": {},
+                "minor": False,
             }
         ]
         assert sessions == {}
@@ -1420,7 +1424,10 @@ class TestAskServiceDependencyInjection:
         service = AskService(
             llm_manager=Mock(), clarification_confidence_ceiling=ceiling
         )
-        ctx = Mock(question="Which users?", schema_formatted="users", db_type="mysql")
+        ctx = Mock(
+            question="Which users?", schema_formatted="users", db_type="mysql",
+            answer_first=False,
+        )
         ambiguity = Ambiguity(
             id="status",
             category="status",
@@ -2771,15 +2778,21 @@ async def test_validation_repair_quotes_the_answers_definition_not_the_questions
     assert "category = 'toys'" not in message
 
 
-async def _writer_dialogue(refusals, answer=None, *, no_interactive=False, missing=("elderly",)):
+async def _writer_dialogue(
+    refusals, answer=None, *, no_interactive=False, missing=("elderly",), best_effort=None
+):
     """Ask a question whose SQL writer cannot find ``missing`` for the first ``refusals``
-    calls, and answer each question Ask raises with ``answer``."""
+    calls, and answer each question Ask raises with ``answer``. ``best_effort`` collects
+    whether each call was told to approximate instead of refusing."""
     generated = []
 
     def fake_generate(ctx, _presenter, _manager):
         generated.append(ctx.refined_question or ctx.question)
+        if best_effort is not None:
+            best_effort.append(ctx.best_effort)
         if len(generated) <= refusals:
             ctx.missing_schema = list(missing)
+            ctx.missing_schema_suggestions = ["Older than 65", "65 or older"]
             ctx.mark_error(
                 "No column defines elderly.",
                 code="ask_cannot_answer",
@@ -2838,6 +2851,19 @@ async def test_writer_refusal_asks_about_the_missing_concept_and_retries():
 
 
 @pytest.mark.asyncio
+async def test_writer_question_suggests_answers_and_the_answer_is_worked_out():
+    best_effort = []
+    rounds, _ = await _writer_dialogue(
+        refusals=1, answer="Older than 65", best_effort=best_effort
+    )
+
+    [question] = rounds[0][-1].questions
+    assert question.examples == ["Older than 65", "65 or older"]
+    # The writer may refuse before the user is asked, but not after they answered.
+    assert best_effort == [False, True]
+
+
+@pytest.mark.asyncio
 async def test_writer_refusal_names_every_missing_concept_in_one_question():
     missing = (
         "weather forecast data",
@@ -2854,8 +2880,8 @@ async def test_writer_refusal_names_every_missing_concept_in_one_question():
     [question] = asked[-1].questions
     assert question.question == (
         "I couldn't find weather forecast data, weather conditions for Monaco or forecast "
-        "date for tomorrow in this database. Which table, column or JSON key hold them, "
-        "or how should I work them out?"
+        "date for tomorrow in this database. Where are they recorded, or how should I "
+        "work them out?"
     )
     assert "Answer: There is none" in generated[-1]
     error = refused[-1]
@@ -2889,3 +2915,413 @@ async def test_non_interactive_writer_refusal_is_an_error():
 
     assert len(rounds) == 1 and len(generated) == 1
     assert isinstance(rounds[0][-1], AskErrorEvent)
+
+
+def _customer_id_ambiguity():
+    return Ambiguity(
+        id="customer",
+        category="unclear_schema_reference",
+        term="ID",
+        reason="Two tables hold a customer reference.",
+        clarifying_question="Which ID should identify each customer?",
+        possible_interpretations=[
+            AmbiguityOption(
+                "main", "Customer number on the main record", 0.5, hint="core_record.clientref"
+            ),
+            AmbiguityOption(
+                "income",
+                "Client reference on the income record",
+                0.5,
+                hint="employment_and_income.emplcoreref->ref",
+            ),
+        ],
+    )
+
+
+def test_clarification_options_show_schema_hints_with_an_example_value():
+    from features.ask.engine.ask3.context import Ask3Context
+    from features.ask.engine.ask3.types import ColumnInfo, SchemaInfo, TableInfo
+
+    queries = []
+
+    def db_executor(sql, _config):
+        queries.append(sql)
+        return {"success": True, "rows": [["CU241436"]], "columns": ["clientref"]}
+
+    service = AskService(persist_queries=False, db_executor=db_executor)
+    ctx = Ask3Context(question="Show each customer's ID", target="credit", dry_run=False)
+    ctx.target_config = {"engine": "postgresql"}
+    ctx.db_type = "postgresql"
+    ctx.schema_info = SchemaInfo(
+        target="credit",
+        db_type="postgresql",
+        tables={
+            "core_record": TableInfo(
+                name="core_record", columns={"clientref": ColumnInfo("clientref", "text")}
+            )
+        },
+    )
+
+    [question] = service._clarification_questions(ctx, [_customer_id_ambiguity()])
+
+    assert question.options == [
+        "Customer number on the main record",
+        "Client reference on the income record",
+    ]
+    # Only a hint that names a schema column is read; the JSON path is shown as written.
+    assert question.hints == [
+        "core_record.clientref, e.g. CU241436",
+        "employment_and_income.emplcoreref->ref",
+    ]
+    assert len(queries) == 1 and '"clientref"' in queries[0]
+
+
+def test_a_json_document_is_no_example_value():
+    from features.ask.engine.ask3.context import Ask3Context
+    from features.ask.engine.ask3.types import ColumnInfo, SchemaInfo, TableInfo
+
+    def db_executor(_sql, _config):
+        return {"success": True, "rows": [['{"autopay": "Yes"}']], "columns": ["doc"]}
+
+    service = AskService(persist_queries=False, db_executor=db_executor)
+    ctx = Ask3Context(question="Who invests?", target="credit", dry_run=False)
+    ctx.target_config = {"engine": "postgresql"}
+    ctx.db_type = "postgresql"
+    ctx.schema_info = SchemaInfo(
+        target="credit",
+        db_type="postgresql",
+        tables={"bank": TableInfo(name="bank", columns={"doc": ColumnInfo("doc", "jsonb")})},
+    )
+    ambiguity = Ambiguity(
+        id="focus",
+        category="unclear_value_reference",
+        term="investment focus",
+        reason="Several signals.",
+        clarifying_question="How should we decide who invests?",
+        possible_interpretations=[
+            AmbiguityOption("portfolio", "A recorded portfolio profile", 0.6, hint="bank.doc"),
+            AmbiguityOption("amount", "A positive amount", 0.4),
+        ],
+    )
+
+    [question] = service._clarification_questions(ctx, [ambiguity])
+
+    assert question.hints == ["bank.doc", ""]
+
+
+@pytest.mark.asyncio
+async def test_a_chosen_option_gives_the_writer_its_schema_hint():
+    from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
+
+    service = AskService(session_store={}, persist_queries=False)
+    options = AskOptions(dry_run=True, no_interactive=False, persist_query=False)
+    refined = []
+
+    async def mock_load_config(target):
+        return (target, {"engine": "postgresql"})
+
+    def fake_load(ctx, _presenter, _manager):
+        ctx.schema_info = SchemaInfo(
+            target="credit", db_type="postgresql", source=SchemaSource.DATABASE
+        )
+        ctx.schema_info.tables = {"core_record": Mock()}
+        ctx.schema_formatted = "core_record table"
+        return ctx
+
+    def fake_generate(ctx, _presenter, _manager):
+        refined.append(ctx.refined_question)
+        ctx.sql = "SELECT clientref FROM core_record"
+        ctx.generated_sql = ctx.sql
+        return ctx
+
+    with (
+        patch.object(service, "_load_config", side_effect=mock_load_config),
+        patch("features.ask.service.load_schema", side_effect=fake_load),
+        patch.object(
+            service,
+            "_detect_ambiguities",
+            side_effect=lambda ctx: (ctx, [], [_customer_id_ambiguity()]),
+        ),
+        patch("features.ask.service.generate_sql", side_effect=fake_generate),
+        patch("features.ask.service.validate_sql", side_effect=lambda ctx, _p: ctx),
+    ):
+        question = AskInput(question="Show each customer's ID", target="credit")
+        initial = [event async for event in service.ask(question, options)]
+        clarification = initial[-1]
+        assert clarification.questions[0].hints == [
+            "core_record.clientref",
+            "employment_and_income.emplcoreref->ref",
+        ]
+        result = [
+            event
+            async for event in service.resume(
+                clarification.session_id,
+                {"customer": "Customer number on the main record"},
+            )
+        ][-1]
+
+    assert isinstance(result, AskResultEvent)
+    assert (
+        "Answer: Customer number on the main record (core_record.clientref)" in refined[0]
+    )
+    assert result.clarifications[0].answer == "Customer number on the main record"
+
+
+def test_each_chosen_option_carries_its_schema_hint():
+    hints = {"Average DTI": "ei.debincratio", "Loan amount": "ca.totloanamt"}
+
+    assert _with_option_hints("Average DTI", hints) == "Average DTI (ei.debincratio)"
+    assert (
+        _with_option_hints("Average DTI; Median DTI; Loan amount", hints)
+        == "Average DTI (ei.debincratio); Median DTI; Loan amount (ca.totloanamt)"
+    )
+    assert _with_option_hints("Debt over income; but capped", hints) == (
+        "Debt over income; but capped"
+    )
+
+
+async def _answer_first(
+    ambiguities,
+    *,
+    refusals=0,
+    clarifications=(),
+    sql="SELECT ei.debincratio FROM ei",
+    derived=(),
+):
+    """Ask with answer_first set: the detector finds ``ambiguities`` and the SQL writer
+    refuses ``refusals`` times, then writes ``sql`` and reports the measures it
+    ``derived``. Returns the events, each prompt the writer saw, whether it was told to
+    approximate, and how often detection ran."""
+    sessions = {}
+    service = AskService(session_store=sessions, persist_queries=False)
+    generated, best_effort, detections = [], [], []
+
+    def fake_detect(ctx):
+        detections.append(ctx.question)
+        return ctx, [], list(ambiguities)
+
+    def fake_generate(ctx, _presenter, _manager):
+        generated.append(ctx.refined_question or ctx.question)
+        best_effort.append(ctx.best_effort)
+        if len(generated) <= refusals:
+            ctx.missing_schema = ["housing costs"]
+            ctx.missing_schema_suggestions = ["Mortgage balance divided by 12", "Rent"]
+            ctx.mark_error(
+                "No housing costs.", code="ask_cannot_answer", category="missing_schema"
+            )
+            return ctx
+        ctx.sql = ctx.generated_sql = sql
+        ctx.derived_measures = [dict(item) for item in derived]
+        return ctx
+
+    with (
+        patch.object(service, "_load_config", side_effect=_load_test_config),
+        patch("features.ask.service.load_schema", side_effect=_fake_schema_load),
+        patch.object(service, "_detect_ambiguities", side_effect=fake_detect),
+        patch("features.ask.service.generate_sql", side_effect=fake_generate),
+        patch("features.ask.service.validate_sql", side_effect=lambda ctx, _p: ctx),
+    ):
+        events = [
+            event
+            async for event in service.ask(
+                AskInput(
+                    question="Rank customers by debt",
+                    target="t",
+                    clarifications=list(clarifications),
+                ),
+                AskOptions(
+                    no_interactive=False, dry_run=True, persist_query=False,
+                    answer_first=True,
+                ),
+            )
+        ]
+    assert sessions == {}
+    return events, generated, best_effort, detections
+
+
+def _ranking_ambiguities():
+    return [
+        Ambiguity(
+            id="ranking",
+            category="ranking",
+            term="debt",
+            reason="Several debt measures.",
+            clarifying_question="Rank by which debt measure?",
+            possible_interpretations=[
+                AmbiguityOption("loans", "Total loan amount", 0.4, hint="ca.totloanamt"),
+                AmbiguityOption("dti", "Debt-to-income ratio", 0.7, hint="ei.debincratio"),
+            ],
+        ),
+        Ambiguity(
+            id="measures",
+            category="output",
+            term="debt metrics",
+            reason="Several metrics.",
+            clarifying_question="Which measures should be shown?",
+            possible_interpretations=[
+                AmbiguityOption("a", "Average DTI", 0.8),
+                AmbiguityOption("b", "Median DTI", 0.5),
+                AmbiguityOption("c", "Loan amount", 0.2),
+            ],
+            answer_type="choices",
+        ),
+        Ambiguity(
+            id="top",
+            category="count",
+            term="top",
+            reason="No count.",
+            clarifying_question="How many customers?",
+            possible_interpretations=[],
+            answer_type="value",
+            answer_examples=["10", "25"],
+        ),
+        Ambiguity(
+            id="segment",
+            category="output",
+            term="segment",
+            reason="No rule.",
+            clarifying_question="What makes a segment small?",
+            possible_interpretations=[],
+            answer_type="value",
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_answer_first_answers_with_its_best_guesses_and_lists_them():
+    events, generated, _, _ = await _answer_first(_ranking_ambiguities())
+
+    assert not any(isinstance(event, AskClarificationNeededEvent) for event in events)
+    result = events[-1]
+    assert isinstance(result, AskResultEvent)
+    assert [(item.id, item.answer, item.assumed) for item in result.clarifications] == [
+        ("ranking", "Debt-to-income ratio", True),
+        ("measures", "Average DTI; Median DTI", True),
+        ("top", "10", True),
+        # Nothing to choose: the SQL writer decides, and the user can still say.
+        ("segment", "", True),
+    ]
+    ranking = result.clarifications[0]
+    assert ranking.options == ["Total loan amount", "Debt-to-income ratio"]
+    assert ranking.hints == ["ca.totloanamt", "ei.debincratio"]
+    assert result.clarifications[1].multiple is True
+    assert result.clarifications[2].examples == ["10", "25"]
+    assert "Answer: Debt-to-income ratio (ei.debincratio)" in generated[0]
+    assert "What makes a segment small?" not in generated[0]
+
+
+@pytest.mark.asyncio
+async def test_answer_first_leaves_out_a_guess_the_sql_does_not_read():
+    events, _, _, _ = await _answer_first(_ranking_ambiguities(), sql="SELECT 1")
+
+    # No reading of the debt measure is in the SQL, so that guess did not shape it.
+    assert [item.id for item in events[-1].clarifications] == ["measures", "top", "segment"]
+
+
+@pytest.mark.asyncio
+async def test_answer_first_lists_the_measures_the_writer_derived():
+    events, _, _, _ = await _answer_first(
+        _ranking_ambiguities()[:1],
+        derived=[
+            {
+                "term": "total debt service ratio",
+                "used": "Total liabilities divided by annual income",
+                "alternatives": ["Mortgage balance divided by 12, over monthly income"],
+            },
+            # The detector already asked about this term.
+            {"term": "Debt", "used": "Total loan amount", "alternatives": []},
+        ],
+    )
+
+    ranking, derived = events[-1].clarifications
+    assert ranking.id == "ranking"
+    assert (derived.id, derived.question, derived.answer, derived.assumed) == (
+        "derived-total-debt-service-ratio",
+        "How should Ask work out total debt service ratio?",
+        "Total liabilities divided by annual income",
+        True,
+    )
+    assert derived.options == [
+        "Total liabilities divided by annual income",
+        "Mortgage balance divided by 12, over monthly income",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_answer_first_lists_points_that_only_change_what_shows_last():
+    ambiguities = _ranking_ambiguities()[:3]
+    ambiguities[0].priority = "low"
+
+    events, _, _, _ = await _answer_first(ambiguities)
+
+    assert [(item.id, item.minor) for item in events[-1].clarifications] == [
+        ("measures", False),
+        ("top", False),
+        ("ranking", True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_answer_first_works_a_missing_concept_out_as_the_writer_suggested():
+    events, generated, best_effort, _ = await _answer_first([], refusals=1)
+
+    result = events[-1]
+    assert isinstance(result, AskResultEvent)
+    [missing] = result.clarifications
+    assert (missing.id, missing.answer, missing.assumed) == (
+        "missing-1", "Mortgage balance divided by 12", True,
+    )
+    assert missing.question == "How should Ask work out housing costs?"
+    assert missing.examples == ["Mortgage balance divided by 12", "Rent"]
+    assert "Answer: Mortgage balance divided by 12" in generated[-1]
+    assert best_effort == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_answer_first_asks_when_there_is_no_way_to_work_it_out():
+    sessions = {}
+    service = AskService(session_store=sessions, persist_queries=False)
+
+    def refuse(ctx, _presenter, _manager):
+        ctx.missing_schema = ["weather"]
+        ctx.mark_error("No weather.", code="ask_cannot_answer", category="missing_schema")
+        return ctx
+
+    with (
+        patch.object(service, "_load_config", side_effect=_load_test_config),
+        patch("features.ask.service.load_schema", side_effect=_fake_schema_load),
+        patch.object(service, "_detect_ambiguities", side_effect=lambda ctx: (ctx, [], [])),
+        patch("features.ask.service.generate_sql", side_effect=refuse),
+    ):
+        events = [
+            event
+            async for event in service.ask(
+                AskInput(question="Weather in Monaco?", target="t"),
+                AskOptions(dry_run=True, persist_query=False, answer_first=True),
+            )
+        ]
+
+    assert isinstance(events[-1], AskClarificationNeededEvent)
+    [question] = events[-1].questions
+    assert "I couldn't find weather" in question.question
+    assert len(sessions) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_changed_assumption_runs_again_without_asking_and_keeps_the_rest():
+    first, _, _, _ = await _answer_first(_ranking_ambiguities())
+    changed = [
+        replace(item, answer="Total loan amount", assumed=False)
+        if item.id == "ranking"
+        else item
+        for item in first[-1].clarifications
+    ]
+
+    events, generated, best_effort, detections = await _answer_first(
+        _ranking_ambiguities(), clarifications=changed
+    )
+
+    assert detections == []
+    assert best_effort == [True]
+    assert "Answer: Total loan amount (ca.totloanamt)" in generated[0]
+    assert events[-1].clarifications == changed

@@ -755,3 +755,63 @@ def test_writer_refuses_only_for_missing_values_or_data_changes():
     )
     assert "A clarification answer that declines" in COMPREHENSIVE_ASK_PROMPT
     assert "list the unsettled\n  terms in `missing_schema`" in COMPREHENSIVE_ASK_PROMPT
+
+
+def test_a_refusal_keeps_the_ways_to_work_the_concept_out() -> None:
+    from features.ask.engine.ask3.phases.generate import generate_sql
+
+    ctx = Ask3Context(question="Average housing cost?", target="t", db_type="postgresql")
+    refusal = {"success": True, "sql": "", "explanation": "", "confidence": 0.0,
+               "assumptions": ["Mortgage balance divided by 12", " ", "Rent payment",
+                               "Mortgage balance divided by 12", "Zero for owners", "Fourth"],
+               "cannot_answer": True, "cannot_answer_reason": "missing_schema",
+               "missing_schema": ["housing costs"], "error": None, "raw_response": {}}
+    with patch("features.ask.sql_generation.generate_sql_from_nl", return_value=refusal):
+        generate_sql(ctx, MagicMock(), llm_manager=MagicMock())
+
+    assert ctx.missing_schema == ["housing costs"]
+    assert ctx.missing_schema_suggestions == [
+        "Mortgage balance divided by 12", "Rent payment", "Zero for owners"]
+
+
+@pytest.mark.parametrize("best_effort", [True, False])
+def test_best_effort_tells_the_writer_to_approximate(best_effort) -> None:
+    from features.ask.engine.ask3.phases.generate import generate_sql
+    from features.ask.prompts.ask_prompts import BEST_EFFORT_CONTEXT
+
+    ctx = Ask3Context(question="Average housing cost?", target="t", db_type="postgresql",
+                      provided_context="Housing is in property data.", best_effort=best_effort)
+    answer = {"success": True, "sql": "SELECT 1", "explanation": "", "confidence": 1.0,
+              "cannot_answer": False, "raw_response": {}}
+    with patch("features.ask.sql_generation.generate_sql_from_nl",
+               return_value=answer) as generate:
+        generate_sql(ctx, MagicMock(), llm_manager=MagicMock())
+
+    context = generate.call_args.kwargs["provided_context"]
+    assert context.startswith("Housing is in property data.")
+    assert (BEST_EFFORT_CONTEXT in context) is best_effort
+
+
+def test_generation_keeps_the_measures_the_sql_derives() -> None:
+    from features.ask.engine.ask3.phases.generate import generate_sql
+
+    ctx = Ask3Context(question="Debt service ratio by segment?", target="t",
+                      db_type="postgresql")
+    derived = [{"term": "debt service ratio", "used": "Liabilities over income",
+                "alternatives": []}]
+    answer = {"success": True, "sql": "SELECT 1", "explanation": "", "confidence": 1.0,
+              "cannot_answer": False, "raw_response": {}, "derived": derived}
+    with patch("features.ask.sql_generation.generate_sql_from_nl", return_value=answer):
+        generate_sql(ctx, MagicMock(), llm_manager=MagicMock())
+
+    assert ctx.derived_measures == derived
+
+
+def test_writer_lists_the_measures_it_works_out() -> None:
+    from features.ask.prompts.ask_prompts import (
+        BEST_EFFORT_CONTEXT, COMPREHENSIVE_ASK_PROMPT, SQL_GENERATION_RESPONSE_SCHEMA,
+    )
+
+    assert "In `derived`, list each measure" in COMPREHENSIVE_ASK_PROMPT
+    assert "list it in `derived`" in BEST_EFFORT_CONTEXT
+    assert "derived" in SQL_GENERATION_RESPONSE_SCHEMA["required"]

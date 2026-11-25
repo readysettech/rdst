@@ -23,6 +23,7 @@ from shared.ui import (
 )
 
 from .prompts.ask_prompts import (
+    ANSWER_FIRST_DETECTION_NOTE,
     format_detection_draft_block,
     format_matched_database_values_block,
     format_provided_context_block,
@@ -94,6 +95,8 @@ class AmbiguityOption:
     score: float
     evidence: List[str] = field(default_factory=list)
     sql_effect: str = ""
+    # The schema identifier the option reads, shown beside its business-terms text.
+    hint: str = ""
 
     def __post_init__(self) -> None:
         if not self.id.strip() or not self.text.strip():
@@ -108,14 +111,16 @@ class AmbiguityOption:
             "score": self.score,
             "evidence": list(self.evidence),
             "sql_effect": self.sql_effect,
+            "hint": self.hint,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AmbiguityOption":
-        if set(data) != {"id", "text", "score", "evidence", "sql_effect"}:
+        if set(data) - {"hint"} != {"id", "text", "score", "evidence", "sql_effect"}:
             raise ValueError("ambiguity option has unexpected fields")
         if not all(
-            isinstance(data[field], str) for field in ("id", "text", "sql_effect")
+            isinstance(data.get(field, ""), str)
+            for field in ("id", "text", "sql_effect", "hint")
         ):
             raise ValueError("ambiguity option text fields must be strings")
         if isinstance(data["score"], bool) or not isinstance(
@@ -136,20 +141,26 @@ class AmbiguityOption:
             score=float(data["score"]),
             evidence=list(data["evidence"]),
             sql_effect=data["sql_effect"],
+            hint=data.get("hint", "").strip(),
         )
 
 
 CHOICE_ANSWER = "choice"
+# The user picks every option that applies, as for which measures or columns to show.
+SEVERAL_ANSWER = "choices"
 OPEN_ANSWER_TYPES = frozenset({"value", "definition"})
-ANSWER_TYPES = frozenset({CHOICE_ANSWER, *OPEN_ANSWER_TYPES})
+ANSWER_TYPES = frozenset({CHOICE_ANSWER, SEVERAL_ANSWER, *OPEN_ANSWER_TYPES})
+# Readings to pick one from; a question that allows several may list one more.
+MAX_CHOICE_OPTIONS = 3
 
 
 @dataclass
 class Ambiguity:
     """Single detected ambiguity.
 
-    A ``choice`` ambiguity lists the readings to pick from; a ``value`` or
-    ``definition`` ambiguity asks the user to state a fact and has no options.
+    A ``choice`` ambiguity lists the readings to pick one from, a ``choices`` ambiguity
+    the items to pick any of; a ``value`` or ``definition`` ambiguity asks the user to
+    state a fact and has no options.
     """
 
     id: str
@@ -160,10 +171,16 @@ class Ambiguity:
     clarifying_question: str
     priority: str = "medium"
     answer_type: str = CHOICE_ANSWER
+    # Suggested answers to an open question; the user may pick one or type their own.
+    answer_examples: List[str] = field(default_factory=list)
 
     @property
     def is_open(self) -> bool:
         return self.answer_type in OPEN_ANSWER_TYPES
+
+    @property
+    def multiple(self) -> bool:
+        return self.answer_type == SEVERAL_ANSWER
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -177,6 +194,7 @@ class Ambiguity:
             "clarifying_question": self.clarifying_question,
             "priority": self.priority,
             "answer_type": self.answer_type,
+            "answer_examples": list(self.answer_examples),
         }
 
     @classmethod
@@ -211,8 +229,17 @@ class Ambiguity:
             else [
                 AmbiguityOption.from_dict(option)
                 for option in data["possible_interpretations"]
-            ],
+            ][: MAX_CHOICE_OPTIONS if answer_type == CHOICE_ANSWER else None],
             answer_type=answer_type,
+            answer_examples=list(
+                dict.fromkeys(
+                    example.strip()
+                    for example in data.get("answer_examples") or []
+                    if isinstance(example, str) and example.strip()
+                )
+            )[:3]
+            if answer_type in OPEN_ANSWER_TYPES
+            else [],
         )
 
 
@@ -525,12 +552,15 @@ def detect_ambiguities(
     target_database: str = "",
     compact: bool = False,
     draft_sql: str = "",
+    answer_first: bool = False,
 ) -> Dict[str, Any]:
     """Ask the model whether the question needs clarification.
 
     ``compact`` requests the shorter reply of COMPACT_AMBIGUITY_DETECTION_PROMPT, which is
     mapped into the same report. ``draft_sql``, the SQL written for the question before any
-    clarification, turns the decision into a review of that draft.
+    clarification, turns the decision into a review of that draft. ``answer_first`` asks
+    for every point that changes the result, since Ask answers with its best reading of
+    each and lists them for the user to change.
     """
     try:
         pref_context = format_preference_tree_for_prompt(preference_tree)
@@ -557,7 +587,8 @@ def detect_ambiguities(
             matched_database_values_block=format_matched_database_values_block(
                 matched_database_values
             )
-            + format_detection_draft_block(draft_sql),
+            + format_detection_draft_block(draft_sql)
+            + (ANSWER_FIRST_DETECTION_NOTE if answer_first else ""),
         )
 
         logger.info("Detecting ambiguities in: %s", nl_question)
@@ -685,7 +716,7 @@ def detect_ambiguities(
                 ]
                 if missing:
                     raise ValueError(f"ambiguity missing fields: {missing}")
-                if set(ambiguity_data) - {"answer_type"} != {
+                if set(ambiguity_data) - {"answer_type", "answer_examples"} != {
                     "id",
                     "category",
                     "term",
@@ -826,7 +857,7 @@ def _expand_compact_report(parsed: Any) -> Dict[str, Any]:
     schema = COMPACT_AMBIGUITY_DETECTION_RESPONSE_SCHEMA
     items = schema["properties"]["ambiguities"]
     item_fields = set(items["items"]["properties"])
-    max_options = items["items"]["properties"]["options"]["maxItems"]
+    schema_max_options = items["items"]["properties"]["options"]["maxItems"]
     if not isinstance(parsed, dict) or set(parsed) != set(schema["properties"]):
         raise ValueError("compact ambiguity response has unexpected fields")
     requires = parsed["requires_clarification"]
@@ -839,6 +870,10 @@ def _expand_compact_report(parsed: Any) -> Dict[str, Any]:
         options = item["options"]
         if not isinstance(options, list) or not all(isinstance(o, str) for o in options):
             raise ValueError("compact ambiguity options must be strings")
+        max_options = (
+            MAX_CHOICE_OPTIONS if item.get("answer_type") == CHOICE_ANSWER
+            else schema_max_options
+        )
         options = [text for text in options if text.strip()][:max_options]
         ambiguity_id = f"ambiguity-{index}"
         ambiguities.append(

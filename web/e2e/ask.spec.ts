@@ -113,7 +113,9 @@ test('asks a question and renders the answer first with the post-validation SQL 
   const table = page.getByTestId('ask-table')
   await expect(table).toContainText('customer')
   await expect(page.getByTestId('ask-row').first()).toContainText('Ada')
-  expect(requests).toEqual([{ question, target: 'e2e-guard' }])
+  expect(requests).toEqual([
+    { question, target: 'e2e-guard', answer_first: true },
+  ])
 
   // The SQL is open once the answer lands: the POST-VALIDATION query (with the
   // injected LIMIT), and the disclosure names the added LIMIT. It folds on request.
@@ -222,15 +224,15 @@ test('answers a clarification and resumes the original ask session', async ({
     page.getByText('Which revenue definition: choose one', { exact: true })
   ).toBeVisible()
   await page.getByRole('radio', { name: /Gross revenue/ }).check()
-  // The submit button names the outcome it runs.
-  await page.getByRole('button', { name: 'Run with gross revenue' }).click()
+  await page.getByRole('button', { name: 'Run', exact: true }).click()
 
   await expect(page.getByTestId('ask-row').first()).toContainText('7,300')
   expect(requests).toEqual([
-    { question, target: 'e2e-guard' },
+    { question, target: 'e2e-guard', answer_first: true },
     {
       question,
       target: 'e2e-guard',
+      answer_first: true,
       session_id: 'ask-session-42',
       clarification_answers: { revenue_definition: 'Gross revenue' },
     },
@@ -306,8 +308,8 @@ test('a streamed Ask failure keeps the question and Try again re-runs it', async
     'The SQL generator is temporarily unavailable'
   )
   expect(requests).toEqual([
-    { question, target: 'e2e-guard' },
-    { question, target: 'e2e-guard' },
+    { question, target: 'e2e-guard', answer_first: true },
+    { question, target: 'e2e-guard', answer_first: true },
   ])
 
   // A failure routes back to the composer with the question intact, so the

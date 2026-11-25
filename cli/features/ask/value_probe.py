@@ -718,3 +718,15 @@ def create_occurrence_percentage_probe_executor(ctx: Any, db_executor=None):
         return result
 
     return execute
+
+
+def create_option_example_probe_executor(ctx, db_executor):
+    """One example value per clarification option, within three shared seconds."""
+    return _create_bounded_probe_executor(
+        ctx,
+        db_executor,
+        max_calls=8,
+        timeout_seconds=3,
+        diagnostic_attribute="option_example_probe_diagnostics",
+        version="option-example-budget-v1",
+    )

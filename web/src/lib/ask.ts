@@ -14,6 +14,8 @@ export interface AskRequest {
   clarification_answers?: Record<string, string>
   /** Clarifications an earlier answer to the question reported, applied instead of asking. */
   clarifications?: AskClarification[]
+  /** Answer with Ask's best guesses and report them instead of asking first. */
+  answer_first?: boolean
 }
 
 type AskEvent = components['schemas']['AskEvent']

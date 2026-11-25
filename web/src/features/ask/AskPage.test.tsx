@@ -131,6 +131,7 @@ describe('the box', () => {
     const view = renderAsk()
     fireEvent.keyDown(screen.getByRole('textbox', { name: 'Question' }), {
       key: 'Enter',
+      ctrlKey: true,
     })
     await vi.waitFor(() => expect(idle.ask).toHaveBeenCalled())
     const waiting = askState({
@@ -154,17 +155,27 @@ describe('the box', () => {
     expect(idle.reset).toHaveBeenCalled()
   })
 
-  it('ignores Enter while a question runs', () => {
+  it('breaks the line on a plain Enter', () => {
+    const ask = askState()
+    vi.mocked(useAsk).mockReturnValue(ask)
+    renderAsk()
+    const box = screen.getByRole('textbox', { name: 'Question' })
+    expect(fireEvent.keyDown(box, { key: 'Enter' })).toBe(true)
+    expect(ask.ask).not.toHaveBeenCalled()
+  })
+
+  it('ignores Ctrl+Enter while a question runs', () => {
     const ask = askState({ state: 'generating' })
     vi.mocked(useAsk).mockReturnValue(ask)
     renderAsk()
     fireEvent.keyDown(screen.getByRole('textbox', { name: 'Question' }), {
       key: 'Enter',
+      ctrlKey: true,
     })
     expect(ask.ask).not.toHaveBeenCalled()
   })
 
-  it('asks once when Enter is pressed again while the question starts', async () => {
+  it('asks once when Ctrl+Enter is pressed again while the question starts', async () => {
     const ask = askState()
     vi.mocked(useAsk).mockReturnValue(ask)
     let reachable: (value: boolean) => void = () => {}
@@ -176,7 +187,8 @@ describe('the box', () => {
     )
     renderAsk({ beforeRun })
     const box = screen.getByRole('textbox', { name: 'Question' })
-    for (let i = 0; i < 5; i++) fireEvent.keyDown(box, { key: 'Enter' })
+    for (let i = 0; i < 5; i++)
+      fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
     reachable(true)
     await waitFor(() => expect(ask.ask).toHaveBeenCalled())
     expect(beforeRun).toHaveBeenCalledTimes(1)
@@ -209,14 +221,14 @@ describe('the box', () => {
     const box = screen.getByRole('textbox', { name: 'Question' })
     fireEvent.change(box, { target: { value: 'SELECT * FROM t WHERE id = 7' } })
     expect(screen.queryByText(note)).toBeNull()
-    fireEvent.keyDown(box, { key: 'Enter' })
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
     await waitFor(() => expect(ask.ask).toHaveBeenCalled())
     expect(navigate).toHaveBeenCalledWith(
       expect.objectContaining({ to: '/ask', replace: true })
     )
   })
 
-  it('is the page: the caption, Enter and the one Ask button', async () => {
+  it('is the page: the caption, Ctrl+Enter and the one Ask button', async () => {
     const ask = askState()
     vi.mocked(useAsk).mockReturnValue(ask)
     renderAsk()
@@ -226,12 +238,14 @@ describe('the box', () => {
         'Read-only on demo. 100 rows unless you ask for more.'
       )
     ).toBeTruthy()
-    expect(within(box).getByText('Enter')).toBeTruthy()
+    expect(within(box).getByText('Ctrl Enter')).toBeTruthy()
     fireEvent.keyDown(within(box).getByRole('textbox', { name: 'Question' }), {
       key: 'Enter',
+      ctrlKey: true,
     })
     await waitFor(() =>
       expect(ask.ask).toHaveBeenCalledWith({
+        answer_first: true,
         question: 'Which posts got the most votes this week?',
         target: 'demo',
       })
@@ -326,14 +340,13 @@ describe('answering', () => {
     vi.mocked(useAsk).mockReturnValue(ask)
     renderAsk({ initialQuestion: 'Who are the top users?' })
     expect(screen.getByText('Top by what?')).toBeTruthy()
-    expect(screen.getAllByRole('radio')).toHaveLength(3)
+    // The three readings and "None of these".
+    expect(screen.getAllByRole('radio')).toHaveLength(4)
     expect(screen.getByText('users.reputation, highest first')).toBeTruthy()
     // A caption that only repeats its label is left out.
     expect(screen.getAllByText('Reputation')).toHaveLength(1)
     fireEvent.click(screen.getByRole('radio', { name: /Accepted answers/ }))
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Run with accepted answers' })
-    )
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
     expect(ask.resumeWithAnswers).toHaveBeenCalledWith({
       top: 'Accepted answers',
     })
@@ -358,11 +371,11 @@ describe('answering', () => {
     vi.mocked(useAsk).mockReturnValue(ask)
     renderAsk({ initialQuestion: 'How many patients have high glucose?' })
     expect(screen.queryAllByRole('radio')).toHaveLength(0)
-    // Left blank, the question can be skipped.
-    const skip = screen.getByRole('button', {
-      name: 'Skip',
+    // Left blank, the question is skipped and Ask goes with its best guess.
+    const run = screen.getByRole('button', {
+      name: 'Run',
     }) as HTMLButtonElement
-    expect(skip.disabled).toBe(false)
+    expect(run.disabled).toBe(false)
     fireEvent.change(
       screen.getByRole('textbox', {
         name: 'What glucose level counts as high?',
@@ -430,8 +443,13 @@ describe('the answer', () => {
       search: { query: `${SQL} LIMIT 1000`, target: 'demo', origin: 'ask' },
     })
 
-    // The SQL that ran is open once the answer lands, and folds on request.
+    // The SQL that ran is open once the answer lands, formatted, and folds on request.
     expect(screen.getByTestId('ask-sql').textContent).toContain('FROM votes v')
+    await waitFor(() =>
+      expect(screen.getByTestId('ask-sql').textContent).toMatch(
+        /\nFROM\s+votes v/
+      )
+    )
     const disclosure = screen.getByRole('button', { name: /SQL that ran/ })
     expect(disclosure.getAttribute('aria-expanded')).toBe('true')
     expect(disclosure.textContent).toContain('LIMIT 1000 added')
@@ -453,7 +471,7 @@ describe('the answer', () => {
     const question = 'Show me the best titles'
     const view = renderAsk({ initialQuestion: question })
     const box = screen.getByRole('textbox', { name: 'Question' })
-    fireEvent.keyDown(box, { key: 'Enter' })
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
     await waitFor(() => expect(ask.ask).toHaveBeenCalledTimes(1))
     const answered = askState({
       ask: ask.ask,
@@ -468,6 +486,7 @@ describe('the answer', () => {
     )
     await waitFor(() => expect(ask.ask).toHaveBeenCalledTimes(2))
     expect(ask.ask).toHaveBeenLastCalledWith({
+      answer_first: true,
       question,
       target: 'demo',
       clarifications,
@@ -503,7 +522,11 @@ describe('the answer', () => {
       />
     )
     await waitFor(() =>
-      expect(ask.ask).toHaveBeenCalledWith({ question, target: 'demo' })
+      expect(ask.ask).toHaveBeenCalledWith({
+        question,
+        target: 'demo',
+        answer_first: true,
+      })
     )
     expect(ask.ask).toHaveBeenCalledTimes(1)
   })
@@ -628,6 +651,7 @@ describe('the answer', () => {
     expect(ask.reset).toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(ask.ask).toHaveBeenCalledWith({
+      answer_first: true,
       question: 'Which posts got the most votes this week?',
       target: 'demo',
     })
@@ -653,6 +677,7 @@ describe('Earlier', () => {
     )
     await waitFor(() =>
       expect(ask.ask).toHaveBeenCalledWith({
+        answer_first: true,
         question: 'Which users have earned the most gold badges?',
         target: 'demo',
       })

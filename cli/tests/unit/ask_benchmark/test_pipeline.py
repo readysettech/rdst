@@ -1,3 +1,4 @@
+import json
 import asyncio
 import threading
 import time
@@ -26,7 +27,11 @@ from devtools.ask_benchmark.models import (
     QueryResult,
     RunLimits,
 )
-from devtools.ask_benchmark.oracle_user import ORACLE_USER_POLICY, OracleUserSimulator
+from devtools.ask_benchmark.oracle_user import (
+    ORACLE_USER_POLICY,
+    UNANSWERABLE_ANSWER,
+    OracleUserSimulator,
+)
 from devtools.ask_benchmark.pipeline import (
     build_model_only_prompt,
     extract_sql,
@@ -47,7 +52,7 @@ from features.ask.events import (
     AskResultEvent,
     AskSqlGeneratedEvent,
 )
-from features.ask.models import AskClarificationQuestion
+from features.ask.models import AskClarification, AskClarificationQuestion
 from features.schema.semantic_layer.manager import SemanticLayerManager
 
 
@@ -1199,6 +1204,71 @@ def test_rdst_runner_answers_a_clarification_as_the_oracle_user(tmp_path: Path):
     clarification = result["diagnostics"]["clarification"]
     assert clarification["answer_policy"] == ORACLE_USER_POLICY
     assert clarification["oracle_rounds"][0]["exchanges"][0]["choice"] == 2
+
+
+@pytest.mark.parametrize("pick", [1, 2, None])
+def test_answer_first_lets_the_oracle_user_change_what_ask_assumed(tmp_path: Path, pick):
+    ctx = _rdst_context()
+    asked = []
+
+    def model(_system, _user):
+        return json.dumps({"option": pick, "answer": "" if pick else UNANSWERABLE_ANSWER})
+
+    def result(sql, clarifications):
+        return AskResultEvent(
+            type="result", success=True, sql=sql, rows=[(1,)], columns=["value"],
+            row_count=1, execution_time_ms=1.0, llm_calls=2, total_tokens=10,
+            clarifications=clarifications,
+        )
+
+    class FakeAskService:
+        def __init__(self, **kwargs):
+            self.observer = kwargs["phase_observer"]
+
+        async def ask(self, input_data, options):
+            assert options.answer_first is True
+            asked.append(input_data.clarifications)
+            self.observer("execute", ctx)
+            yield result(
+                "SELECT 1",
+                input_data.clarifications
+                or [
+                    AskClarification(
+                        id="value", term="value", question="Which value?",
+                        answer="0", options=["0", "1"], assumed=True,
+                    )
+                ],
+            )
+
+    store = ArtifactStore(tmp_path / "run")
+    store.initialize({"run_id": "run"})
+    runner = BenchmarkRunner(
+        run_id="run",
+        track=EvaluationTrack.RDST,
+        context_mode=ContextMode.RAW,
+        executor=_RDSTExecutor(),
+        schema_loader=_SchemaLoader(),
+        artifact_store=store,
+        semantic_dir=tmp_path / "semantic",
+        interaction_mode=InteractionMode.INTERACTIVE_ORACLE,
+        adapter_factory=lambda model: _Adapter(model),
+        semantic_schema_format="verbose-v1",
+        oracle_user=OracleUserSimulator(model),
+        answer_first=True,
+    )
+    runner.preflight_gold([_case()])
+    with patch("devtools.ask_benchmark.runner.AskService", FakeAskService):
+        attempt = runner._run_rdst(_case(), _Adapter(_spec()))
+
+    review = attempt["diagnostics"]["answer_first_review"]
+    assert review["assumed"] == {"value": "0"}
+    if pick != 2:
+        # The user agrees with Ask or cannot say, so the first answer stands.
+        assert len(asked) == 1 and review["changed"] is False
+    else:
+        assert review["changes"] == {"value": "1"}
+        [changed] = asked[1]
+        assert (changed.answer, changed.assumed) == ("1", False)
 
 
 def test_an_unreachable_oracle_user_leaves_the_attempt_unscored(tmp_path: Path):

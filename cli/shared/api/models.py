@@ -1,6 +1,6 @@
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AnalyzeRequest(BaseModel):
@@ -75,12 +75,26 @@ class DeleteResponse(BaseModel):
 
 
 class AskClarificationAnswer(BaseModel):
-    """A clarification the user answered, as an answer reports it."""
+    """A clarification answered by the user or assumed by Ask, as an answer reports it."""
 
     id: str = Field(min_length=1)
     term: str
     question: str
-    answer: str = Field(min_length=1)
+    # Empty only for a point Ask left to the SQL writer when it answered first.
+    answer: str
+    options: list[str] = Field(default_factory=list)
+    hints: list[str] = Field(default_factory=list)
+    examples: list[str] = Field(default_factory=list)
+    multiple: bool = False
+    assumed: bool = False
+    # Changes only which columns show or how rows are ordered.
+    minor: bool = False
+
+    @model_validator(mode="after")
+    def _answered_unless_assumed(self) -> "AskClarificationAnswer":
+        if not self.assumed and not self.answer.strip():
+            raise ValueError("answer must not be empty")
+        return self
 
 
 class AskRequest(BaseModel):
@@ -95,6 +109,8 @@ class AskRequest(BaseModel):
     clarification_answers: Optional[dict[str, str]] = None
     # Answers from an earlier run of the same question, applied in place of asking again.
     clarifications: Optional[list[AskClarificationAnswer]] = None
+    # Answer with Ask's best guesses and list them, instead of asking first.
+    answer_first: bool = False
 
 
 __all__ = [

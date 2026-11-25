@@ -79,6 +79,8 @@ class _Model:
             json.dumps({"option": None, "answer": DONT_KNOW_ANSWER}),
             (None, None, "dont_know"),
         ),
+        ('{"option": [2, 1, 2], "answer": ""}', ("A16; A15", 2, "options")),
+        ('{"option": [1, 3], "answer": ""}', (None, None, "empty_reply")),
     ],
 )
 def test_parse_reply_maps_options_and_blocks_leaks(raw, expected):
@@ -412,3 +414,46 @@ def test_simulator_blocks_an_answer_that_keeps_naming_identifiers():
 
     assert answers == {}
     assert (records[0].answer, records[0].reason) == (None, "identifier_blocked")
+
+
+def test_simulator_sees_each_option_with_its_schema_hint():
+    model = _Model(['{"option": 2, "answer": ""}'])
+    simulator = OracleUserSimulator(model)
+    question = _question(options=("Crimes in 1995", "Crimes in 1996"))
+    question.hints = ["district.A15", "district.A16"]
+
+    answers, _ = simulator.answer(_case(), [question])
+
+    assert "1. Crimes in 1995 (district.A15)" in model.prompts[0][1]
+    assert answers == {"year": "Crimes in 1996"}
+
+
+def test_options_only_user_picks_the_closest_option_instead_of_typing():
+    model = _Model(
+        [
+            '{"option": null, "answer": "The crime count of 1995."}',
+            '{"option": 1, "answer": ""}',
+        ]
+    )
+    simulator = OracleUserSimulator(model, options_only=True)
+
+    answers, records = simulator.answer(_case(), [_question()])
+
+    assert answers == {"year": "A15"}
+    assert records[0].reason == "forced_choice"
+    assert "offers only these options" in model.prompts[1][1]
+
+
+def test_options_only_user_gets_the_preselected_option_when_it_picks_none():
+    model = _Model(
+        [
+            '{"option": null, "answer": "The crime count of 1995."}',
+            '{"option": null, "answer": "Neither."}',
+        ]
+    )
+    simulator = OracleUserSimulator(model, options_only=True)
+
+    answers, records = simulator.answer(_case(), [_question()])
+
+    assert answers == {"year": "A15"}
+    assert records[0].reason == "forced_default"

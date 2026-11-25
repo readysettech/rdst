@@ -187,6 +187,18 @@ def test_detector_reviews_the_draft_it_is_given(draft_sql) -> None:
     assert ("SQL DRAFTED FOR THIS QUESTION" in manager.prompt) is bool(draft_sql)
     assert ("SELECT COUNT(*) FROM flights" in manager.prompt) is bool(draft_sql)
 
+@pytest.mark.parametrize("answer_first", [False, True])
+def test_detector_reports_every_point_when_ask_answers_first(answer_first) -> None:
+    manager = RecordingLLMManager()
+
+    detect_ambiguities(nl_question="Rank customers by debt", filtered_schema="c(id)",
+                       database_engine="mysql", llm_manager=manager,
+                       answer_first=answer_first)
+
+    assert ("ASK ANSWERS FIRST" in manager.prompt) is answer_first
+    assert ("Mark a point low priority" in manager.prompt) is answer_first
+
+
 def test_detector_prompt_asks_for_missing_parameters_and_identifiers() -> None:
     manager = RecordingLLMManager()
 
@@ -203,7 +215,15 @@ def test_detector_prompt_asks_for_missing_parameters_and_identifiers() -> None:
     assert '"the best ones" need a result count' in manager.prompt
     assert "needs its threshold or qualifying values" in manager.prompt
     assert "Treat a vague output request as a genuine ambiguity" in manager.prompt
-    assert "The user knows this database." in manager.prompt
+    assert "ask about the concept in business terms" in manager.prompt
+    assert "Put every identifier it reads in `hint`" in manager.prompt
+    assert "Ask one thing per question" in manager.prompt
+    assert "Never ask a\n  question that depends on another one's answer" in manager.prompt
+    assert "Ask which identifier to show only when the candidates hold different" in (
+        manager.prompt
+    )
+    assert "- `choices`: the user picks every option that applies" in manager.prompt
+    assert "give up to three\n`answer_examples`" in manager.prompt
     assert "A safety row cap is\n  not a semantic default" in manager.prompt
 
 
@@ -634,7 +654,26 @@ def test_option_accepts_single_evidence_string():
     assert option.evidence == ["\"top\" often implies a short list"]
 
 
-def _open_response(*, answer_type: str, options: list | None = None) -> dict:
+def test_option_keeps_the_schema_hint_beside_its_business_text():
+    from features.ask.ambiguity_detection import AmbiguityOption
+
+    option = AmbiguityOption.from_dict(
+        {
+            "id": "opt-1",
+            "text": "Customer number on the main customer record",
+            "score": 0.5,
+            "evidence": [],
+            "sql_effect": "Returns core_record.clientref",
+            "hint": " core_record.clientref ",
+        }
+    )
+    assert option.hint == "core_record.clientref"
+    assert option.to_dict()["hint"] == "core_record.clientref"
+
+
+def _open_response(
+    *, answer_type: str, options: list | None = None, answer_examples=()
+) -> dict:
     return {
         "response": json.dumps(
             {
@@ -645,6 +684,7 @@ def _open_response(*, answer_type: str, options: list | None = None) -> dict:
                         "term": "high glucose",
                         "reason": "No stated cutoff defines high glucose.",
                         "answer_type": answer_type,
+                        "answer_examples": list(answer_examples),
                         "possible_interpretations": options or [],
                         "clarifying_question": "What glucose level counts as high?",
                         "priority": "medium",
@@ -689,6 +729,48 @@ def test_detector_asks_an_open_question_for_an_unstated_fact(answer_type) -> Non
     assert ambiguity.possible_interpretations == []
     assert ambiguity.to_dict()["answer_type"] == answer_type
     assert report.requires_clarification is True
+
+
+@pytest.mark.parametrize(("answer_type", "kept"), [("choices", 4), ("choice", 3)])
+def test_a_question_that_allows_several_options_may_list_four(answer_type, kept) -> None:
+    manager = RecordingLLMManager()
+    options = [
+        {"id": name, "text": name, "score": 0.5, "evidence": [], "sql_effect": name, "hint": ""}
+        for name in ("Average DTI", "Median DTI", "Total liabilities", "Loan amount")
+    ]
+    manager.generate_response = lambda **_kwargs: _open_response(
+        answer_type=answer_type, options=options
+    )
+
+    report = detect_ambiguities(
+        nl_question="Summarize debt by segment",
+        filtered_schema="ei(debincratio)",
+        database_engine="postgresql",
+        llm_manager=manager,
+    )["report"]
+
+    [ambiguity] = report.ambiguities
+    assert ambiguity.multiple is (answer_type == "choices")
+    assert len(ambiguity.possible_interpretations) == kept
+
+
+def test_detector_keeps_suggested_answers_for_an_open_question() -> None:
+    manager = RecordingLLMManager()
+    manager.generate_response = lambda **_kwargs: _open_response(
+        answer_type="value",
+        answer_examples=[" Above 180 mg/dL ", "Above 180 mg/dL", "", "Above 200", "Above 250", "x"],
+    )
+
+    report = detect_ambiguities(
+        nl_question="How many patients have high glucose?",
+        filtered_schema="lab(glu)",
+        database_engine="mysql",
+        llm_manager=manager,
+    )["report"]
+
+    [ambiguity] = report.ambiguities
+    # Blank and repeated suggestions are dropped, and at most three are kept.
+    assert ambiguity.answer_examples == ["Above 180 mg/dL", "Above 200", "Above 250"]
 
 
 def test_detector_drops_a_choice_question_with_one_option() -> None:
@@ -738,7 +820,12 @@ def test_detector_prompt_offers_open_answer_types() -> None:
     )
     schema = manager.kwargs["extra"]["response_format"]["json_schema"]["schema"]
     item = schema["properties"]["ambiguities"]["items"]
-    assert item["properties"]["answer_type"]["enum"] == ["choice", "value", "definition"]
+    assert item["properties"]["answer_type"]["enum"] == [
+        "choice",
+        "choices",
+        "value",
+        "definition",
+    ]
     assert item["properties"]["possible_interpretations"]["minItems"] == 0
     assert "Prefer `value` or `definition` over inventing options" in manager.prompt
 

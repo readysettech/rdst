@@ -4074,15 +4074,51 @@
         "type": "object"
       },
       "AskClarification": {
-        "description": "A clarification question the user answered for a question.",
+        "description": "A clarification question answered for a question, by the user or, when Ask answers\nfirst, by Ask's best guess.",
         "properties": {
           "answer": {
             "title": "Answer",
             "type": "string"
           },
+          "assumed": {
+            "default": false,
+            "title": "Assumed",
+            "type": "boolean"
+          },
+          "examples": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Examples",
+            "type": "array"
+          },
+          "hints": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Hints",
+            "type": "array"
+          },
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "minor": {
+            "default": false,
+            "title": "Minor",
+            "type": "boolean"
+          },
+          "multiple": {
+            "default": false,
+            "title": "Multiple",
+            "type": "boolean"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
           },
           "question": {
             "title": "Question",
@@ -4103,17 +4139,52 @@
         "type": "object"
       },
       "AskClarificationAnswer": {
-        "description": "A clarification the user answered, as an answer reports it.",
+        "description": "A clarification answered by the user or assumed by Ask, as an answer reports it.",
         "properties": {
           "answer": {
-            "minLength": 1,
             "title": "Answer",
             "type": "string"
+          },
+          "assumed": {
+            "default": false,
+            "title": "Assumed",
+            "type": "boolean"
+          },
+          "examples": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Examples",
+            "type": "array"
+          },
+          "hints": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Hints",
+            "type": "array"
           },
           "id": {
             "minLength": 1,
             "title": "Id",
             "type": "string"
+          },
+          "minor": {
+            "default": false,
+            "title": "Minor",
+            "type": "boolean"
+          },
+          "multiple": {
+            "default": false,
+            "title": "Multiple",
+            "type": "boolean"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
           },
           "question": {
             "title": "Question",
@@ -4172,9 +4243,28 @@
       "AskClarificationQuestion": {
         "description": "A clarification question for the user.",
         "properties": {
+          "examples": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Examples",
+            "type": "array"
+          },
+          "hints": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Hints",
+            "type": "array"
+          },
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "multiple": {
+            "default": false,
+            "title": "Multiple",
+            "type": "boolean"
           },
           "options": {
             "items": {
@@ -4411,6 +4501,11 @@
       "AskRequest": {
         "description": "Request for text-to-SQL conversion.",
         "properties": {
+          "answer_first": {
+            "default": false,
+            "title": "Answer First",
+            "type": "boolean"
+          },
           "clarification_answers": {
             "anyOf": [
               {

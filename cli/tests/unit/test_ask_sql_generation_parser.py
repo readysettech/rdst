@@ -134,6 +134,33 @@ def test_missing_fields_beside_usable_sql_keep_the_answer(missing):
     assert result["sql"] == "SELECT name FROM events"
 
 
+def test_measures_the_sql_derives_are_reported_without_malformed_entries():
+    derived = [
+        {"term": " debt service ratio ", "used": "Liabilities over income",
+         "alternatives": ["Loans over income", 3, "Mortgage over income", "Rent"]},
+        {"term": "", "used": "Nothing", "alternatives": []},
+        {"term": "score", "used": 1, "alternatives": []},
+        "loose text",
+    ]
+    result = _generate({**_ANSWER, "derived": derived})
+    assert result["success"] is True
+    assert result["derived"] == [
+        {"term": "debt service ratio", "used": "Liabilities over income",
+         "alternatives": ["Loans over income", "Mortgage over income"]},
+    ]
+
+
+@pytest.mark.parametrize("response", [
+    _ANSWER,
+    {**_ANSWER, "sql": "", "cannot_answer": True,
+     "cannot_answer_reason": "missing_schema", "missing_schema": ["event dates"]},
+])
+def test_a_reply_without_derived_measures_reports_none(response):
+    result = _generate(response)
+    assert result["success"] is True
+    assert result["derived"] == []
+
+
 def test_answer_object_with_stray_fields_is_parsed_from_prose():
     answer = {**_ANSWER, "notes": "checked"}
     text = f"Here is the query: {json.dumps(answer)} It lists every name."

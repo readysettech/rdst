@@ -242,7 +242,8 @@ async def test_an_answer_reports_and_accepts_its_clarifications(app, monkeypatch
     from shared.api.target_guard import TargetGuard, require_target_body
 
     clarification = AskClarification(
-        id="ranking", term="best", question="Rank by what?", answer="most votes"
+        id="ranking", term="best", question="Rank by what?", answer="most votes",
+        options=["most votes", "highest rating"],
     )
     asked = []
 
@@ -265,6 +266,8 @@ async def test_an_answer_reports_and_accepts_its_clarifications(app, monkeypatch
     app.dependency_overrides[require_target_body] = target_guard
     reported = {
         "id": "ranking", "term": "best", "question": "Rank by what?", "answer": "most votes",
+        "options": ["most votes", "highest rating"], "hints": [], "examples": [],
+        "multiple": False, "assumed": False, "minor": False,
     }
 
     async with AsyncClient(
@@ -280,3 +283,14 @@ async def test_an_answer_reports_and_accepts_its_clarifications(app, monkeypatch
         line for line in response.text.splitlines() if line.startswith("data:")
     )
     assert json.loads(data.removeprefix("data:"))["clarifications"] == [reported]
+
+
+def test_only_a_point_ask_assumed_may_come_back_unanswered():
+    from pydantic import ValidationError
+
+    from shared.api.models import AskClarificationAnswer
+
+    fields = {"id": "segment", "term": "small", "question": "What makes a segment small?"}
+    assert AskClarificationAnswer(**fields, answer="", assumed=True).answer == ""
+    with pytest.raises(ValidationError):
+        AskClarificationAnswer(**fields, answer=" ")

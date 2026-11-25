@@ -14,7 +14,7 @@ import { AskChoice } from '../features/ask/AskChoice'
 import { AskEarlier } from '../features/ask/AskEarlier'
 import { AskFailure } from '../features/ask/AskFailure'
 import { AskSteps } from '../features/ask/AskSteps'
-import { hasPlaceholders } from '../features/ask/askModel'
+import { ASK_ANSWER_FIRST, hasPlaceholders } from '../features/ask/askModel'
 import { fetchAskExamples, fetchAskHistory } from '../lib/api'
 import { type AskClarification, useAsk } from '../lib/ask'
 
@@ -155,6 +155,7 @@ export function AskPanel({
       await ask({
         question: trimmed,
         target: runsAgainst,
+        answer_first: ASK_ANSWER_FIRST,
         ...(clarifications?.length ? { clarifications } : {}),
       })
     },
@@ -338,6 +339,16 @@ export function AskPanel({
                 answeredFrom,
                 result.clarifications
               )
+            }
+            onChangeAssumptions={
+              ASK_ANSWER_FIRST
+                ? (clarifications) =>
+                    askAgainOn(
+                      askedQuestion.current || question,
+                      answeredFrom,
+                      clarifications
+                    )
+                : undefined
             }
             onEdit={edit}
           />

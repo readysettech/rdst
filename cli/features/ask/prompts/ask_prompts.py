@@ -29,6 +29,25 @@ def format_clarification_draft(sql: str) -> str:
     )
 
 
+BEST_EFFORT_CONTEXT = (
+    "The user has answered Ask's questions and expects an answer. When a concept has no "
+    "exact column, work it out from the closest related columns and list it in "
+    "`derived`; do not set `cannot_answer` for `missing_schema` or `ambiguous`."
+)
+
+
+ANSWER_FIRST_DETECTION_NOTE = (
+    "\n\nASK ANSWERS FIRST:\n"
+    "Ask answers with the best reading of each point you report and lists the points "
+    "under the answer for the user to change, so a reported point costs the user "
+    "nothing. Report every point where another reading changes the result, even when "
+    "one reading is clearly best, including a measure, ratio or score the question names "
+    "that no column holds. Mark a point low priority when it changes only which columns "
+    "are shown or how rows are ordered. Set requires_clarification to true when you "
+    "report any point."
+)
+
+
 def format_detection_draft_block(sql: str) -> str:
     """The SQL drafted for the question, for the clarification detector to review."""
     if not sql.strip():
@@ -98,9 +117,19 @@ Requirements:
 - Keep `explanation` to one short sentence.
 - Put every unavoidable interpretation in `assumptions`; do not encode a hedge as an
   invented SQL predicate.
+- In `derived`, list each measure, ratio or score the question asks for that no column
+  holds and the provided context does not define, which the SQL works out from other
+  columns: `term` in the question's words, `used` saying how the SQL works it out in
+  business words (for example "Total liabilities divided by annual income"), and up to
+  two other reasonable ways from the data in `alternatives`. A word that only selects or
+  ranks rows ("wealthy", "top", "active") is not a measure. Leave `derived` empty when
+  every value the SQL returns reads a column of that meaning.
 - Set `cannot_answer` to true with `cannot_answer_reason` = `missing_schema` only when
   a value the answer needs is in neither the schema nor the provided context; leave
-  `sql` empty and identify the missing concepts in `missing_schema`. Tables that
+  `sql` empty, identify the missing concepts in `missing_schema`, and in `assumptions`
+  give up to three ways a user might work them out from the data that exists, each a
+  short complete answer in business words (for example "Mortgage balance divided by
+  12"). Tables that
   reference a shared parent (for example both carry a key of the same site or plant)
   are joinable through that parent: join through it and state the approximation in
   `assumptions`. A formula or term the provided context defines is computable from the
@@ -174,6 +203,19 @@ SQL_GENERATION_RESPONSE_SCHEMA = {
             "enum": ["", "missing_schema", "unsupported_request", "ambiguous"],
         },
         "missing_schema": {"type": "array", "items": {"type": "string"}},
+        "derived": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "term": {"type": "string"},
+                    "used": {"type": "string"},
+                    "alternatives": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["term", "used", "alternatives"],
+            },
+        },
     },
     "required": [
         "sql",
@@ -183,6 +225,7 @@ SQL_GENERATION_RESPONSE_SCHEMA = {
         "cannot_answer",
         "cannot_answer_reason",
         "missing_schema",
+        "derived",
     ],
 }
 

@@ -72,7 +72,10 @@ def generate_sql(
     # Import here to avoid circular imports
     # Path: lib/engines/ask3/phases/generate.py -> lib/functions/, lib/llm_manager/
     from features.ask.engine.ask3.phases.schema import COMPACT_SCHEMA_FORMAT_VERSION
-    from features.ask.prompts.ask_prompts import format_clarification_draft
+    from features.ask.prompts.ask_prompts import (
+        BEST_EFFORT_CONTEXT,
+        format_clarification_draft,
+    )
     from features.ask.sql_generation import generate_sql_from_nl
     from shared.llm_manager import LLMManager
 
@@ -103,6 +106,10 @@ def generate_sql(
     # Use refined question if available
     question = ctx.refined_question or ctx.question
     provided_context = ctx.provided_context
+    if ctx.best_effort:
+        provided_context = "\n\n".join(
+            part for part in (provided_context.strip(), BEST_EFFORT_CONTEXT) if part
+        )
 
     draft_question = ctx.clarification_draft_question
     ctx.clarification_draft_question = ""
@@ -124,7 +131,7 @@ def generate_sql(
         if draft_sql:
             ctx.clarification_draft_sql = draft_sql
             provided_context = "\n\n".join(
-                part for part in (ctx.provided_context.strip(),
+                part for part in (provided_context.strip(),
                                   format_clarification_draft(draft_sql)) if part
             )
 
@@ -169,6 +176,7 @@ def generate_sql(
     ctx.generation_confidence = result.get("confidence", 1.0)
     ctx.sql_explanation = result.get("explanation", "")
     ctx.generation_response = result.get("raw_response", {})
+    ctx.derived_measures = list(result.get("derived") or [])
 
     if result.get("cannot_answer", False):
         assumptions = result.get("assumptions", [])
@@ -179,6 +187,13 @@ def generate_sql(
             for item in missing_schema
             if isinstance(item, str) and item.strip()
         ]
+        ctx.missing_schema_suggestions = list(
+            dict.fromkeys(
+                item.strip()
+                for item in assumptions
+                if isinstance(item, str) and item.strip()
+            )
+        )[:3]
         ctx.mark_error(
             cannot_answer_message(reason, missing_schema, assumptions),
             code="ask_cannot_answer",

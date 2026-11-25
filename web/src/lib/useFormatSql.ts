@@ -29,11 +29,18 @@ function sanitizeParams(sql: string): {
   }
 }
 
-// sql-formatter's expressionWidth only affects parenthesized expressions —
-// column/item lists always break one per line. Re-join indented continuation
-// lines while they fit, so clauses stay compact without hiding AND/OR branches
-// that make a query easy to scan.
+// sql-formatter's expressionWidth only affects parenthesized expressions --
+// column/item lists always break one per line. Re-join a line onto the line it
+// is indented under while it fits, so clauses stay compact ("FROM orders o")
+// without hiding AND/OR branches or joins that make a query easy to scan. A
+// line that starts a clause keeps its own line at every nesting depth.
 const DEFAULT_LINE_WIDTH = 120
+const CLAUSE_START =
+  /^(SELECT|FROM|WHERE|GROUP BY|ORDER BY|HAVING|LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|WITH|WINDOW|RETURNING|VALUES|SET|AND|OR|XOR|((LEFT|RIGHT|FULL|INNER|CROSS)( OUTER)? )?JOIN)\b/i
+
+const indentOf = (line: string) => line.length - line.trimStart().length
+const unclosed = (line: string) =>
+  (line.match(/\(/g) ?? []).length > (line.match(/\)/g) ?? []).length
 
 function compactLines(
   text: string,
@@ -44,26 +51,38 @@ function compactLines(
   const out: string[] = []
   // A string literal spanning lines must keep its exact newlines.
   let insideString = false
-  let insideProjection = false
+  // The indent of the SELECT whose items keep one line each, while inside it;
+  // lines deeper than an item still join their item.
+  let projection: number | null = null
+  let itemIndent = 0
   for (const line of lines) {
     const trimmed = line.trim()
+    const indent = indentOf(line)
     const prev = out[out.length - 1]
-    if (!/^\s/.test(line)) {
-      insideProjection =
-        multilineProjection && /^(SELECT|RETURNING)\b/i.test(trimmed)
-    }
+    if (projection !== null && trimmed && indent <= projection)
+      projection = null
+    // A closing parenthesis ends the expression its line opened.
+    const closes =
+      trimmed.startsWith(')') &&
+      prev !== undefined &&
+      indent >= indentOf(prev) &&
+      unclosed(prev)
     const canJoin =
       !insideString &&
-      !insideProjection &&
-      out.length > 0 &&
+      (projection === null || indent > itemIndent || closes) &&
+      prev !== undefined &&
       trimmed.length > 0 &&
-      /^\s/.test(line) &&
-      !!prev?.trim() &&
+      !!prev.trim() &&
+      (indent > indentOf(prev) || closes) &&
       !prev.includes('--') &&
-      !/^(AND|OR|XOR|JOIN)\b/i.test(trimmed) &&
+      !CLAUSE_START.test(trimmed) &&
       `${prev} ${trimmed}`.length <= lineWidth
     if (canJoin) out[out.length - 1] = `${prev} ${trimmed}`
     else out.push(line)
+    if (multilineProjection && /^(SELECT|RETURNING)\b/i.test(trimmed)) {
+      projection = indent
+      itemIndent = Number.POSITIVE_INFINITY
+    } else if (projection !== null && itemIndent > indent) itemIndent = indent
     if ((line.match(/'/g) ?? []).length % 2 === 1) insideString = !insideString
   }
   return out.join('\n')

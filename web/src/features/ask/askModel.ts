@@ -81,8 +81,13 @@ export function isLabelColumn(column: string): boolean {
 
 export function cellText(cell: unknown, column?: string): string {
   if (cell === null || cell === undefined) return 'NULL'
-  if (typeof cell === 'number' && !(column && isLabelColumn(column)))
-    return Number.isInteger(cell) ? cell.toLocaleString('en-US') : String(cell)
+  if (typeof cell === 'number' && !(column && isLabelColumn(column))) {
+    if (Number.isInteger(cell)) return cell.toLocaleString('en-US')
+    // A computed ratio or average reads at a glance; Download CSV keeps every digit.
+    return Math.abs(cell) >= 1
+      ? cell.toLocaleString('en-US', { maximumFractionDigits: 3 })
+      : cell.toLocaleString('en-US', { maximumSignificantDigits: 4 })
+  }
   return String(cell)
 }
 
@@ -272,3 +277,7 @@ export function fillParams(
     return LITERAL.test(value) ? value : `'${value.replace(/'/g, "''")}'`
   })
 }
+
+// Ask answers with its best guesses and lists them for the user to change, instead of
+// asking clarifying questions first.
+export const ASK_ANSWER_FIRST = true

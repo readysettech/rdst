@@ -112,6 +112,15 @@ _IDENTIFIER_RETRY = (
     "\n\nYour previous answer named database identifiers ({names}). Give the same answer "
     "in business terms, without naming any table or column."
 )
+# A product surface without free text on option questions: the user must pick one.
+_OPTIONS_ONLY_RETRY = (
+    "\n\nThe screen offers only these options and no way to type an answer. Reply with "
+    "the number of the option closest to what you meant."
+)
+# A question whose options the user may pick several of, as the product shows it.
+_SEVERAL_NOTE = (
+    " (You may pick several options: set \"option\" to a list of their numbers.)"
+)
 _SQL_LEAK = re.compile(r"\bselect\b[\s\S]*\bfrom\b|\bwhere\b[\s\S]*=|`", re.IGNORECASE)
 _MAX_FREE_TEXT_CHARS = 300
 
@@ -261,6 +270,17 @@ def parse_reply(
         return None, None, "unparseable_reply"
     choice = data.get("option")
     if (
+        isinstance(choice, list)
+        and choice
+        and all(
+            isinstance(item, int) and not isinstance(item, bool) and 1 <= item <= len(options)
+            for item in choice
+        )
+    ):
+        # A question that allows several options takes them all.
+        picked = list(dict.fromkeys(choice))
+        return "; ".join(options[item - 1] for item in picked), picked[0], "options"
+    if (
         isinstance(choice, int)
         and not isinstance(choice, bool)
         and 1 <= choice <= len(options)
@@ -302,12 +322,15 @@ class OracleUserSimulator:
         max_free_text_chars: int = _MAX_FREE_TEXT_CHARS,
         leak_pattern: re.Pattern[str] = _SQL_LEAK,
         user_words: Callable[[BenchmarkCase], str] | None = None,
+        options_only: bool = False,
     ):
         """``policy``, ``system_prompt`` and ``build_message`` define what the simulated
         user knows; a benchmark with its own clarification labels passes all three.
         ``user_words`` is the user's own wording for a case (default: question and evidence);
         free-text answers that name gold-SQL identifiers outside it are asked once to
-        rephrase, then blocked."""
+        rephrase, then blocked. ``options_only`` models a surface where an option question
+        takes only one of its options: a reply that picks none is asked once for the
+        closest option, then gets the first, which that surface preselects."""
         if max_answers is not None and max_answers < 1:
             raise ValueError("max_answers must be positive")
         self._complete = complete
@@ -322,6 +345,7 @@ class OracleUserSimulator:
         )
         self.cache_path = cache_path
         self.max_answers = max_answers
+        self.options_only = options_only
         self._lock = threading.Lock()
         self._cache: dict[str, str] = {}
         self._load_cache()
@@ -347,6 +371,7 @@ class OracleUserSimulator:
             "max_free_text_chars": self.max_free_text_chars,
             "leak_pattern": self.leak_pattern.pattern,
             "identifier_guard": "gold-sql-names-v1",
+            "options_only": self.options_only,
             "system_prompt_sha256": hashlib.sha256(
                 self.system_prompt.encode()
             ).hexdigest(),
@@ -362,7 +387,10 @@ class OracleUserSimulator:
         answers: dict[str, str] = {}
         records = []
         for index, question in enumerate(questions):
-            options = list(question.options or [])
+            # Suggested answers to an open question are picked like options, but the user
+            # can always type instead.
+            choice_only = bool(question.options)
+            options = list(question.options or getattr(question, "examples", None) or [])
             if self.max_answers is not None and index >= self.max_answers:
                 records.append(
                     OracleAnswer(
@@ -377,14 +405,23 @@ class OracleUserSimulator:
                     )
                 )
                 continue
-            raw, cached = self._reply(case, question.question, options)
+            # The user sees each option with its schema hint, as the product shows it.
+            hints = list(getattr(question, "hints", None) or [])
+            shown = [
+                f"{option} ({hint})" if hint else option
+                for option, hint in zip(options, hints + [""] * len(options))
+            ]
+            asked = question.question + (
+                _SEVERAL_NOTE if getattr(question, "multiple", False) else ""
+            )
+            raw, cached = self._reply(case, asked, shown)
             answer, choice, reason = parse_reply(
                 raw, options, self.max_free_text_chars, self.leak_pattern
             )
             named = self._named_identifiers(case, answer, choice)
             if named:
                 retry = _IDENTIFIER_RETRY.format(names=", ".join(named))
-                raw, cached = self._reply(case, question.question, options, retry)
+                raw, cached = self._reply(case, asked, shown, retry)
                 answer, choice, reason = parse_reply(
                     raw, options, self.max_free_text_chars, self.leak_pattern
                 )
@@ -392,6 +429,15 @@ class OracleUserSimulator:
                     answer, choice, reason = None, None, "identifier_blocked"
                 elif reason == "free_text":
                     reason = "rephrased"
+            if self.options_only and choice_only and choice is None:
+                if reason in ("free_text", "rephrased"):
+                    raw, cached = self._reply(case, asked, shown, _OPTIONS_ONLY_RETRY)
+                    _, choice, _ = parse_reply(
+                        raw, options, self.max_free_text_chars, self.leak_pattern
+                    )
+                reason = "forced_choice" if choice else "forced_default"
+                choice = choice or 1
+                answer = options[choice - 1]
             if answer is not None:
                 answers[question.id] = answer
             records.append(
