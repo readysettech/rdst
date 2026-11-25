@@ -313,8 +313,18 @@ targets:
     port: 5432
     database: shop
     user: shop
-    passwordSecret: {name: pg-app, key: password}   # CloudNativePG's app Secret
+    passwordSecret: {name: pg-app, key: password}   # a Secret in RDST's namespace
     monitoring: true              # turn monitoring on once it's added
+```
+
+The Secret has to be in RDST's namespace, since a pod can only read Secrets from
+its own. When the database's Secret lives in another namespace, as
+CloudNativePG's does, copy it over, and copy it again whenever the password
+changes:
+
+```bash
+kubectl -n database get secret pg-app -o jsonpath='{.data.password}' | base64 -d \
+  | kubectl -n rdst create secret generic pg-app --from-file=password=/dev/stdin
 ```
 
 On every start RDST adds or updates these databases. A name that's already in

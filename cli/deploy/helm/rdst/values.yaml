@@ -49,9 +49,9 @@ telemetry:
   enabled: true
 
 # Databases RDST connects to on startup, for installs done by an agent or GitOps. Each
-# password comes from a Kubernetes Secret as RDST_<NAME>_PASSWORD and never touches RDST's
-# disk. RDST adds or updates these on every start; databases added in the UI are left alone,
-# and one removed from this list stays in RDST until you delete it there.
+# password comes from a Kubernetes Secret in RDST's namespace as RDST_<NAME>_PASSWORD and
+# never touches RDST's disk. RDST adds or updates these on every start; databases added in
+# the UI are left alone, and one removed from this list stays in RDST until you delete it there.
 targets: []
 #  - name: shop
 #    engine: postgresql          # or mysql
