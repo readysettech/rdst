@@ -30,6 +30,11 @@ function Stop-ProcessTree {
         throw "taskkill.exe timed out while stopping process $ProcessId"
     }
     $taskkill.WaitForExit()
+    # Termination finishes after taskkill.exe returns.
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ((Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 200
+    }
     if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
         throw "Process tree remained after taskkill.exe: $ProcessId"
     }
@@ -222,13 +227,12 @@ function Get-RdstProfilePaths {
     ) | Where-Object { Test-Path $_ }
 }
 
-# The updater's cache holds the installer copy electron-builder keeps for differential updates,
-# never user data, so certification removes it itself. The uninstaller's delete skips files
-# another process still has open, such as a scan of that freshly written installer, so retry
-# for a while. Returns a description of whatever could not be removed.
-function Remove-RdstUpdaterCache {
+# Windows can't delete a file another process still has open, such as a scan of a freshly
+# written executable or the uninstaller's running copy of itself, so retry for a while.
+# Returns a description of whatever could not be removed.
+function Remove-DirectoryWithRetry {
     param(
-        [string]$Path = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'rdst-desktop-updater'),
+        [Parameter(Mandatory = $true)][string]$Path,
         [int]$TimeoutSeconds = 60
     )
 
@@ -242,7 +246,22 @@ function Remove-RdstUpdaterCache {
     if (Test-Path -LiteralPath $Path) {
         $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
             ForEach-Object { "$($_.FullName) ($($_.Length) bytes)" })
-        return "RDST updater cache remained after $TimeoutSeconds seconds: $Path $($files -join ', ')"
+        return "$Path remained after $TimeoutSeconds seconds: $($files -join ', ')"
+    }
+}
+
+# The updater's cache holds the installer copy electron-builder keeps for differential updates,
+# never user data, so certification removes it itself. The uninstaller's delete skips files
+# another process still has open, such as a scan of that freshly written installer.
+function Remove-RdstUpdaterCache {
+    param(
+        [string]$Path = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'rdst-desktop-updater'),
+        [int]$TimeoutSeconds = 60
+    )
+
+    $problem = Remove-DirectoryWithRetry $Path $TimeoutSeconds
+    if ($problem) {
+        return "RDST updater cache remained: $problem"
     }
 }
 
@@ -719,9 +738,6 @@ try {
     # Leftovers of an earlier certification run belong to this script, not to RDST: clear them so
     # one interrupted run doesn't fail every later one on this agent.
     Get-RdstFirewallRules | Remove-NetFirewallRule -ErrorAction SilentlyContinue
-    Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'rdst-store-cert-*' `
-        -ErrorAction SilentlyContinue | Where-Object { $_.FullName -ne $workDir } |
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     # Packaging used to run the sidecar's --version check against this profile, which left a data
     # directory that is empty or holds only an empty keyring lock: no RDST data, so clear exactly that.
     $profileDataDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.rdst'
@@ -745,6 +761,15 @@ try {
             Remove-Item -LiteralPath $certificationMarker -Force
         }
     }
+    # After the interrupted run's processes are gone, so they no longer hold its files.
+    $staleWorkDirs = @(Get-ChildItem ([IO.Path]::GetTempPath()) -Directory -Filter 'rdst-store-cert-*' `
+        -ErrorAction SilentlyContinue | Where-Object { $_.FullName -ne $workDir })
+    foreach ($staleWorkDir in $staleWorkDirs) {
+        $staleProblem = Remove-DirectoryWithRetry $staleWorkDir.FullName 30
+        if ($staleProblem) {
+            Write-Warning $staleProblem
+        }
+    }
     $preflightFindings = @(Get-RdstStateFindings $installRoot $workDir)
     if ($preflightFindings.Count -gt 0) {
         throw "Certification agent contains pre-existing RDST state: $($preflightFindings -join ', ')"
@@ -754,9 +779,21 @@ try {
     Set-Content -LiteralPath $certificationMarker -Value $env:BUILDKITE_JOB_ID -Encoding Ascii
 
     $defender = Get-DefenderCommand
-    Invoke-CapturedChecked $defender @('-SignatureUpdate') (
-        Join-Path $certificationDir 'defender-signature-update.log'
-    )
+    # The update downloads from Microsoft, which fails now and then.
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            Invoke-CapturedChecked $defender @('-SignatureUpdate') (
+                Join-Path $certificationDir 'defender-signature-update.log'
+            )
+            break
+        } catch {
+            if ($attempt -ge 3) {
+                throw
+            }
+            Write-Warning "Defender signature update attempt $attempt failed: $($_.Exception.Message)"
+            Start-Sleep -Seconds 15
+        }
+    }
     Require-FirstPartySignature $installer.FullName $ExpectedSignaturePublisher
     Invoke-CapturedChecked $defender @(
         '-Scan', '-ScanType', '3', '-File', $installer.FullName, '-DisableRemediation'
@@ -857,8 +894,9 @@ try {
     New-Item -ItemType Directory -Force -Path $env:APPDATA, $env:TEMP | Out-Null
     $smokeStdout = Join-Path $certificationDir 'smoke.stdout.log'
     $smokeStderr = Join-Path $certificationDir 'smoke.stderr.log'
+    # Beyond the app's own 180-second smoke deadline, which reports where it was stuck.
     $smokeExitCode = Invoke-BoundedProcess $installedApp `
-        @('--disable-gpu', '--disable-dev-shm-usage') 180 $smokeStdout $smokeStderr
+        @('--disable-gpu', '--disable-dev-shm-usage') 300 $smokeStdout $smokeStderr
     if ($smokeExitCode -ne 0) {
         throw "Installed Store application smoke failed with exit code $smokeExitCode"
     }
@@ -985,7 +1023,11 @@ try {
         }
     }
     try {
-        Remove-Item $workDir -Recurse -Force -ErrorAction Stop
+        # The uninstaller ran with TEMP inside it, and its copy of itself can outlive the install.
+        $workDirProblem = Remove-DirectoryWithRetry $workDir
+        if ($workDirProblem) {
+            $cleanupFailures += "Could not remove certification work directory: $workDirProblem"
+        }
     } catch {
         $cleanupFailures += "Could not remove certification work directory: $($_.Exception.Message)"
     }

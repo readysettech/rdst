@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 import selectors
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -183,6 +184,24 @@ async def test_inbox_stream_emits_upsert_and_notified(monkeypatch, tmp_path):
     assert second["event"] == "notified"
     assert '"subject": "q"' in first["data"]
     await response.body_iterator.aclose()
+
+
+async def test_inbox_stream_ends_when_a_reset_removes_its_database(monkeypatch, tmp_path):
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
+    store = MonitorStore()
+    store.upsert_item("db", "stuck_query", "old", 0.9, "Stuck", {}, 100)
+    class Request:
+        headers = {}
+
+        async def is_disconnected(self):
+            return False
+    response = await routes.inbox_stream(Request())
+    await anext(response.body_iterator)
+    for path in tmp_path.glob("monitor.db*"):
+        path.unlink()
+    with pytest.raises(StopAsyncIteration):
+        await anext(response.body_iterator)
+    assert not store.path.exists()
 
 
 async def test_inbox_stream_resumes_after_last_event_id(monkeypatch, tmp_path):

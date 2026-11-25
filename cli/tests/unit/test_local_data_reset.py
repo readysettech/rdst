@@ -182,9 +182,37 @@ def test_invalid_secret_inventory_does_not_block_the_reset(reset_app):
     assert not (data_dir / "config.toml").exists()
 
 
+@pytest.mark.parametrize("error", [
+    # SQLite deleted the -shm file of a database whose last connection closed.
+    FileNotFoundError(2, "The system cannot find the file specified"),
+    # A read created the database again after its folder was emptied.
+    OSError(39, "Directory not empty"),
+])
+def test_reset_retries_files_that_requests_touch_meanwhile(reset_app, monkeypatch, error):
+    app, data_dir, _ = reset_app
+    _seed_config(data_dir)
+    rmtree = settings_mod.shutil.rmtree
+    attempts: list[Path] = []
+
+    def racing_rmtree(path):
+        attempts.append(path)
+        if len(attempts) == 1:
+            raise error
+        rmtree(path)
+
+    monkeypatch.setattr(settings_mod.shutil, "rmtree", racing_rmtree)
+
+    response = asyncio.run(_reset(app))
+
+    assert response.status_code == 200
+    assert len(attempts) == 2
+    assert not data_dir.exists()
+
+
 def test_filesystem_failure_is_reported(reset_app, monkeypatch):
     app, data_dir, _ = reset_app
     _seed_config(data_dir)
+    monkeypatch.setattr(settings_mod, "_DATA_DIR_REMOVAL_TIMEOUT_SECONDS", 0)
     monkeypatch.setattr(settings_mod.shutil, "rmtree", MagicMock(side_effect=OSError("busy")))
 
     response = asyncio.run(_reset(app))
@@ -203,6 +231,7 @@ def test_sandbox_restarts_when_files_cannot_be_removed(reset_app, monkeypatch):
     monkeypatch.setattr(sandbox, "is_running", lambda: True)
     monkeypatch.setattr(sandbox, "stop", AsyncMock())
     monkeypatch.setattr(sandbox, "start", AsyncMock())
+    monkeypatch.setattr(settings_mod, "_DATA_DIR_REMOVAL_TIMEOUT_SECONDS", 0)
     monkeypatch.setattr(settings_mod.shutil, "rmtree", MagicMock(side_effect=OSError("busy")))
 
     response = asyncio.run(_reset(app))

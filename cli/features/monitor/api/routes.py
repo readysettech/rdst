@@ -1222,6 +1222,10 @@ async def inbox_stream(request: Request):
         # Make the browser refetch once so that edge cannot leave it stale.
         yield {"id": str(cursor), "event": "upsert", "data": "{}"}
         while not await request.is_disconnected():
+            # A local-data reset removes the database, and reading it would create an empty
+            # one. The stream ends instead, and the browser reconnects to a fresh database.
+            if not store.path.exists():
+                return
             for row in await asyncio.to_thread(store.inbox_events, cursor):
                 cursor = row["id"]
                 if row["kind"] == "notified":
@@ -1397,6 +1401,11 @@ async def stream(target: str, request: Request = None):
             store.read, "SELECT COALESCE(MAX(id),0) id FROM monitor_pulse WHERE target=?",
             (target,)))[0]["id"]
         while True:
+            # A local-data reset removes the database, and reading it would create an empty
+            # one. The stream ends instead, and the browser reconnects to a fresh database.
+            if not store.path.exists():
+                offer(None)
+                return
             latest, presented = await asyncio.to_thread(read_pulses, latest)
             if presented:
                 for row in presented:
@@ -1410,9 +1419,12 @@ async def stream(target: str, request: Request = None):
                 if request is not None and await request.is_disconnected():
                     return
                 try:
-                    yield await asyncio.wait_for(queue.get(), timeout=5)
+                    event = await asyncio.wait_for(queue.get(), timeout=5)
                 except asyncio.TimeoutError:
                     continue
+                if event is None:
+                    return
+                yield event
         finally:
             for task in tasks:
                 task.cancel()

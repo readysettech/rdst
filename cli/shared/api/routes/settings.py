@@ -6,6 +6,8 @@ import asyncio
 import logging
 import shutil
 import threading
+import time
+from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -20,6 +22,7 @@ router = APIRouter(prefix="/settings")
 logger = logging.getLogger(__name__)
 _LOCAL_DATA_RESET_LOCK = threading.Lock()
 _KEYRING_CLEANUP_TIMEOUT_SECONDS = 5.0
+_DATA_DIR_REMOVAL_TIMEOUT_SECONDS = 10.0
 # The latest AI decision still being applied to monitored databases, which writes to the
 # monitor store; a local-data reset waits for it.
 _ai_consent_apply: threading.Thread | None = None
@@ -44,6 +47,23 @@ async def _stop_monitoring_services(state) -> None:
             await service.stop()
             setattr(state, name, None)
     await query_discovery.close()
+
+
+async def _remove_data_dir(data_dir: Path) -> None:
+    """Remove the data directory, retrying while requests still running touch it: SQLite
+    deletes a database's -shm file when its last connection closes, a read can create the
+    database again, and Windows can't delete a file that is open."""
+    deadline = time.monotonic() + _DATA_DIR_REMOVAL_TIMEOUT_SECONDS
+    while True:
+        try:
+            await asyncio.to_thread(shutil.rmtree, data_dir)
+            return
+        except OSError:
+            if not data_dir.exists():
+                return
+            if time.monotonic() >= deadline:
+                raise
+            await asyncio.sleep(0.1)
 
 
 class EmailRequest(BaseModel):
@@ -574,7 +594,7 @@ async def reset_local_data(request: Request) -> ResetLocalDataResponse:
             if sandbox_running:
                 await sandbox_manager.stop()
             if data_dir.exists():
-                shutil.rmtree(data_dir)
+                await _remove_data_dir(data_dir)
         except Exception as exc:
             errors.append(f"Local files: {exc}")
         finally:

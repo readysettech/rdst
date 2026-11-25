@@ -321,6 +321,30 @@ async def test_stream_emits_pulse_after_each_collector_pass(monkeypatch, store):
     await events.aclose()
 
 
+
+async def test_stream_ends_when_a_reset_removes_its_database(monkeypatch, store):
+    class Collector:
+        async def subscribe(self):
+            await asyncio.sleep(3600)
+            yield None
+
+    monkeypatch.setattr(routes.query_discovery, "collector_for", lambda target: Collector())
+    monkeypatch.setattr(routes, "PULSE_POLL_SECONDS", 0.01)
+    store.set_settings("db", {"enabled": True})
+    async def connected():
+        return False
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()),
+                              is_disconnected=connected)
+    response = await routes.stream("db", request)
+    events = response.body_iterator
+    pending = asyncio.ensure_future(anext(events))
+    await asyncio.sleep(0.05)
+    for path in store.path.parent.glob("monitor.db*"):
+        path.unlink()
+    with pytest.raises(StopAsyncIteration):
+        await asyncio.wait_for(pending, 2)
+    assert not store.path.exists()
+
 # 5.6 Mute rules and 5.7 inbox presentation
 
 def test_mute_rules_round_trip_and_move_open_items(client, store):
